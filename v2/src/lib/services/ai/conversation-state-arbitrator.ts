@@ -177,6 +177,18 @@ export class ConversationStateArbitrator {
       rawPendingSlot === 'timezone_clarification' ||
       isCallOffer(lastAssistantMsg);
 
+    // Rule 4: If message has explicit hours/hour-ranges, bypass must NOT run. Route it to callback_time_answer.
+    const hasExplicitHourOrRange = /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*[-–]\s*\d{1,2}\b)/.test(lowerUser);
+
+    if (hasExplicitHourOrRange && lowerUser !== '..') {
+      return {
+        effectivePendingSlot: 'generic_none',
+        effectiveIntent: 'callback_time_answer',
+        staleSlotSuppressed: true,
+        suppressionReason: 'callback_time_preference_provided'
+      };
+    }
+
     if (hasCallbackTimeKw && !hasMonthKw && isCallSchedulingContext && lowerUser !== '..') {
       return {
         effectivePendingSlot: 'generic_none',
@@ -186,14 +198,14 @@ export class ConversationStateArbitrator {
       };
     }
 
-    if (isSpecificCallTimeOffer(lastAssistantMsg) && isAffirmative) {
+    if (isSpecificCallTimeOffer(lastAssistantMsg) && isAffirmative && !hasExplicitHourOrRange) {
       return {
         effectivePendingSlot: 'generic_none',
         effectiveIntent: 'callback_confirmation',
         staleSlotSuppressed: true,
         suppressionReason: 'callback_confirmed'
       };
-    } else if (isCallOffer(lastAssistantMsg) && isAffirmative) {
+    } else if (isCallOffer(lastAssistantMsg) && isAffirmative && !hasExplicitHourOrRange) {
       return {
         effectivePendingSlot: 'generic_none',
         effectiveIntent: 'call_scheduling_request',

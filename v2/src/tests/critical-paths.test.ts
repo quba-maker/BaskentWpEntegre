@@ -7857,8 +7857,8 @@ test("P0.27 T1: callback_confirmation routed and handled via bypass returning Tu
       ]
     } as any);
 
-    const hasTurkishDateAndSuffix = res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle *10:00*’da arayacaktır") ||
-                                    res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle 10:00’da arayacaktır");
+    const hasTurkishDateAndSuffix = res.text.includes("22 Haziran Pazartesi Türkiye saatiyle") &&
+                                    (res.text.includes("10:00’da") || res.text.includes("10:00'da") || res.text.includes("*10:00*’da") || res.text.includes("*10:00*'da"));
     assert(hasTurkishDateAndSuffix, "Response must be formatted with Turkish date and suffix '10:00'da'");
     
     // Check task insert
@@ -7957,8 +7957,8 @@ test("P0.27 T2: callback_confirmation idempotency blocks duplicate task creation
       ]
     } as any);
 
-    const hasTurkishDateAndSuffix = res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle *10:00*’da arayacaktır") ||
-                                    res.text.includes("Hasta danışmanımız sizi 22 Haziran Pazartesi Türkiye saatiyle 10:00’da arayacaktır");
+    const hasTurkishDateAndSuffix = res.text.includes("22 Haziran Pazartesi Türkiye saatiyle") &&
+                                    (res.text.includes("10:00’da") || res.text.includes("10:00'da") || res.text.includes("*10:00*’da") || res.text.includes("*10:00*'da"));
     assert(hasTurkishDateAndSuffix, "Response must be formatted with Turkish date and suffix");
     
     const taskInsert = dbCalls.find(c => c.text.includes("INSERT INTO follow_up_tasks"));
@@ -8348,10 +8348,7 @@ test("P0.28.1 T3: olur confirmation does not schedule arama on arrival date if n
     } as any);
 
     assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
-    assert(res.text.includes("Teyidinizi aldım"), "Expected clean affirmation");
-    assert(res.text.includes("sabah saatlerinde araması için notunuzu iletiyorum"), "Expected safe preferred time callback note");
-    assert(!res.text.includes("20 Temmuz"), "Should not schedule callback on travel date (20 Temmuz)");
-    assert(!res.text.includes("planlayabilir"), "Should not contain robotic planlayabilir");
+    assert(res.text.includes("Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz?"), "Expected clarification when no reliable offer exists");
   } finally {
     (global as any).mockDb = originalDb;
   }
@@ -8419,7 +8416,7 @@ test("P0.28.1 T4: genuine callback offer from last_callback_offer is confirmed s
     assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
     assert(res.text.includes("Teyidinizi aldım"), "Expected clean affirmation");
     assert(res.text.includes("22 Haziran Pazartesi"), "Should successfully schedule the genuine offer");
-    assert(res.text.includes("10:00") && res.text.includes("arayacaktır"), "Should format the confirmed time and suffix");
+    assert(res.text.includes("10:00") && res.text.includes("not alıyorum"), "Should format the confirmed time and suffix");
   } finally {
     (global as any).mockDb = originalDb;
   }
@@ -9324,6 +9321,130 @@ test("P0.30 - Form Yönetimi Status / Matching / 24h Window / Template Gate Fix"
   } finally {
     process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
     (global as any).mockDb = originalMockDb;
+  }
+});
+
+// ==========================================
+// Başkent v62 Özel Ek Testleri
+// ==========================================
+
+test("Başkent v62 Ek T1: Hasta sadece 'tamam uygundur' derse ve güvenilir son teklif yoksa default 09:00 uydurulmaz, netleştirilir", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        // Son teklif yok veya güvenilir değil (proposed_due_at yok)
+        return [{ metadata: {} }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "tamam uygundur",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Detayları kaydettim. Uygun bir saatte arayalım mı?" },
+        { role: "user", content: "tamam uygundur" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
+    assert(res.text.includes("uygun bir gün ve saat aralığı belirtebilir misiniz?"), "Should ask for clarification and not default to 09:00");
+    assert(!res.text.includes("09:00"), "Should not contain default 09:00");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("Başkent v62 Ek T2: Hasta 'Türkiye saatiyle 13:30–16:00' derse sistem timezone double-translation yapmaz", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: { turkey_visit_intent: 'turkey_visit_intent_positive', patient_country: 'Germany', patient_timezone: 'Europe/Berlin' } }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {}
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "Türkiye saatiyle 13:30–16:00",
+      phoneNumber: "491701234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "merhaba" },
+        { role: "assistant", content: "Yarın için telefon görüşmesi planlayabiliriz. Hangi saatler uygun olur?" },
+        { role: "user", content: "Türkiye saatiyle 13:30–16:00" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
+    assert(res.text.includes("13:30"), `Response should contain correct TRT: ${res.text}`);
+    assert(res.text.includes("12:30") || res.text.includes("11:30"), `Response should contain Berlin local time: ${res.text}`);
+  } finally {
+    (global as any).mockDb = originalDb;
   }
 });
 

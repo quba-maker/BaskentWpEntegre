@@ -107,6 +107,47 @@ export class AIResponseOrchestrator {
     const startTime = Date.now();
     const settingsDb = withTenantDB(tenantId);
 
+    const parseToUtcWithTz = (dStr: string, tStr: string, tz: string): string => {
+      const [yyyy, mm, dd] = dStr.split('-').map(Number);
+      const [hh, min] = tStr.split(':').map(Number);
+      const localUtc = Date.UTC(yyyy, mm - 1, dd, hh, min);
+      let offsetMin = 180; // default Turkey +3
+      try {
+        const tzFormatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          year: 'numeric', month: 'numeric', day: 'numeric',
+          hour: 'numeric', minute: 'numeric', second: 'numeric',
+          hour12: false
+        });
+        const utcFormatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'UTC',
+          year: 'numeric', month: 'numeric', day: 'numeric',
+          hour: 'numeric', minute: 'numeric', second: 'numeric',
+          hour12: false
+        });
+        const dummyDate = new Date(localUtc);
+        const tzParts = tzFormatter.formatToParts(dummyDate);
+        const utcParts = utcFormatter.formatToParts(dummyDate);
+        const getVal = (parts: Intl.DateTimeFormatPart[], type: string) => parseInt(parts.find(p => p.type === type)?.value || '0', 10);
+        const tzYear = getVal(tzParts, 'year');
+        const tzMonth = getVal(tzParts, 'month') - 1;
+        const tzDay = getVal(tzParts, 'day');
+        const tzHour = getVal(tzParts, 'hour');
+        const tzMinute = getVal(tzParts, 'minute');
+        const utcYear = getVal(utcParts, 'year');
+        const utcMonth = getVal(utcParts, 'month') - 1;
+        const utcDay = getVal(utcParts, 'day');
+        const utcHour = getVal(utcParts, 'hour');
+        const utcMinute = getVal(utcParts, 'minute');
+        const tzDate = Date.UTC(tzYear, tzMonth, tzDay, tzHour, tzMinute);
+        const utcDate = Date.UTC(utcYear, utcMonth, utcDay, utcHour, utcMinute);
+        offsetMin = (tzDate - utcDate) / 60000;
+      } catch (err) {
+        offsetMin = 180;
+      }
+      return new Date(localUtc - offsetMin * 60000).toISOString();
+    };
+
     let dryRun = true;
     let cachedInboundSettings: any = null;
 
@@ -1418,7 +1459,6 @@ export class AIResponseOrchestrator {
           if (!parsedSugg) {
             const assistantHistory = history.filter(m => m.role === 'assistant');
             const lastAssistantMsg = (assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '') || '';
-            
             const isGenuineOffer = 
               lastOffer?.source === 'bot_callback_offer' || 
               lastOffer?.source === 'callback_confirmation_bypass' ||
@@ -1439,11 +1479,16 @@ export class AIResponseOrchestrator {
           let responseText = '';
           const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
           const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
-          // Deterministic cliches avoided per Rule 6 (no "Müşteri temsilcimiz")
-          const agentLabelPossessive = 'Hasta danışmanımızın';
-          const agentLabel = 'Hasta danışmanımız';
           
           if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
+            const { resolvePatientTimeDisplay } = require('../../utils/timezone');
+            const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
+            const timeDisplay = resolvePatientTimeDisplay({
+              country,
+              timezone: convMeta?.patient_timezone || null,
+              referenceDate: parsedSugg.proposed_date
+            });
+
             const [yyyy, mm, dd] = parsedSugg.suggested_date.split('-').map(Number);
             const d = new Date(yyyy, mm - 1, dd);
             const dayName = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][d.getDay()];
@@ -1459,8 +1504,29 @@ export class AIResponseOrchestrator {
             };
             const suffix = suffixes[hour] || 'da';
             const formattedTime = `${parsedSugg.suggested_time}’${suffix}`;
-            
-            responseText = `Teyidinizi aldım. ${agentLabel} sizi ${formattedDate} Türkiye saatiyle ${formattedTime} arayacaktır 🙏`;
+
+            if (timeDisplay.patientTimezone && timeDisplay.patientTimezone !== 'Europe/Istanbul') {
+              const patientTz = timeDisplay.patientTimezone;
+              const patientD = new Date(parsedSugg.proposed_date);
+              
+              const patientTimeStr = patientD.toLocaleTimeString('tr-TR', {
+                timeZone: patientTz,
+                hour: '2-digit', minute: '2-digit', hour12: false
+              });
+              const patientHourInt = parseInt(patientTimeStr.split(':')[0], 10);
+              const patientSuffix = suffixes[patientHourInt] || 'da';
+              const formattedPatientTime = `${patientTimeStr}’${patientSuffix}`;
+
+              const patientDatePartsFormatter = new Intl.DateTimeFormat('tr-TR', {
+                timeZone: patientTz,
+                day: 'numeric', month: 'long', weekday: 'long'
+              });
+              const patientDateStr = patientDatePartsFormatter.format(patientD);
+              
+              responseText = `Teyidinizi aldım. Görüşme talebinizi yerel saatinizle ${patientDateStr} ${formattedPatientTime} (Türkiye saatiyle ${formattedDate} ${formattedTime}) olarak hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+            } else {
+              responseText = `Teyidinizi aldım. Görüşme talebinizi ${formattedDate} Türkiye saatiyle ${formattedTime} olarak hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+            }
             
             // Create follow-up task idempotently
             if (!sandbox) {
@@ -1511,18 +1577,8 @@ export class AIResponseOrchestrator {
               }
             }
           } else {
-            const { CallPreferenceLabelResolver } = require('./call-preference-label-resolver');
-            const facts = ConversationKnownFactsResolver.resolve({
-              history: history.filter((m: any) => m.content != null).map((m: any) => ({ role: m.role, content: m.content as string })),
-              opportunity: unifiedContext?.opportunity,
-              profile: unifiedContext?.profile,
-              latestForm: unifiedContext?.latestForm,
-              conversation: unifiedContext?.conversation
-            });
-            const callTime = facts.preferredCallTime || '';
-            const cleanCallTime = callTime ? CallPreferenceLabelResolver.resolve(callTime) : 'en yakın uygun çalışma saatlerinde';
-            
-            responseText = `Teyidinizi aldım. ${agentLabelPossessive} sizi ${cleanCallTime} araması için notunuzu iletiyorum 🙏`;
+            // Rule 4: Ask for clarification instead of inventing or confirming with generic "en yakın uygun..."
+            responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
           }
           
           fallbackResult = { text: responseText, finalPath: 'callback_confirmation_bypass' };
@@ -1647,7 +1703,9 @@ export class AIResponseOrchestrator {
           } else {
             // Task creation allowed! Execute normal P0.28.2 callback time answer parsing and task creation.
             const { parseDeterministicSuggestion } = require('../../utils/date-parser');
-            const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, null);
+            const assistantHistory = history.filter(m => m.role === 'assistant');
+            const lastAssistantMsg = (assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '') || '';
+            const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, lastAssistantMsg);
             
             let responseText = '';
             let isSuccess = false;
@@ -1656,10 +1714,20 @@ export class AIResponseOrchestrator {
             
             const wh = (brain.context.settings?.workingHours || brain.context.config?.workingHours || { enabled: true, start: "09:00", end: "21:00" }) as any;
             
-            if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
-              proposedDateStr = parsedSugg.proposed_date;
+            if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time) {
+              const { resolvePatientTimeDisplay, resolvePatientTimezone } = require('../../utils/timezone');
+              const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
+              const tzRes = resolvePatientTimezone(country);
               
-              let currentD = new Date(parsedSugg.proposed_date);
+              const timeZone = (parsedSugg.suggested_timezone_basis === 'turkey_time' || tzRes.timezone === 'Europe/Istanbul')
+                ? 'Europe/Istanbul'
+                : tzRes.timezone;
+                
+              const correctedUtc = parseToUtcWithTz(parsedSugg.suggested_date, parsedSugg.suggested_time, timeZone);
+              parsedSugg.proposed_date = correctedUtc;
+              proposedDateStr = correctedUtc;
+              
+              let currentD = new Date(correctedUtc);
               let trTime = currentD.getTime() + 3 * 60 * 60 * 1000;
               let trDate = new Date(trTime);
               
@@ -1731,24 +1799,41 @@ export class AIResponseOrchestrator {
                 const suffix = suffixes[hourInt] || 'da';
                 const formattedTime = `${hh}:${min}’${suffix}`;
                 
-                responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${formattedDate} Türkiye saatiyle ${formattedTime} araması için notunuzu iletiyorum. 🙏`;
+                const timeDisplay = resolvePatientTimeDisplay({
+                  country,
+                  timezone: convMeta?.patient_timezone || null,
+                  referenceDate: shiftedDateStr
+                });
+
+                if (timeDisplay.patientTimezone && timeDisplay.patientTimezone !== 'Europe/Istanbul') {
+                  const patientTz = timeDisplay.patientTimezone;
+                  const patientD = new Date(shiftedDateStr);
+                  
+                  const patientTimeStr = patientD.toLocaleTimeString('tr-TR', {
+                    timeZone: patientTz,
+                    hour: '2-digit', minute: '2-digit', hour12: false
+                  });
+                  const patientHourInt = parseInt(patientTimeStr.split(':')[0], 10);
+                  const patientSuffix = suffixes[patientHourInt] || 'da';
+                  const formattedPatientTime = `${patientTimeStr}’${patientSuffix}`;
+
+                  const patientDatePartsFormatter = new Intl.DateTimeFormat('tr-TR', {
+                    timeZone: patientTz,
+                    day: 'numeric', month: 'long', weekday: 'long'
+                  });
+                  const patientDateStr = patientDatePartsFormatter.format(patientD);
+                  
+                  responseText = `Teyidinizi aldım. Görüşme talebinizi yerel saatinizle ${patientDateStr} ${formattedPatientTime} (Türkiye saatiyle ${formattedDate} ${formattedTime}) olarak hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
+                } else {
+                  responseText = `Teyidinizi aldım. Görüşme talebinizi ${formattedDate} Türkiye saatiyle ${formattedTime} olarak hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
+                }
               }
               isSuccess = true;
             }
             
             if (!isSuccess) {
-              const lower = inboundText.toLowerCase();
-              if (replyLanguage === 'ar') {
-                responseText = "تم تسجيل تفضيلاتك للاتصال بك. سيتصل بك مستشار المرضى لدينا في أقرب وقت مناسب. 🙏";
-              } else {
-                let period = 'sabah saatlerinde';
-                if (lower.includes('akşam') || lower.includes('aksam') || lower.includes('gece')) {
-                  period = 'akşam saatlerinde';
-                } else if (lower.includes('öğle') || lower.includes('ogle') || lower.includes('öğlen') || lower.includes('oglen') || lower.includes('öğleden sonra') || lower.includes('ogleden sonra')) {
-                  period = 'öğleden sonra saatlerinde';
-                }
-                responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${period} araması için notunuzu iletiyorum. 🙏`;
-              }
+              // Rule 3: Ask for clarification instead of uydurma when parsing fails
+              responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
             }
             
             if (isSuccess && shiftedDateStr && !sandbox) {
@@ -2029,7 +2114,7 @@ export class AIResponseOrchestrator {
             text = `Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili ${agentLabel} iletiyorum. Görüşmek üzere. 🙏`;
           } else if (isCallbackTimeAnswer) {
             const { parseDeterministicSuggestion } = require('../../utils/date-parser');
-            const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, null);
+            const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, lastAssistantMsg);
             
             let responseText = '';
             let isSuccess = false;
@@ -2037,8 +2122,19 @@ export class AIResponseOrchestrator {
             
             const wh = (brain.context.settings?.workingHours || brain.context.config?.workingHours || { enabled: true, start: "09:00", end: "21:00" }) as any;
             
-            if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
-              let currentD = new Date(parsedSugg.proposed_date);
+            if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time) {
+              const { resolvePatientTimeDisplay, resolvePatientTimezone } = require('../../utils/timezone');
+              const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
+              const tzRes = resolvePatientTimezone(country);
+              
+              const timeZone = (parsedSugg.suggested_timezone_basis === 'turkey_time' || tzRes.timezone === 'Europe/Istanbul')
+                ? 'Europe/Istanbul'
+                : tzRes.timezone;
+                
+              const correctedUtc = parseToUtcWithTz(parsedSugg.suggested_date, parsedSugg.suggested_time, timeZone);
+              parsedSugg.proposed_date = correctedUtc;
+              
+              let currentD = new Date(correctedUtc);
               let trTime = currentD.getTime() + 3 * 60 * 60 * 1000;
               let trDate = new Date(trTime);
               
@@ -2094,32 +2190,56 @@ export class AIResponseOrchestrator {
               const hh = String(finalTrD.getUTCHours()).padStart(2, '0');
               const min = String(finalTrD.getUTCMinutes()).padStart(2, '0');
               
-              const dayName = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][dayIndex];
-              const monthNames = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
-              const formattedDate = `${dd} ${monthNames[mm]} ${dayName}`;
-              
-              const hourInt = parseInt(hh, 10);
-              const suffixes: Record<number, string> = {
-                0: 'de', 1: 'de', 2: 'de', 3: 'te', 4: 'te', 5: 'te', 6: 'da', 7: 'de', 8: 'de', 9: 'da',
-                10: 'da', 11: 'de', 12: 'de', 13: 'te', 14: 'te', 15: 'te', 16: 'da', 17: 'de', 18: 'de',
-                19: 'da', 20: 'de', 21: 'de', 22: 'de', 23: 'te'
-              };
-              const suffix = suffixes[hourInt] || 'da';
-              const formattedTime = `${hh}:${min}’${suffix}`;
-              
-              responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${formattedDate} Türkiye saatiyle ${formattedTime} araması için notunuzu iletiyorum. 🙏`;
+              if (replyLanguage === 'ar') {
+                responseText = "تم تسجيل تفضيلاتك للاتصال بك. سيتصل بك مستشار المرضى لدينا في الوقت المحدد بتوقيت تركيا. 🙏";
+              } else {
+                const dayName = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][dayIndex];
+                const monthNames = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+                const formattedDate = `${dd} ${monthNames[mm]} ${dayName}`;
+                
+                const hourInt = parseInt(hh, 10);
+                const suffixes: Record<number, string> = {
+                  0: 'de', 1: 'de', 2: 'de', 3: 'te', 4: 'te', 5: 'te', 6: 'da', 7: 'de', 8: 'de', 9: 'da',
+                  10: 'da', 11: 'de', 12: 'de', 13: 'te', 14: 'te', 15: 'te', 16: 'da', 17: 'de', 18: 'de',
+                  19: 'da', 20: 'de', 21: 'de', 22: 'de', 23: 'te'
+                };
+                const suffix = suffixes[hourInt] || 'da';
+                const formattedTime = `${hh}:${min}’${suffix}`;
+                
+                const timeDisplay = resolvePatientTimeDisplay({
+                  country,
+                  timezone: convMeta?.patient_timezone || null,
+                  referenceDate: shiftedDateStr
+                });
+
+                if (timeDisplay.patientTimezone && timeDisplay.patientTimezone !== 'Europe/Istanbul') {
+                  const patientTz = timeDisplay.patientTimezone;
+                  const patientD = new Date(shiftedDateStr);
+                  
+                  const patientTimeStr = patientD.toLocaleTimeString('tr-TR', {
+                    timeZone: patientTz,
+                    hour: '2-digit', minute: '2-digit', hour12: false
+                  });
+                  const patientHourInt = parseInt(patientTimeStr.split(':')[0], 10);
+                  const patientSuffix = suffixes[patientHourInt] || 'da';
+                  const formattedPatientTime = `${patientTimeStr}’${patientSuffix}`;
+
+                  const patientDatePartsFormatter = new Intl.DateTimeFormat('tr-TR', {
+                    timeZone: patientTz,
+                    day: 'numeric', month: 'long', weekday: 'long'
+                  });
+                  const patientDateStr = patientDatePartsFormatter.format(patientD);
+                  
+                  responseText = `Teyidinizi aldım. Görüşme talebinizi yerel saatinizle ${patientDateStr} ${formattedPatientTime} (Türkiye saatiyle ${formattedDate} ${formattedTime}) olarak hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
+                } else {
+                  responseText = `Teyidinizi aldım. Görüşme talebinizi ${formattedDate} Türkiye saatiyle ${formattedTime} olarak hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
+                }
+              }
               isSuccess = true;
             }
             
             if (!isSuccess) {
-              const lower = inboundText.toLowerCase();
-              let period = 'sabah saatlerinde';
-              if (lower.includes('akşam') || lower.includes('aksam') || lower.includes('gece')) {
-                period = 'akşam saatlerinde';
-              } else if (lower.includes('öğle') || lower.includes('ogle') || lower.includes('öğlen') || lower.includes('oglen') || lower.includes('öğleden sonra') || lower.includes('ogleden sonra')) {
-                period = 'öğleden sonra saatlerinde';
-              }
-              responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${period} araması için notunuzu iletiyorum. 🙏`;
+              responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
             }
             
             if (isSuccess && shiftedDateStr && !sandbox) {
