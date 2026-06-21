@@ -165,6 +165,7 @@ export class AIResponseOrchestrator {
     }
 
     let replyLanguage: string | undefined = undefined;
+    let tenantDefaultLang: string | undefined = undefined;
 
     const buildResult = (data: Omit<OrchestratorResult, 'dryRun'>): OrchestratorResult => {
       return {
@@ -247,6 +248,7 @@ export class AIResponseOrchestrator {
     let resolvedChannelId = channelId || '';
     let isDbLockAcquired = false;
     let isRedisLockAcquired = false;
+    let timezone: string | null = null;
     const lockToken = crypto.randomUUID();
 
     // ────────────────────────────────────────────────────────
@@ -366,6 +368,16 @@ export class AIResponseOrchestrator {
         } catch (_) {
           resolvedChannelId = channelId || '';
         }
+
+        try {
+          const tenantTzRow = await db.executeSafe({
+            text: `SELECT timezone FROM tenants WHERE id = $1 LIMIT 1`,
+            values: [tenantId]
+          }) as any[];
+          timezone = tenantTzRow[0]?.timezone || null;
+        } catch (_) {
+          timezone = null;
+        }
       }
 
       // Inbound Autopilot Settings & Eligibility checks (only when sandbox is false)
@@ -390,7 +402,6 @@ export class AIResponseOrchestrator {
         }
 
         // Timezone Check (if timezone settings/details fail or are missing, we fall back to not_eligible / dry-run)
-        let timezone: string | null = null;
         try {
           const tenantTzRow = await db.executeSafe({
             text: `SELECT timezone FROM tenants WHERE id = $1 LIMIT 1`,
@@ -756,7 +767,7 @@ export class AIResponseOrchestrator {
       // 3b. Resolve Language Response Policy with full history and tenant settings
       try {
         const { LanguageResponsePolicy } = await import('./language-response-policy');
-        const tenantDefaultLang = brain.context.config?.defaultLanguage || undefined;
+        tenantDefaultLang = brain.context.config?.defaultLanguage || undefined;
         const channelFixedLang = brain.context.config?.fixedLanguage || undefined;
         const languagePolicy = LanguageResponsePolicy.resolve(
           inboundText,
@@ -1834,7 +1845,7 @@ export class AIResponseOrchestrator {
             
             if (!isSuccess) {
               if (hasRelativeOrPeriodKeywords(inboundText)) {
-                responseText = buildRelativeDaypartClarification(inboundText, country, convMeta, unifiedContext);
+                responseText = buildRelativeDaypartClarification(inboundText, country, convMeta, unifiedContext, timezone || brain.context.config?.timezone || 'Europe/Istanbul', replyLanguage, tenantDefaultLang);
               } else {
                 // Rule 3: Ask for clarification instead of uydurma when parsing fails
                 responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
@@ -2246,7 +2257,7 @@ export class AIResponseOrchestrator {
             
             if (!isSuccess) {
               if (hasRelativeOrPeriodKeywords(inboundText)) {
-                responseText = buildRelativeDaypartClarification(inboundText, country, convMeta, unifiedContext);
+                responseText = buildRelativeDaypartClarification(inboundText, country, convMeta, unifiedContext, timezone || brain.context.config?.timezone || 'Europe/Istanbul', replyLanguage, tenantDefaultLang);
               } else {
                 responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
               }
@@ -2542,124 +2553,234 @@ export class AIResponseOrchestrator {
 }
 
 function hasRelativeOrPeriodKeywords(text: string): boolean {
-  const lower = text.toLowerCase();
-  return [
-    'bugün', 'bugun', 'yarın', 'yarin',
-    'sabah', 'öğle', 'öğlen', 'oglen', 'akşam', 'aksam', 'gece',
-    'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar'
-  ].some(kw => lower.includes(kw));
+  const { MultilingualTimeIntentResolver } = require('./multilingual-time-intent-resolver');
+  const res = MultilingualTimeIntentResolver.resolve(text);
+  return res.hasRelativeDate || res.hasDaypart;
 }
 
 function buildRelativeDaypartClarification(
   inboundText: string,
   country: string | null,
   convMeta: any,
-  unifiedContext: any
+  unifiedContext: any,
+  tenantTz: string = 'Europe/Istanbul',
+  replyLanguage?: string,
+  tenantDefaultLang?: string
 ): string {
-  const lowerUser = inboundText.toLowerCase();
+  const { MultilingualTimeIntentResolver } = require('./multilingual-time-intent-resolver');
+  const timeIntentRes = MultilingualTimeIntentResolver.resolve(inboundText);
 
-  // Detect daypart
-  let requestedDaypart = '';
-  if (lowerUser.includes('sabah')) {
-    requestedDaypart = 'sabah';
-  } else if (lowerUser.includes('öğle') || lowerUser.includes('öğlen') || lowerUser.includes('oglen') || lowerUser.includes('öğleden sonra')) {
-    requestedDaypart = 'öğle';
-  } else if (lowerUser.includes('akşam') || lowerUser.includes('aksam') || lowerUser.includes('akşamüstü') || lowerUser.includes('aksamustu')) {
-    requestedDaypart = 'akşam';
-  } else if (lowerUser.includes('gece')) {
-    requestedDaypart = 'gece';
+  // Fallback hierarchy:
+  // 1. Detected language from the latest message
+  // 2. Conversation/channel reply language
+  // 3. Tenant default language
+  // 4. System safe default ('en')
+  let langCandidate = 'en';
+  if (timeIntentRes.detectedLanguageHint && timeIntentRes.detectedLanguageHint !== 'unknown') {
+    langCandidate = timeIntentRes.detectedLanguageHint;
+  } else if (replyLanguage) {
+    langCandidate = replyLanguage;
+  } else if (tenantDefaultLang) {
+    langCandidate = tenantDefaultLang;
   }
 
-  // Detect day
+  // Ensure the resolved language is supported, otherwise fallback to 'en'
+  const supportedLangs = ['tr', 'en', 'de', 'ar', 'nl'];
+  const lang = supportedLangs.includes(langCandidate) ? langCandidate : 'en';
+
+  // 1. Resolve daypart label
+  let requestedDaypart = '';
+  const daypartLabels: Record<string, Record<string, string>> = {
+    morning: { tr: 'sabah', en: 'morning', de: 'Morgen', ar: 'صباحاً', nl: 'ochtend' },
+    afternoon: { tr: 'öğle', en: 'afternoon', de: 'Nachmittag', ar: 'بعد الظهر', nl: 'middag' },
+    evening: { tr: 'akşam', en: 'evening', de: 'Abend', ar: 'مساءً', nl: 'avond' },
+    night: { tr: 'gece', en: 'night', de: 'Nacht', ar: 'ليلاً', nl: 'nacht' }
+  };
+  if (timeIntentRes.hasDaypart && timeIntentRes.daypart !== 'unknown') {
+    requestedDaypart = daypartLabels[timeIntentRes.daypart][lang] || '';
+  }
+
+  // 2. Resolve weekday/day label
   const weekdaysMap: { [key: string]: number } = {
     pazartesi: 1, salı: 2, sali: 2, çarşamba: 3, carsamba: 3,
-    perşembe: 4, persembe: 4, cuma: 5, cumartesi: 6, pazar: 0
+    perşembe: 4, persembe: 4, cuma: 5, cumartesi: 6, pazar: 0,
+    monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 0,
+    montag: 1, dienstag: 2, mittwoch: 3, donnerstag: 4, freitag: 5, samstag: 6, sonntag: 0,
+    maandag: 1, dinsdag: 2, woensdag: 3, donderdag: 4, vrijdag: 5, zaterdag: 6, zondag: 0,
+    الاثنين: 1, الثلاثاء: 2, الاربعاء: 3, الخميس: 4, الجمعة: 5, السبت: 6, الاحد: 0
   };
+
+  const clean = MultilingualTimeIntentResolver.normalize(inboundText);
   let matchedWeekday: string | null = null;
   for (const dayName of Object.keys(weekdaysMap)) {
-    if (new RegExp(`\\b${dayName}\\b`, 'i').test(lowerUser)) {
+    if (new RegExp(`\\b${dayName}\\b`, 'i').test(clean) || clean.includes(dayName)) {
       matchedWeekday = dayName;
       break;
     }
   }
 
-  const hasBugun = /\b(bugün|bu gün)\b/i.test(lowerUser);
-  const hasYarin = /\b(yarın|yarin)\b/i.test(lowerUser);
-
-  const getTrDate = (d: Date) => {
-    return new Date(d.getTime() + 3 * 3600000);
+  const getTzDate = (d: Date, zone: string) => {
+    try {
+      const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+      const formatter = new Intl.DateTimeFormat('en-US', { timeZone: zone, hour12: false, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+      const parts = formatter.formatToParts(new Date(utc));
+      const map = new Map(parts.map(p => [p.type, p.value]));
+      return new Date(Date.UTC(
+        parseInt(map.get('year')!, 10),
+        parseInt(map.get('month')!, 10) - 1,
+        parseInt(map.get('day')!, 10),
+        parseInt(map.get('hour')!, 10),
+        parseInt(map.get('minute')!, 10),
+        parseInt(map.get('second')!, 10)
+      ));
+    } catch {
+      const trTime = d.getTime() + 3 * 3600000;
+      return new Date(trTime);
+    }
   };
-  const nowTr = getTrDate(new Date());
-  const currentTrDay = nowTr.getUTCDay(); // 0 is Sunday, 1 is Monday, etc.
+
+  const nowTenant = getTzDate(new Date(), tenantTz);
+  const currentTrDay = nowTenant.getUTCDay();
 
   let targetDayOfWeek = currentTrDay;
-  let targetDayLabel = 'Bugün';
 
-  if (hasBugun) {
+  const dayLabels: Record<string, Record<string, string>> = {
+    today: { tr: 'Bugün', en: 'Today', de: 'Heute', ar: 'اليوم', nl: 'Vandaag' },
+    tomorrow: { tr: 'Yarın', en: 'Tomorrow', de: 'Morgen', ar: 'غداً', nl: 'Morgen' }
+  };
+
+  let targetDayLabel = dayLabels.today[lang];
+
+  if (timeIntentRes.relativeDateType === 'today') {
     targetDayOfWeek = currentTrDay;
-    targetDayLabel = 'Bugün';
-  } else if (hasYarin) {
+    targetDayLabel = dayLabels.today[lang];
+  } else if (timeIntentRes.relativeDateType === 'tomorrow') {
     targetDayOfWeek = (currentTrDay + 1) % 7;
-    targetDayLabel = 'Yarın';
+    targetDayLabel = dayLabels.tomorrow[lang];
   } else if (matchedWeekday) {
     targetDayOfWeek = weekdaysMap[matchedWeekday];
     targetDayLabel = matchedWeekday.charAt(0).toUpperCase() + matchedWeekday.slice(1);
   } else {
-    // If no explicit day mentioned but daypart is mentioned, default to today
     targetDayOfWeek = currentTrDay;
-    targetDayLabel = 'Bugün';
+    targetDayLabel = dayLabels.today[lang];
   }
 
-  const isPastWorkingHours = nowTr.getUTCHours() >= 21;
+  const isPastWorkingHours = nowTenant.getUTCHours() >= 21;
   const isSunday = targetDayOfWeek === 0;
 
   // Sunday rule: counselors offline, suggest Monday
-  if (isSunday || (targetDayLabel === 'Bugün' && currentTrDay === 0) || (targetDayLabel === 'Yarın' && currentTrDay === 6 && isPastWorkingHours)) {
-    const daypartStr = requestedDaypart ? `${requestedDaypart} ` : '';
-    const dayLabelToUse = targetDayLabel === 'Bugün' ? 'Bugün' : (targetDayLabel === 'Yarın' ? 'Yarın' : `${targetDayLabel} günü`);
-    return `${dayLabelToUse} için uygunluk net olmayabilir. Pazartesi ${daypartStr}saatlerinde uygun olduğunuz aralığı yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+  if (isSunday || (timeIntentRes.relativeDateType === 'today' && currentTrDay === 0) || (timeIntentRes.relativeDateType === 'tomorrow' && currentTrDay === 6 && isPastWorkingHours)) {
+    if (lang === 'tr') {
+      const daypartSuffix = requestedDaypart ? ` ${requestedDaypart}ı` : '';
+      const dayLabelToUse = timeIntentRes.relativeDateType === 'today' ? 'Bugün' : (timeIntentRes.relativeDateType === 'tomorrow' ? 'Yarın' : `${targetDayLabel} günü`);
+      return `${dayLabelToUse} için uygunluk net olmayabilir. Pazartesi${daypartSuffix} için uygun olduğunuz saat aralığını yazarsanız görüşme talebinizi hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+    } else if (lang === 'en') {
+      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
+      const dayLabelToUse = timeIntentRes.relativeDateType === 'today' ? 'Today' : (timeIntentRes.relativeDateType === 'tomorrow' ? 'Tomorrow' : targetDayLabel);
+      return `${dayLabelToUse} might not be available. Please write your preferred time range on Monday${daypartStr} so I can note your call request for our patient coordinator 🙏`;
+    } else if (lang === 'de') {
+      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
+      const dayLabelToUse = timeIntentRes.relativeDateType === 'today' ? 'Heute' : (timeIntentRes.relativeDateType === 'tomorrow' ? 'Morgen' : targetDayLabel);
+      return `Die Verfügbarkeit für ${dayLabelToUse} ist möglicherweise nicht gewährleistet. Bitte teilen Sie uns Ihre bevorzugte Uhrzeit für Montag${daypartStr} mit, damit ich Ihre Gesprächsanfrage für unseren Patientenberater notieren kann 🙏`;
+    } else if (lang === 'ar') {
+      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
+      const dayLabelToUse = timeIntentRes.relativeDateType === 'today' ? 'اليوم' : (timeIntentRes.relativeDateType === 'tomorrow' ? 'غداً' : targetDayLabel);
+      return `قد لا تكون المواعيد متاحة في ${dayLabelToUse}. يرجى كتابة الفترة الزمنية المناسبة لك يوم الاثنين${daypartStr} لتسجيل طلب الاتصال لمستشار المرضى لدينا 🙏`;
+    } else { // nl
+      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
+      const dayLabelToUse = timeIntentRes.relativeDateType === 'today' ? 'Vandaag' : (timeIntentRes.relativeDateType === 'tomorrow' ? 'Morgen' : targetDayLabel);
+      return `Beschikbaarheid voor ${dayLabelToUse} is mogelijk niet gegarandeerd. Gelieve uw gewenste tijdsbereik voor maandag${daypartStr} door te geven, zodat ik uw oproepverzoek kan noteren voor onze patiëntadviseur 🙏`;
+    }
   }
 
   // If requested today but working hours are already over
-  if (targetDayLabel === 'Bugün' && isPastWorkingHours) {
-    const daypartStr = requestedDaypart ? `${requestedDaypart} ` : '';
-    // If tomorrow is Sunday, suggest Monday
-    if (currentTrDay === 5) { // Friday past 21:00 -> tomorrow is Saturday (valid)
-      return `Bugün için çalışma saatlerimiz sona ermiştir. Yarın ${daypartStr}saatlerinde uygun olduğunuz aralığı yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-    } else if (currentTrDay === 6) { // Saturday past 21:00 -> tomorrow is Sunday (offline)
-      return `Bugün için çalışma saatlerimiz sona ermiştir. Pazartesi ${daypartStr}saatlerinde uygun olduğunuz aralığı yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-    } else {
-      return `Bugün için çalışma saatlerimiz sona ermiştir. Yarın ${daypartStr}saatlerinde uygun olduğunuz aralığı yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+  if (timeIntentRes.relativeDateType === 'today' && isPastWorkingHours) {
+    if (lang === 'tr') {
+      const daypartSuffix = requestedDaypart ? ` ${requestedDaypart}ı` : '';
+      if (currentTrDay === 5) {
+        return `Bugün için çalışma saatlerimiz sona ermiştir. Yarın${daypartSuffix} için uygun olduğunuz saat aralığını yazarsanız görüşme talebinizi hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+      } else if (currentTrDay === 6) {
+        return `Bugün için çalışma saatlerimiz sona ermiştir. Pazartesi${daypartSuffix} için uygun olduğunuz saat aralığını yazarsanız görüşme talebinizi hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+      } else {
+        return `Bugün için çalışma saatlerimiz sona ermiştir. Yarın${daypartSuffix} için uygun olduğunuz saat aralığını yazarsanız görüşme talebinizi hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+      }
+    } else if (lang === 'en') {
+      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
+      const nextDay = currentTrDay === 5 ? 'tomorrow' : (currentTrDay === 6 ? 'Monday' : 'tomorrow');
+      return `Our working hours for today have ended. Please write your preferred time range for ${nextDay}${daypartStr} so I can note your call request for our patient coordinator 🙏`;
+    } else if (lang === 'de') {
+      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
+      const nextDay = currentTrDay === 5 ? 'morgen' : (currentTrDay === 6 ? 'Montag' : 'morgen');
+      return `Unsere Arbeitszeiten für heute sind beendet. Bitte teilen Sie uns Ihre bevorzugte Uhrzeit für ${nextDay}${daypartStr} mit, damit ich Ihre Gesprächsanfrage für unseren Patientenberater notieren kann 🙏`;
+    } else if (lang === 'ar') {
+      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
+      const nextDay = currentTrDay === 5 ? 'غداً' : (currentTrDay === 6 ? 'يوم الاثنين' : 'غداً');
+      return `انتهت ساعات العمل اليوم. يرجى كتابة الفترة الزمنية المناسبة لك ${nextDay}${daypartStr} لتسجيل طلب الاتصال لمستشار المرضى لدينا 🙏`;
+    } else { // nl
+      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
+      const nextDay = currentTrDay === 5 ? 'morgen' : (currentTrDay === 6 ? 'maandag' : 'morgen');
+      return `Onze werkuren voor vandaag zijn beëindigd. Gelieve uw gewenste tijdsbereik voor ${nextDay}${daypartStr} door te geven, zodat ik uw oproepverzoek kan noteren voor onze patiëntadviseur 🙏`;
     }
   }
 
   // Valid day/time requested, ask for specific hour range
   const { resolvePatientTimezone } = require('../../utils/timezone');
   const tzRes = resolvePatientTimezone(country);
-  const isDifferentTimezone = tzRes.timezone && tzRes.timezone !== 'Europe/Istanbul';
+  const isDifferentTimezone = tzRes.timezone && tzRes.timezone !== tenantTz;
 
   const daypartSuffix = requestedDaypart ? ` ${requestedDaypart}` : '';
-  const confirmPhrase = `${targetDayLabel}${daypartSuffix} için not alabilirim.`;
+
+  // Confirm phrases
+  const confirmPhrases: Record<string, string> = {
+    tr: `${targetDayLabel}${daypartSuffix} için görüşme talebinizi not alabilirim.`,
+    en: `I can note your call request for ${targetDayLabel}${daypartSuffix}.`,
+    de: `Ich kann Ihre Gesprächsanfrage für ${targetDayLabel}${daypartSuffix} notieren.`,
+    ar: `يمكنني تسجيل طلب الاتصال بك في ${targetDayLabel}${daypartSuffix}.`,
+    nl: `Ik kan uw oproepverzoek voor ${targetDayLabel}${daypartSuffix} noteren.`
+  };
+  const confirmPhrase = confirmPhrases[lang] || confirmPhrases.en;
 
   if (isDifferentTimezone) {
-    const countryLabels: { [key: string]: string } = {
-      'Almanya': 'Almanya', 'Germany': 'Almanya', 'DE': 'Almanya',
-      'Hollanda': 'Hollanda', 'Netherlands': 'Hollanda', 'NL': 'Hollanda',
-      'İngiltere': 'İngiltere', 'UK': 'İngiltere', 'GB': 'İngiltere',
-      'Fransa': 'Fransa', 'France': 'Fransa', 'FR': 'Fransa',
-      'Avusturya': 'Avusturya', 'Austria': 'Avusturya', 'AT': 'Avusturya',
-      'Belçika': 'Belçika', 'Belgium': 'Belçika', 'BE': 'Belçika',
-      'İsviçre': 'İsviçre', 'Switzerland': 'İsviçre', 'CH': 'İsviçre',
-      'Danimarka': 'Danimarka', 'Denmark': 'Danimarka', 'DK': 'Danimarka',
-      'İsveç': 'İsveç', 'Sweden': 'İsveç', 'SE': 'İsveç',
+    const countryTranslations: Record<string, Record<string, string>> = {
+      tr: { Germany: 'Almanya', Deutschland: 'Almanya', Netherlands: 'Hollanda', Holland: 'Hollanda', 'United Kingdom': 'İngiltere', France: 'Fransa', Belgium: 'Belçika', Switzerland: 'İsviçre', Denmark: 'Danimarka', Sweden: 'İsveç' },
+      en: { Almanya: 'Germany', Deutschland: 'Germany', Hollanda: 'Netherlands', Holland: 'Netherlands', 'United Kingdom': 'UK', Fransa: 'France', Belçika: 'Belgium', İsviçre: 'Switzerland', Danimarka: 'Denmark', İsveç: 'Sweden' },
+      de: { Germany: 'Deutschland', Almanya: 'Deutschland', Hollanda: 'Niederlande', Netherlands: 'Niederlande', 'United Kingdom': 'UK', Fransa: 'Frankreich', Belçika: 'Belgien', İsviçre: 'Schweiz', Danimarka: 'Dänemark', İsveç: 'Schweden' },
+      nl: { Germany: 'Duitsland', Almanya: 'Duitsland', Hollanda: 'Nederland', Netherlands: 'Nederland', 'United Kingdom': 'VK', Fransa: 'Frankrijk', Belçika: 'België', İsviçre: 'Zwitserland', Danimarka: 'Denemarken', İsveç: 'Zweden' },
+      ar: { Germany: 'ألمانيا', Almanya: 'ألمانيا', Hollanda: 'هولندا', Netherlands: 'هولندا', 'United Kingdom': 'بريطانيا', Fransa: 'فرنسا', Belçika: 'بلجيكا', İsviçre: 'سويسرا', Danimarka: 'الدانمارك', İsveç: 'السويد' }
     };
-    const patientCountryName = country ? (countryLabels[country] || country) : '';
-    const tzQuestion = patientCountryName 
-      ? `Saat aralığını ${patientCountryName} saatinize göre mi paylaşmıştınız?` 
-      : `Saat aralığını yerel saatinize göre mi paylaşmıştınız?`;
-    
-    return `${confirmPhrase} ${tzQuestion} Örneğin 18:00–21:00 arası gibi net bir aralık yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+
+    const patientCountryName = country ? (countryTranslations[lang]?.[country] || (lang === 'tr' ? country : null) || countryTranslations.en[country] || country) : '';
+
+    const clinicTzTranslations: Record<string, Record<string, string>> = {
+      'Europe/Istanbul': { tr: 'Türkiye', en: 'Turkey', de: 'Türkei', ar: 'تركيا', nl: 'Turkije' },
+      'Europe/Berlin': { tr: 'Almanya', en: 'Germany', de: 'Deutschland', ar: 'ألمانيا', nl: 'Duitsland' },
+      'Europe/Amsterdam': { tr: 'Hollanda', en: 'Netherlands', de: 'Niederlande', ar: 'هولندا', nl: 'Nederland' },
+      'Europe/London': { tr: 'İngiltere', en: 'UK', de: 'Vereinigtes Königreich', ar: 'بريطانيا', nl: 'VK' }
+    };
+    const clinicTimezoneName = clinicTzTranslations[tenantTz]?.[lang] || (tenantTz.split('/')[1] || 'clinic');
+
+    if (lang === 'tr') {
+      return `${confirmPhrase} Saat aralığını ${patientCountryName} saatinize göre mi, Türkiye saatine göre mi paylaşmak istersiniz? Örneğin 18:00–20:00 gibi net bir aralık yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+    } else if (lang === 'en') {
+      return `${confirmPhrase} Would you like the time range to be in your ${patientCountryName} time or ${clinicTimezoneName} time? For example, if you write a clear range like 18:00–20:00, I will note it for our patient coordinator 🙏`;
+    } else if (lang === 'de') {
+      return `${confirmPhrase} Möchten Sie den Zeitraum in Ihrer ${patientCountryName}-Zeit oder in der ${clinicTimezoneName}-Zeit angeben? Wenn Sie beispielsweise einen klaren Bereich wie 18:00–20:00 schreiben, werde ich dies für unseren Patientenberater notieren 🙏`;
+    } else if (lang === 'ar') {
+      return `${confirmPhrase} هل ترغب في أن تكون الفترة الزمنية بتوقيت ${patientCountryName} أم بتوقيت ${clinicTimezoneName}؟ على سبيل المثال، إذا كتبت فترة محددة مثل 18:00-20:00، سأسجل ذلك لمستشار المرضى لدينا 🙏`;
+    } else { // nl
+      return `${confirmPhrase} Wilt u dat het tijdsbereik in uw ${patientCountryName}-tijd of in de ${clinicTimezoneName}-tijd is? Als u bijvoorbeeld een duidelijk bereik zoals 18:00–20:00 schrijft, zal ik dit noteren voor onze patiëntadviseur 🙏`;
+    }
   } else {
-    return `${confirmPhrase} Örneğin 18:00–21:00 arası gibi net bir saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+    if (lang === 'tr') {
+      return `${confirmPhrase} Örneğin 18:00–20:00 gibi net bir saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
+    } else if (lang === 'en') {
+      return `${confirmPhrase} Could you please specify a clear time range, such as 18:00–20:00? I will note your call request with this range for our patient coordinator 🙏`;
+    } else if (lang === 'de') {
+      return `${confirmPhrase} Könnten Sie bitte einen genauen Zeitraum angeben, z. B. 18:00–20:00? Ich werde Ihre Gesprächsanfrage mit diesem Bereich für unseren Patientenberater notieren 🙏`;
+    } else if (lang === 'ar') {
+      return `${confirmPhrase} هل يمكنك تحديد فترة زمنية واضحة، مثل 18:00-20:00؟ سأسجل طلب الاتصال بك مع هذه الفترة لمستشار المرضى لدينا 🙏`;
+    } else { // nl
+      return `${confirmPhrase} Zou u een duidelijk tijdsbereik kunnen opgeven, zoals 18:00–20:00? Ik noteer uw oproepverzoek met dit bereik voor onze patiëntadviseur 🙏`;
+    }
   }
 }

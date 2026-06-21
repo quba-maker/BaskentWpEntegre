@@ -48,13 +48,7 @@ export class TurkeyVisitIntentResolver {
   }
 
   public static hasExplicitCallRequest(text: string): boolean {
-    if (!text) return false;
-    const clean = text.toLowerCase().trim();
-    const callPhrases = [
-      'beni arayın', 'beni arayin', 'telefonla görüşmek istiyorum', 'telefonla gorusmek istiyorum', 
-      'randevu almak istiyorum', 'arama planlayalım', 'arama planlayalim', 'arar mısınız', 'ararmisiniz',
-      'اتصلوا بي', 'أريد موعد', 'اريد موعد', 'تواصل معي'
-    ];
-    return callPhrases.some(phrase => clean.includes(phrase));
+    const { MultilingualTimeIntentResolver } = require('./multilingual-time-intent-resolver');
+    return MultilingualTimeIntentResolver.resolve(text).hasExplicitCallRequest;
   }
 }

@@ -160,11 +160,13 @@ export class ConversationStateArbitrator {
     }
 
     // P0.28.2: callback_time_answer check
-    const hasCallbackTimeKw = [
-      'saat', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
-      'yarın', 'yarin', 'bugün', 'bugun', 'sabah', 'öğlen', 'oglen', 'öğleden sonra', 'ogleden sonra', 'akşam', 'aksam', 'gece',
-      'hafta içi', 'haftaici', 'hafta sonu', 'haftasonu'
-    ].some(kw => lowerUser.includes(kw)) || /(?:\b\d{1,2}[:. ]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(lowerUser);
+    const { MultilingualTimeIntentResolver } = require('./multilingual-time-intent-resolver');
+    const timeIntentRes = MultilingualTimeIntentResolver.resolve(lastUserMessage);
+
+    const hasCallbackTimeKw = 
+      timeIntentRes.hasRelativeDate || 
+      timeIntentRes.hasDaypart || 
+      /(?:\b\d{1,2}[:. ]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(lowerUser);
 
     const hasMonthKw = [
       'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
@@ -175,7 +177,10 @@ export class ConversationStateArbitrator {
       rawPendingSlot === 'call_time' || 
       rawPendingSlot === 'call_date' || 
       rawPendingSlot === 'timezone_clarification' ||
-      isCallOffer(lastAssistantMsg);
+      isCallOffer(lastAssistantMsg) ||
+      routerIntent === 'call_scheduling_request' ||
+      routerIntent === 'time_availability' ||
+      timeIntentRes.hasExplicitCallRequest;
 
     // Rule 4: If message has explicit hours/hour-ranges, bypass must NOT run. Route it to callback_time_answer.
     const hasExplicitHourOrRange = /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*[-–]\s*\d{1,2}\b)/.test(lowerUser);

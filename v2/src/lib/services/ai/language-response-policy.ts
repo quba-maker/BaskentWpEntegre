@@ -116,7 +116,7 @@ export class LanguageResponsePolicy {
       tenantDefaultApplied = true;
     } else {
       // Ultimate fallback
-      replyLanguage = 'tr';
+      replyLanguage = 'en';
       tenantDefaultApplied = true;
     }
 
