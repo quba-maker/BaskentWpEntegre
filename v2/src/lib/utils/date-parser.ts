@@ -249,8 +249,18 @@ export function parseDeterministicSuggestion(
     }
   }
 
-  // Inherit proposed time and/or date from last assistant message if missing from user message
-  if ((!time || !date) && lastAssistantMessage) {
+  // Inherit proposed time and/or date from last assistant message if missing from user message.
+  // GUARD: Do NOT inherit if:
+  //   (a) user only provided a daypart (e.g. "akşam") without an explicit hour — bot must ask for range instead,
+  //   (b) user message looks like a question (contains '?' or question suffixes).
+  const userHasExplicitHour = time !== null; // time is set above only from explicit numeric patterns
+  const userHasOnlyDaypart = !userHasExplicitHour && (
+    /(?<![a-zçğışöü])(akşam|sabah|öğlen|öğle|gece|öğleden sonra|öğleden önce|evening|morning|night|afternoon)(?![a-zçğışöü])/i.test(normalized)
+  );
+  const userMessageIsQuestion = normalized.includes('?') || 
+    /\b(çalışıyor\s*mu|calisiyor\s*mu|musunuz|misiniz|m[ıi]d[ıi]r|kaçta|kacta|ne\s+zaman|hangi\s+g[üu]n|a[çc][ıi]k\s*m[ıi])\b/i.test(normalized);
+
+  if ((!time || !date) && lastAssistantMessage && !userHasOnlyDaypart && !userMessageIsQuestion) {
     const assistantDet = parseDeterministicSuggestion(lastAssistantMessage, refDate, null, null);
     if (!time && assistantDet.suggested_time) {
       time = assistantDet.suggested_time;

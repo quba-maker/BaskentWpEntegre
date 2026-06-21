@@ -67,6 +67,61 @@ const SLOT_OVERRIDE_INTENTS: ConversationIntent[] = [
 
 export class ConversationStateArbitrator {
   /**
+   * Question Guard: Returns true if the user's message is a question
+   * (business hours, availability, general inquiry) rather than a callback answer.
+   * When true, callback bypass gates MUST NOT fire.
+   */
+  private static containsQuestion(text: string): boolean {
+    const lower = (text || '').toLowerCase().trim();
+
+    // Hard question marker: ends or contains '?'
+    if (lower.includes('?')) return true;
+
+    // Turkish question suffix patterns (musunuz, misiniz, mıdır, etc.)
+    const trQuestionPatterns = [
+      /\b(mısınız|misiniz|musunuz|müsünüz)\b/,
+      /\b(mıdır|midir|mudur|müdür)\b/,
+      /\b(mı|mi|mu|mü)\s*\?/,
+      /\b(çalışıyor\s*mu|calisiyor\s*mu)\b/,
+      /\b(açık\s*mı|acik\s*mi|acık\s*mi)\b/,
+      /\b(var\s*mı|var\s*mi)\b/,
+      /\b(oluyor\s*mu|olur\s*mu)\b/,
+      /\b(yapıyor\s*mu|yapiyor\s*mu)\b/,
+      /\b(hangi\s+gün|hangi\s+gun)\b/,
+      /\b(kaçta|kacta|saat\s+kaç|saat\s+kac)\b/,
+      /\b(ne\s+zaman|nezaman)\b/,
+      /\b(nasıl|nasil)\b/,
+      /\b(bilgi\s+alabilir\s+miyim|bilgi\s+verir\s+misiniz)\b/,
+      /\b(müsait\s*misiniz|musait\s*misiniz)\b/
+    ];
+
+    if (trQuestionPatterns.some(p => p.test(lower))) return true;
+
+    // English question patterns
+    const enQuestionPatterns = [
+      /\b(are\s+you|do\s+you|is\s+it|can\s+you|will\s+you)\b/,
+      /\b(what\s+time|what\s+day|which\s+day|how\s+do|when\s+do)\b/,
+      /\b(open\s+on|working\s+on|available\s+on)\b/
+    ];
+
+    if (enQuestionPatterns.some(p => p.test(lower))) return true;
+
+    // Business hours / availability question keywords (standalone, no '?' needed)
+    const businessHoursKw = [
+      'çalışıyor musunuz', 'calisiyorlar mi', 'çalışıyorlar mı',
+      'pazar açık', 'pazar acik', 'cumartesi açık', 'cumartesi acik',
+      'hafta sonu açık', 'hafta sonu acik', 'hafta sonu calisiyorlar',
+      'açık mısınız', 'acik misiniz', 'açık mıyız', 'kapalı mı', 'kapali mi',
+      'mesai saatleri', 'çalışma saatleri', 'calisma saatleri',
+      'çalışıyor mu', 'calisiyor mu'
+    ];
+
+    if (businessHoursKw.some(kw => lower.includes(kw))) return true;
+
+    return false;
+  }
+
+  /**
    * Arbitrates between the pending slot (from PendingQuestionResolver)
    * and the user's current intent (from ConversationIntentRouter).
    * 
@@ -182,8 +237,25 @@ export class ConversationStateArbitrator {
       routerIntent === 'time_availability' ||
       timeIntentRes.hasExplicitCallRequest;
 
+    // === QUESTION GUARD ===
+    // If the user's message is a question (business hours, availability, general inquiry),
+    // ALL callback bypass gates below are disabled. The slot is suspended and intent
+    // is handed back to the router for proper LLM answer.
+    const userIsAsking = this.containsQuestion(lastUserMessage);
+
+    if (userIsAsking && rawPendingSlot && rawPendingSlot !== 'generic_none') {
+      // Suspend pending slot — user asked something, don't hijack with callback flow
+      return {
+        effectivePendingSlot: 'generic_none',
+        effectiveIntent: routerIntent,
+        staleSlotSuppressed: true,
+        suppressionReason: 'question_guard_slot_suspended'
+      };
+    }
+
     // P0.28.3: timezone_clarification bypass routing
-    if (rawPendingSlot === 'timezone_clarification' && lowerUser !== '..') {
+    // Only fires if: slot is timezone_clarification AND message is NOT a question AND is a real tz answer
+    if (rawPendingSlot === 'timezone_clarification' && lowerUser !== '..' && !userIsAsking) {
       const isTzAnswer = this.isMessageRelevantToSlot(lastUserMessage, 'timezone_clarification', routerIntent);
       if (isTzAnswer) {
         return {
@@ -195,10 +267,10 @@ export class ConversationStateArbitrator {
       }
     }
 
-    // Rule 4: If message has explicit hours/hour-ranges, bypass must NOT run. Route it to callback_time_answer.
+    // Rule 4: If message has explicit hours/hour-ranges AND is NOT a question, route to callback_time_answer.
     const hasExplicitHourOrRange = /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*[-–]\s*\d{1,2}\b)/.test(lowerUser);
 
-    if (hasExplicitHourOrRange && lowerUser !== '..') {
+    if (hasExplicitHourOrRange && lowerUser !== '..' && !userIsAsking) {
       return {
         effectivePendingSlot: 'generic_none',
         effectiveIntent: 'callback_time_answer',
@@ -207,7 +279,7 @@ export class ConversationStateArbitrator {
       };
     }
 
-    if (hasCallbackTimeKw && !hasMonthKw && isCallSchedulingContext && lowerUser !== '..') {
+    if (hasCallbackTimeKw && !hasMonthKw && isCallSchedulingContext && lowerUser !== '..' && !userIsAsking) {
       return {
         effectivePendingSlot: 'generic_none',
         effectiveIntent: 'callback_time_answer',

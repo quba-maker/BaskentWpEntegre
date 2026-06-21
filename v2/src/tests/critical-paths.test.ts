@@ -10674,6 +10674,123 @@ test("Başkent v62 Hotfix T6: timezone basis prioritizes user message over merge
 });
 
 // ==========================================
+// HOTFIX T7-T12: Question Guard & Daypart Fix
+// ==========================================
+
+test("Başkent v62 Hotfix T7: Question Guard - 'pazar çalışıyor musunuz?' callback bypass'a girmemeli", () => {
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+
+  const result = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "pazar çalışıyor musunuz ?",
+    rawPendingSlot: "timezone_clarification",
+    rawInterpretedIntent: "generic_other",
+    routerIntent: "clarification_question",
+    history: [
+      { role: "user", content: "bugün akşam olabilir telefon ile görüşme istiyorum" },
+      { role: "assistant", content: "21 Haziran Pazar 13:00 saatinizi not alabilirim. Bu saat Türkiye saatiyle mi, Hollanda saatinizle mi? 🙏" }
+    ],
+    convMeta: {}
+  });
+
+  assert(result.staleSlotSuppressed === true, "Soru mesajında pending slot suppress edilmeli");
+  assert(result.suppressionReason === "question_guard_slot_suspended", `Suppression reason question_guard olmalı, got: ${result.suppressionReason}`);
+  assert(result.effectivePendingSlot === "generic_none", `Slot generic_none olmalı, got: ${result.effectivePendingSlot}`);
+  assert(result.effectiveIntent !== "callback_time_answer", `Intent callback_time_answer olmamalı, got: ${result.effectiveIntent}`);
+});
+
+test("Başkent v62 Hotfix T8: Question Guard - '?' içeren mesajlar callback bypass'a girmemeli", () => {
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+
+  const questionMessages = [
+    "pazar açık mısınız ?",
+    "hangi günler çalışıyorsunuz?",
+    "are you open on sunday?",
+    "kaçta kapanıyorsunuz",
+  ];
+
+  for (const msg of questionMessages) {
+    const result = ConversationStateArbitrator.arbitrate({
+      lastUserMessage: msg,
+      rawPendingSlot: "call_time",
+      rawInterpretedIntent: "generic_other",
+      routerIntent: "clarification_question",
+      history: [
+        { role: "assistant", content: "Pazartesi için uygun saat aralığınızı yazabilir misiniz?" }
+      ],
+      convMeta: {}
+    });
+
+    assert(
+      result.effectiveIntent !== "callback_time_answer",
+      `"${msg}" callback_time_answer olmamalı, got: ${result.effectiveIntent}`
+    );
+    assert(
+      result.staleSlotSuppressed === true || result.effectivePendingSlot === "generic_none",
+      `"${msg}" için slot temizlenmeli`
+    );
+  }
+});
+
+test("Başkent v62 Hotfix T9: Daypart-only mesaj lastAssistantMessage'dan stale saat miras almamalı", () => {
+  const { parseDeterministicSuggestion } = require("../lib/utils/date-parser");
+  const refDate = new Date("2026-06-21T12:00:00+03:00"); // Sunday
+
+  // "bugün akşam" - sadece daypart var, saat yok
+  // lastAssistantMessage'da 13:00 var ama miras alınmamalı
+  const lastAssistant = "21 Haziran Pazar 13:00 saatinizi not alabilirim. Bu saat Türkiye saatiyle mi, Hollanda saatinizle mi? 🙏";
+  const res = parseDeterministicSuggestion("bugün akşam olabilir telefon ile görüşme istiyorum", refDate, null, lastAssistant);
+
+  assert(res.suggested_time === null, `Daypart-only mesajında stale 13:00 miras alınmamalı, got: ${res.suggested_time}`);
+  assert(res.suggested_date !== null, `Bugün tarihi parse edilmeli, got: ${res.suggested_date}`);
+});
+
+test("Başkent v62 Hotfix T10: Soru mesajı lastAssistantMessage'dan saat miras almamalı", () => {
+  const { parseDeterministicSuggestion } = require("../lib/utils/date-parser");
+  const refDate = new Date("2026-06-21T12:00:00+03:00");
+
+  const lastAssistant = "28 Haziran Pazar 13:00 saatinizi not alabilirim. Bu saat Türkiye saatiyle mi, Hollanda saatinizle mi? 🙏";
+  const res = parseDeterministicSuggestion("pazar çalışıyor musunuz ?", refDate, null, lastAssistant);
+
+  assert(res.suggested_time === null, `Soru mesajında stale saat miras alınmamalı, got: ${res.suggested_time}`);
+});
+
+test("Başkent v62 Hotfix T11: Explicit saat aralığı korunmalı - daypart guard çalışmamalı", () => {
+  const { parseDeterministicSuggestion } = require("../lib/utils/date-parser");
+  const refDate = new Date("2026-06-21T12:00:00+03:00");
+
+  // Explicit range - bu miras alma değil, doğrudan parse
+  const res1 = parseDeterministicSuggestion("pazartesi 13-16 arası olabilir", refDate, null, null);
+  assert(res1.suggested_time === "13:00", `13:00 parse edilmeli, got: ${res1.suggested_time}`);
+  assert(res1.suggested_time_end === "16:00", `16:00 end parse edilmeli, got: ${res1.suggested_time_end}`);
+
+  // Explicit single time
+  const res2 = parseDeterministicSuggestion("Türkiye saatiyle 13:30-16:00", refDate, null, null);
+  assert(res2.suggested_time === "13:30", `13:30 parse edilmeli, got: ${res2.suggested_time}`);
+  assert(res2.suggested_time_end === "16:00", `16:00 end parse edilmeli, got: ${res2.suggested_time_end}`);
+  assert(res2.suggested_timezone_basis === "turkey_time", `turkey_time basis bekleniyor, got: ${res2.suggested_timezone_basis}`);
+});
+
+test("Başkent v62 Hotfix T12: Question Guard - 'hollanda' cevabı (gerçek tz cevabı) bypass çalışmalı", () => {
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+
+  // "hollanda" is NOT a question - real tz answer, bypass should still work
+  const result = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "hollanda",
+    rawPendingSlot: "timezone_clarification",
+    rawInterpretedIntent: "generic_other",
+    routerIntent: "callback_time_answer",
+    history: [
+      { role: "assistant", content: "Bu saat Türkiye saatiyle mi, Hollanda saatinizle mi? 🙏" }
+    ],
+    convMeta: {}
+  });
+
+  // "hollanda" is a real tz answer - should go through timezone bypass
+  assert(result.suppressionReason !== "question_guard_slot_suspended", `hollanda cevabı question guard'a takılmamalı, got: ${result.suppressionReason}`);
+  assert(result.effectiveIntent === "callback_time_answer", `Intent callback_time_answer olmalı, got: ${result.effectiveIntent}`);
+});
+
+// ==========================================
 // SONUÇLAR
 // ==========================================
 
