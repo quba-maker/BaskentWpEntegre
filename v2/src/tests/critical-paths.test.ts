@@ -8075,7 +8075,7 @@ test("P0.28 T2: arrival_date_answer bypasses LLM and saves PII-free date", async
     assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
     assert(res.text.includes("10 Temmuz tarihini not aldım"), `Expected date acknowledgement, got: ${res.text}`);
     
-    const updateCall = dbCalls.find(c => c.text.includes("UPDATE conversations SET metadata = $1"));
+    const updateCall = dbCalls.find(c => c.text.includes("UPDATE conversations SET metadata = $1") && c.vals[0].includes("arrival_date"));
     assert(!!updateCall, "Should update conversation metadata");
     
     const updatedMeta = JSON.parse(updateCall.vals[0]);
@@ -8206,7 +8206,7 @@ test("P0.28.1 T1: arrival_date_answer bypass does not write last_callback_offer 
 
     assert(res.modelUsed === "bypass", `Expected bypass model, got: ${res.modelUsed}`);
     
-    const updateCall = dbCalls.find(c => c.text.includes("UPDATE conversations SET metadata = $1"));
+    const updateCall = dbCalls.find(c => c.text.includes("UPDATE conversations SET metadata = $1") && c.vals[0].includes("arrival_date"));
     assert(!!updateCall, "Should update conversation metadata");
     
     const updatedMeta = JSON.parse(updateCall.vals[0]);
@@ -8435,9 +8435,9 @@ test("P0.28.2 T1: callback_time_answer skips Sunday, shifts to Monday, preserves
       dbCalls.push({ text, vals });
       
       if (text.includes("FROM conversations")) {
-        return [{ metadata: {} }];
+        return [{ metadata: { turkey_visit_intent: 'turkey_visit_intent_positive' } }];
       }
-      if (text.includes("UPDATE conversations")) {
+      if (text.includes("FROM update_conversations") || text.includes("UPDATE conversations")) {
         return [{ id: "conv-1" }];
       }
       if (text.includes("FROM ai_module_settings")) {
@@ -8513,6 +8513,215 @@ test("P0.28.2 T1: callback_time_answer skips Sunday, shifts to Monday, preserves
       return !!parsedMeta.last_callback_offer;
     });
     assert(!lastCallbackOfferSaved, "last_callback_offer must not be saved for callback_time_answer path");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.29 T1: callback_time_answer when Turkey visit intent is unknown does not create task, asks about intent", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const dbCalls: any[] = [];
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      const vals = typeof query === 'string' ? params : query?.values || [];
+      dbCalls.push({ text, vals });
+      
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: { turkey_visit_intent: 'turkey_visit_intent_unknown' } }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" }
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "pazar sabah 10",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "assistant", content: "uygun olduğunuz saati paylaşın" },
+        { role: "user", content: "pazar sabah 10" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", "Should bypass LLM");
+    assert(res.text.includes("Türkiye’ye gelmeyi düşünüyor musunuz"), "Should ask Turkey visit intent");
+    
+    // Ensure no follow_up_tasks inserted
+    const taskInserts = dbCalls.filter(c => c.text.includes("INSERT INTO follow_up_tasks"));
+    assert(taskInserts.length === 0, "Should NOT create callback task when visit intent is unknown");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.29 T2: Form re-introduction greeting bypass when visit intent is unknown", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const dbCalls: any[] = [];
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      const vals = typeof query === 'string' ? params : query?.values || [];
+      dbCalls.push({ text, vals });
+      
+      if (text.includes("FROM conversations")) {
+        // Mock that form is greeted/addressed in metadata
+        return [{ metadata: { form_greeted_at: "2026-06-20T12:00:00Z", turkey_visit_intent: 'turkey_visit_intent_unknown' } }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" }
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "merhaba",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "assistant", content: "Önceki karşılama" },
+        { role: "user", content: "merhaba" }
+      ],
+      unifiedContext: {
+        latestForm: { created_at: "2026-06-20T10:00:00Z", name: "Check-up" }
+      }
+    } as any);
+
+    assert(res.modelUsed === "bypass", "Should bypass LLM for greeting form re-introduction");
+    assert(res.text.includes("Türkiye’ye gelmeyi düşünüyor musunuz"), "Should ask if coming to Turkey");
+    assert(res.text.includes("Check-up planlamanızla ilgili"), "Should resolve check-up department");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
+test("P0.29 T3: Arabic Locale Continuity for basic location and Iraq branch check", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: {} }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" }
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    // 1. Basic location "وين"
+    const res1 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "وين",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [{ role: "user", content: "وين" }]
+    } as any);
+    assert(res1.modelUsed === "bypass", "Should bypass for location");
+    assert(res1.text.includes("نحن في مدينة قونيا، تركيا"), "Should return Arabic basic city location");
+
+    // 2. Iraq branch check "هل لديكم فرع في عراق"
+    const res2 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "هل لديكم فرع في عراق",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [{ role: "user", content: "هل لديكم فرع في عراق" }]
+    } as any);
+    assert(res2.modelUsed === "bypass", "Should bypass for Iraq branch check");
+    assert(res2.text.includes("لا يوجد لدينا فرع في العراق"), "Should return Arabic Iraq branch negative redirect");
+
+    // 3. Full address request "العنوان الكامل"
+    const res3 = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "العنوان الكامل",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [{ role: "user", content: "العنوان الكامل" }]
+    } as any);
+    assert(res3.modelUsed === "bypass", "Should bypass for full address request");
+    assert(res3.text.includes("Hocacihan Mahallesi, Saray Caddesi No:1"), "Should return full Turkish address");
   } finally {
     (global as any).mockDb = originalDb;
   }

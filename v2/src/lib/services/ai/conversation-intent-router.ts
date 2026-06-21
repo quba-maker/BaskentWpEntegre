@@ -21,6 +21,7 @@ export type ConversationIntent =
   | 'doctor_lookup'
   | 'department_lookup'
   | 'location_direction'
+  | 'address_full_request'
   | 'form_summary_request'
   | 'capability_question'
   | 'abuse_or_insult'
@@ -281,11 +282,36 @@ export class ConversationIntentRouter {
       return 'department_lookup';
     }
 
-    // 15. Location Direction
-    const locationKeywords = [
-      'neredesiniz', 'adres', 'nasil gelirim', 'konum', 'yol tarifi', 'harita'
+    // 15. Address / Location Direction
+    const fullAddressKeywords = [
+      'عنوان الكامل', 'العنوان الكامل',
+      'أرسل العنوان', 'ارسل العنوان',
+      'وين بالضبط',
+      'الموقع',
+      'لوكيشن',
+      'google maps', 'google map', 'maps',
+      'tam adres',
+      'açık adres', 'acik adres',
+      'konum gönder', 'konum gonder',
+      'konum', 'harita', 'adres'
     ];
-    if (locationKeywords.some(kw => clean.includes(kw))) {
+    if (fullAddressKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
+      return 'address_full_request';
+    }
+
+    const iraqBranchKeywords = [
+      'هل لديكم فرع في عراق', 'هل عندكم فرع في عراق', 'فرع في عراق',
+      'do you have branch in iraq', 'have branch in iraq', 'branch in iraq',
+      'ırak\'ta şubeniz var mı', 'irakta subeniz var mi', 'ırakta şube var mı', 'irak sube'
+    ];
+    const basicLocationKeywords = [
+      'nerede', 'neredesiniz', 'hangi sehir', 'hangi şehir',
+      'turkiyede mi', 'türkiyede mi', 'turkiye\'de mi', 'türkiye\'de mi',
+      'وين', 'وين عنوان', 'يعني بلتركيا', 'بلتركيا', 'بالتركيا', 'في تركيا',
+      'nasil gelirim', 'nasıl gelirim', 'yol tarifi'
+    ];
+    if (iraqBranchKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw)) ||
+        basicLocationKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       return 'location_direction';
     }
 
@@ -299,9 +325,10 @@ export class ConversationIntentRouter {
 
     // 17. Capability Question
     const capabilityKeywords = [
-      'neler yapabilirsiniz', 'nasil yardimci olabilirsiniz', 'sen ne yaparsin'
+      'neler yapabilirsiniz', 'nasil yardimci olabilirsiniz', 'sen ne yaparsin',
+      'كيف تساعدني', 'كيف يمكنك مساعدتي', 'ماذا تفعل', 'كيف بتساعدني'
     ];
-    if (capabilityKeywords.some(kw => clean.includes(kw))) {
+    if (capabilityKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       return 'capability_question';
     }
 
@@ -477,9 +504,36 @@ export class ConversationIntentRouter {
       intents.push('price_question');
     }
 
-    // Location
-    const locationKeywords = ['neredesiniz', 'adres', 'nasil gelirim', 'konum', 'yol tarifi', 'nerede', 'harita'];
-    if (locationKeywords.some(kw => clean.includes(kw))) {
+    // Location / Address
+    const fullAddressKeywordsAll = [
+      'عنوان الكامل', 'العنوان الكامل',
+      'أرسل العنوان', 'ارسل العنوان',
+      'وين بالضبط',
+      'الموقع',
+      'لوكيشن',
+      'google maps', 'google map', 'maps',
+      'tam adres',
+      'açık adres', 'acik adres',
+      'konum gönder', 'konum gonder',
+      'konum', 'harita', 'adres'
+    ];
+    if (fullAddressKeywordsAll.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
+      intents.push('address_full_request');
+    }
+
+    const iraqBranchKeywordsAll = [
+      'هل لديكم فرع في عراق', 'هل عندكم فرع في عراق', 'فرع في عراق',
+      'do you have branch in iraq', 'have branch in iraq', 'branch in iraq',
+      'ırak\'ta şubeniz var mı', 'irakta subeniz var mi', 'ırakta şube var mı', 'irak sube'
+    ];
+    const basicLocationKeywordsAll = [
+      'nerede', 'neredesiniz', 'hangi sehir', 'hangi şehir',
+      'turkiyede mi', 'türkiyede mi', 'turkiye\'de mi', 'türkiye\'de mi',
+      'وين', 'وين عنوان', 'يعني بلتركيا', 'بلتركيا', 'بالتركيا', 'في تركيا',
+      'nasil gelirim', 'nasıl gelirim', 'yol tarifi'
+    ];
+    if (iraqBranchKeywordsAll.some(kw => clean.includes(kw) || originalLower.includes(kw)) ||
+        basicLocationKeywordsAll.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       intents.push('location_direction');
     }
 

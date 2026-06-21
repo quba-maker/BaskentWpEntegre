@@ -120,18 +120,29 @@ export class LanguageResponsePolicy {
       tenantDefaultApplied = true;
     }
 
+    // Arabic Locale Continuity Guard
+    const currentIsArabic = /[\u0600-\u06FF]/.test(currentMessage);
+    const userMsgsFromHistory = history.filter(m => m.role === 'user' && m.content);
+    const last3UserMsgs = [...userMsgsFromHistory.slice(-2).map(m => m.content), currentMessage];
+    const arabicMsgCount = last3UserMsgs.filter(text => /[\u0600-\u06FF]/.test(text)).length;
+    const isArabicMajority = last3UserMsgs.length >= 2 ? (arabicMsgCount >= 2) : currentIsArabic;
+
+    if (currentIsArabic || isArabicMajority) {
+      replyLanguage = 'ar';
+    }
+
     // 6. Determine quality gate locale
     const qualityGateLocale = replyLanguage === 'tr' ? 'tr' : 'generic';
 
     return {
-      detectedUserLanguage: detectedISO,
+      detectedUserLanguage: replyLanguage,
       lastUserMessageLanguage: detectedISO,
       conversationPrimaryLanguage: conversationPrimaryLang,
       replyLanguage,
       replyLanguageName: ISO_TO_NAME[replyLanguage] || replyLanguage,
       languageSwitchDetected,
       qualityGateLocale,
-      languageConfidence: languageSwitchDetected ? 'high' : detectionResult.language_confidence,
+      languageConfidence: languageSwitchDetected ? 'high' : (currentIsArabic ? 'high' : detectionResult.language_confidence),
       tenantDefaultLanguageApplied: tenantDefaultApplied
     };
   }

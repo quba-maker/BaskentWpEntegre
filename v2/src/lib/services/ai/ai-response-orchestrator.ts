@@ -736,6 +736,41 @@ export class AIResponseOrchestrator {
       unifiedContext.currentMessageText = inboundText;
       unifiedContext.currentMessageMediaType = mediaType;
 
+      // P0.29: Turkey Visit Intent detection & persistence
+      const { TurkeyVisitIntentResolver } = require('./turkey-visit-intent-resolver');
+      const resolvedIntentFromMsg = TurkeyVisitIntentResolver.detect(inboundText);
+      const hasExplicitCall = TurkeyVisitIntentResolver.hasExplicitCallRequest(inboundText);
+
+      let currentVisitIntent = convMeta.turkey_visit_intent || 'turkey_visit_intent_unknown';
+      if (resolvedIntentFromMsg) {
+        currentVisitIntent = resolvedIntentFromMsg;
+      }
+      if (hasExplicitCall) {
+        currentVisitIntent = 'turkey_visit_intent_positive';
+      }
+
+      if (currentVisitIntent !== convMeta.turkey_visit_intent) {
+        convMeta.turkey_visit_intent = currentVisitIntent;
+        if (!sandbox && conversationId) {
+          try {
+            const conv = await db.executeSafe({
+              text: `SELECT metadata FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+              values: [conversationId, tenantId]
+            }) as any[];
+            const currentMeta = conv[0]?.metadata || {};
+            currentMeta.turkey_visit_intent = currentVisitIntent;
+            
+            await db.executeSafe({
+              text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
+              values: [JSON.stringify(currentMeta), conversationId, tenantId]
+            });
+          } catch (dbErr) {
+            console.error('[AIResponseOrchestrator] Failed to save turkey_visit_intent to DB:', dbErr);
+          }
+        }
+      }
+      unifiedContext.turkeyVisitIntent = currentVisitIntent;
+
       // 4. P0.16-G: Active Department Arbitration (extended priority chain)
       // Priority order:
       //   1. Current message alias      (DepartmentAliasResolver)
@@ -894,7 +929,7 @@ export class AIResponseOrchestrator {
       // Has active/latest form or open opportunity?
       const hasForm = !!(unifiedContext?.latestForm || (Array.isArray(unifiedContext?.patient_known_facts) && unifiedContext.patient_known_facts.length > 0) || unifiedContext?.opportunity);
 
-      // Check if the form/opportunity has already been addressed by the bot in this conversation
+      // Check if the form/opportunity has already been addressed by the bot
       let formAlreadyAddressed = false;
       if (hasForm) {
         let latestFormCreatedAt: Date | null = null;
@@ -904,19 +939,54 @@ export class AIResponseOrchestrator {
           latestFormCreatedAt = new Date(unifiedContext.opportunity.created_at);
         }
 
-        if (latestFormCreatedAt && !sandbox) {
+        // Check opportunity metadata first
+        const oppMeta = unifiedContext?.opportunity?.metadata || {};
+        if (oppMeta.form_greeted_at || oppMeta.form_followup_started_at || oppMeta.form_context_handled || oppMeta.arrival_date) {
+          formAlreadyAddressed = true;
+        }
+
+        if (!formAlreadyAddressed && latestFormCreatedAt) {
           try {
-            const outboundAfterForm = await db.executeSafe({
-              text: `SELECT id FROM messages 
-                     WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'out' AND created_at > $3 
-                     LIMIT 1`,
-              values: [tenantId, conversationId, latestFormCreatedAt]
+            // Get all conversations for this customer or phone
+            const convs = await db.executeSafe({
+              text: `SELECT id, metadata FROM conversations 
+                     WHERE tenant_id = $1 AND (customer_id = $2 OR phone_number = $3)`,
+              values: [tenantId, customerId || null, phoneNumber || null]
             }) as any[];
-            if (outboundAfterForm.length > 0) {
-              formAlreadyAddressed = true;
+
+            const convIds = convs.map(c => c.id);
+            
+            // Check metadata of all these conversations
+            for (const c of convs) {
+              const meta = c.metadata || {};
+              if (
+                meta.form_greeted_at || 
+                meta.form_followup_started_at || 
+                meta.form_context_handled || 
+                meta.arrival_date
+              ) {
+                formAlreadyAddressed = true;
+                break;
+              }
+            }
+
+            if (!formAlreadyAddressed && convIds.length > 0) {
+              // Check if any outbound message exists in any of these conversations after latestFormCreatedAt
+              const outboundAfterForm = await db.executeSafe({
+                text: `SELECT id FROM messages 
+                       WHERE tenant_id = $1 
+                         AND conversation_id = ANY($2) 
+                         AND direction = 'out' 
+                         AND created_at > $3 
+                       LIMIT 1`,
+                values: [tenantId, convIds, latestFormCreatedAt]
+              }) as any[];
+              if (outboundAfterForm.length > 0) {
+                formAlreadyAddressed = true;
+              }
             }
           } catch (err) {
-            console.warn('[AIResponseOrchestrator] Failed to query outbound messages after form:', err);
+            console.warn('[AIResponseOrchestrator] Failed to query past form greetings:', err);
           }
         }
       }
@@ -942,6 +1012,7 @@ export class AIResponseOrchestrator {
       // Populate unifiedContext values for prompt builder
       unifiedContext.effectiveIntent = effectiveIntent;
       unifiedContext.overrideReason = overrideReason;
+      unifiedContext.formAlreadyAddressed = formAlreadyAddressed;
 
       // Resolve isGreetingOnly context for Bot Reply prompt generation
       const hasQuotedReply = !!(mediaMetadata?.native?.quoted_message_snapshot || mediaMetadata?.native?.reply_to_provider_message_id);
@@ -1051,9 +1122,15 @@ export class AIResponseOrchestrator {
       const isCallbackConfirmation = effectiveIntent === 'callback_confirmation' || effectiveIntent === 'schedule_confirmation';
       const isArrivalDateAnswer = effectiveIntent === 'arrival_date_answer' && !inboundText.includes('?') && inboundText.length < 50;
       const isCallbackTimeAnswer = effectiveIntent === 'callback_time_answer';
+      const isGreeting = effectiveIntent === 'greeting';
+      const shouldBypassFormReintroduction = isGreeting && formAlreadyAddressed;
+      const isAddressFullRequest = effectiveIntent === 'address_full_request';
+      const isLocationDirection = effectiveIntent === 'location_direction';
+      const isCapabilityQuestion = effectiveIntent === 'capability_question';
 
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest
-        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose || isCallbackConfirmation || isArrivalDateAnswer || isCallbackTimeAnswer; // P0.16-L
+        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose || isCallbackConfirmation || isArrivalDateAnswer || isCallbackTimeAnswer || shouldBypassFormReintroduction
+        || isAddressFullRequest || isLocationDirection || isCapabilityQuestion; // P0.16-L
 
       let text = '';
       let bypassed = false;
@@ -1134,7 +1211,10 @@ export class AIResponseOrchestrator {
             unifiedContext,
             channelId,
             systemPromptText,
-            resolvedActiveDepartment: resolvedActiveDepartment || null
+            resolvedActiveDepartment: resolvedActiveDepartment || null,
+            replyLanguage,
+            turkeyVisitIntent: currentVisitIntent,
+            formAlreadyAddressed
           });
           console.log(JSON.stringify({
             tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
@@ -1537,167 +1617,201 @@ export class AIResponseOrchestrator {
 
         // P0.28.2: callback_time_answer bypass
         if (!fallbackResult && isCallbackTimeAnswer) {
-          const { parseDeterministicSuggestion } = require('../../utils/date-parser');
-          // Parse using current local time as reference
-          const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, null);
+          const isPositiveIntent = currentVisitIntent === 'turkey_visit_intent_positive';
+          const hasExplicitCall = TurkeyVisitIntentResolver.hasExplicitCallRequest(inboundText);
+          const lastBotAskedTime = history.length > 0 && 
+            history[history.length - 1].role === 'assistant' && 
+            /saat|zaman|gün|gun|tarih|ne zaman|uygun/i.test(history[history.length - 1].content || '');
+          const isAppointmentContext = history.some(m => 
+            /randevu|arama|görüşme|gorusme|telefon/i.test(m.content || '')
+          );
           
-          let responseText = '';
-          let isSuccess = false;
-          let proposedDateStr: string | null = null;
-          let shiftedDateStr: string | null = null;
-          
-          const wh = (brain.context.settings?.workingHours || brain.context.config?.workingHours || { enabled: true, start: "09:00", end: "21:00" }) as any;
-          
-          if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
-            proposedDateStr = parsedSugg.proposed_date;
+          const shouldCreateTask = isPositiveIntent || hasExplicitCall || (lastBotAskedTime && isAppointmentContext);
+
+          if (!shouldCreateTask) {
+            // Do NOT create task. Resolve using ContextAwareSafeFallbackResolver
+            fallbackResult = ContextAwareSafeFallbackResolver.resolve({
+              inboundText,
+              brain,
+              identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+              unifiedContext,
+              channelId,
+              systemPromptText,
+              resolvedActiveDepartment: resolvedActiveDepartment || null,
+              replyLanguage,
+              turkeyVisitIntent: currentVisitIntent,
+              formAlreadyAddressed
+            });
+            console.log(JSON.stringify({
+              tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+              path: 'callback_time_answer_intent_gated_fallback',
+              tenantId,
+              conversationId: conversationId || 'unknown',
+              workerPath,
+              currentVisitIntent
+            }));
+          } else {
+            // Task creation allowed! Execute normal P0.28.2 callback time answer parsing and task creation.
+            const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+            const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, null);
             
-            // Adjust to operating hours dynamically (not hardcoded)
-            let currentD = new Date(parsedSugg.proposed_date);
-            let trTime = currentD.getTime() + 3 * 60 * 60 * 1000;
-            let trDate = new Date(trTime);
+            let responseText = '';
+            let isSuccess = false;
+            let proposedDateStr: string | null = null;
+            let shiftedDateStr: string | null = null;
             
-            const isDayOpen = (dateObj: Date) => {
-              const day = dateObj.getUTCDay(); // 0 is Sunday, 1 is Monday...
-              if (wh && Array.isArray(wh.days)) {
-                return wh.days.includes(day);
-              }
-              return day !== 0; // Default: closed on Sunday (0)
-            };
+            const wh = (brain.context.settings?.workingHours || brain.context.config?.workingHours || { enabled: true, start: "09:00", end: "21:00" }) as any;
             
-            let shifted = false;
-            let loopCount = 0;
-            while (!isDayOpen(trDate) && loopCount < 7) {
-              trDate.setUTCDate(trDate.getUTCDate() + 1);
-              shifted = true;
-              loopCount++;
-            }
-            
-            let startMin = 9 * 60;
-            let endMin = 21 * 60;
-            if (wh?.start) {
-              const [h, m] = wh.start.split(':').map(Number);
-              startMin = h * 60 + (m || 0);
-            }
-            if (wh?.end) {
-              const [h, m] = wh.end.split(':').map(Number);
-              endMin = h * 60 + (m || 0);
-            }
-            
-            const trHour = trDate.getUTCHours();
-            const trMinute = trDate.getUTCMinutes();
-            const trTotalMinutes = trHour * 60 + trMinute;
-            
-            if (trTotalMinutes < startMin) {
-              trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
-            } else if (trTotalMinutes > endMin) {
-              trDate.setUTCDate(trDate.getUTCDate() + 1);
-              let loopCount2 = 0;
-              while (!isDayOpen(trDate) && loopCount2 < 7) {
-                trDate.setUTCDate(trDate.getUTCDate() + 1);
-                loopCount2++;
-              }
-              trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
-            }
-            
-            // Convert back to UTC
-            shiftedDateStr = new Date(trDate.getTime() - 3 * 60 * 60 * 1000).toISOString();
-            
-            // Format Turkish date
-            const finalTrD = new Date(trDate.getTime()); // Turkey time representation
-            const dd = finalTrD.getUTCDate();
-            const mm = finalTrD.getUTCMonth();
-            const dayIndex = finalTrD.getUTCDay();
-            const hh = String(finalTrD.getUTCHours()).padStart(2, '0');
-            const min = String(finalTrD.getUTCMinutes()).padStart(2, '0');
-            
-            const dayName = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][dayIndex];
-            const monthNames = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
-            const formattedDate = `${dd} ${monthNames[mm]} ${dayName}`;
-            
-            // Turkish suffix rule for the hour
-            const hourInt = parseInt(hh, 10);
-            const suffixes: Record<number, string> = {
-              0: 'de', 1: 'de', 2: 'de', 3: 'te', 4: 'te', 5: 'te', 6: 'da', 7: 'de', 8: 'de', 9: 'da',
-              10: 'da', 11: 'de', 12: 'de', 13: 'te', 14: 'te', 15: 'te', 16: 'da', 17: 'de', 18: 'de',
-              19: 'da', 20: 'de', 21: 'de', 22: 'de', 23: 'te'
-            };
-            const suffix = suffixes[hourInt] || 'da';
-            const formattedTime = `${hh}:${min}’${suffix}`;
-            
-            responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${formattedDate} Türkiye saatiyle ${formattedTime} araması için notunuzu iletiyorum. 🙏`;
-            isSuccess = true;
-          }
-          
-          if (!isSuccess) {
-            // Determine time of day based on user message content
-            const lower = inboundText.toLowerCase();
-            let period = 'sabah saatlerinde';
-            if (lower.includes('akşam') || lower.includes('aksam') || lower.includes('gece')) {
-              period = 'akşam saatlerinde';
-            } else if (lower.includes('öğle') || lower.includes('ogle') || lower.includes('öğlen') || lower.includes('oglen') || lower.includes('öğleden sonra') || lower.includes('ogleden sonra')) {
-              period = 'öğleden sonra saatlerinde';
-            }
-            responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${period} araması için notunuzu iletiyorum. 🙏`;
-          }
-          
-          // Create follow-up task if we have a proposed date (success path)
-          if (isSuccess && shiftedDateStr && !sandbox) {
-            try {
-              // Task duplicate check on combined fields to enforce idempotency
-              const existing = await db.executeSafe({
-                text: `SELECT id FROM follow_up_tasks 
-                       WHERE tenant_id = $1 
-                         AND conversation_id = $2 
-                         AND task_type = $3 
-                         AND due_at = $4 
-                         AND status IN ('pending', 'in_progress')`,
-                values: [tenantId, conversationId, 'callback_scheduled', shiftedDateStr]
-              }) as any[];
+            if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
+              proposedDateStr = parsedSugg.proposed_date;
               
-              if (existing.length === 0) {
-                const { TaskService } = require('../task.service');
-                const taskService = new TaskService(db);
-                const opportunityId = unifiedContext?.opportunity?.id || null;
-                
-                // Construct a unique hash for metadata idempotency control (PII-free)
-                const crypto = require('crypto');
-                const idempotencyKey = crypto.createHash('sha256')
-                  .update(`${tenantId}:${channelId || 'whatsapp'}:${conversationId}:callback_scheduled:${shiftedDateStr}`)
-                  .digest('hex');
-                
-                // Save task - strictly PII-free description/title, no raw phone, name, or msg
-                await taskService.create({
-                  tenantId,
-                  opportunityId: opportunityId || undefined,
-                  conversationId: conversationId || undefined,
-                  phoneNumber,
-                  taskType: 'callback_scheduled',
-                  title: '📞 Geri Arama',
-                  description: 'Telefon görüşmesi planlandı.',
-                  dueAt: shiftedDateStr,
-                  isAutomated: true,
-                  createdBy: 'system',
-                  metadata: {
-                    idempotency_key: idempotencyKey,
-                    callback_time_tr: parsedSugg.suggested_time,
-                    source: 'callback_time_answer'
-                  }
-                });
+              let currentD = new Date(parsedSugg.proposed_date);
+              let trTime = currentD.getTime() + 3 * 60 * 60 * 1000;
+              let trDate = new Date(trTime);
+              
+              const isDayOpen = (dateObj: Date) => {
+                const day = dateObj.getUTCDay();
+                if (wh && Array.isArray(wh.days)) {
+                  return wh.days.includes(day);
+                }
+                return day !== 0;
+              };
+              
+              let shifted = false;
+              let loopCount = 0;
+              while (!isDayOpen(trDate) && loopCount < 7) {
+                trDate.setUTCDate(trDate.getUTCDate() + 1);
+                shifted = true;
+                loopCount++;
               }
-            } catch (taskErr) {
-              console.error('[AIResponseOrchestrator] Failed to create callback follow-up task for callback_time_answer:', taskErr);
+              
+              let startMin = 9 * 60;
+              let endMin = 21 * 60;
+              if (wh?.start) {
+                const [h, m] = wh.start.split(':').map(Number);
+                startMin = h * 60 + (m || 0);
+              }
+              if (wh?.end) {
+                const [h, m] = wh.end.split(':').map(Number);
+                endMin = h * 60 + (m || 0);
+              }
+              
+              const trHour = trDate.getUTCHours();
+              const trMinute = trDate.getUTCMinutes();
+              const trTotalMinutes = trHour * 60 + trMinute;
+              
+              if (trTotalMinutes < startMin) {
+                trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+              } else if (trTotalMinutes > endMin) {
+                trDate.setUTCDate(trDate.getUTCDate() + 1);
+                let loopCount2 = 0;
+                while (!isDayOpen(trDate) && loopCount2 < 7) {
+                  trDate.setUTCDate(trDate.getUTCDate() + 1);
+                  loopCount2++;
+                }
+                trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+              }
+              
+              shiftedDateStr = new Date(trDate.getTime() - 3 * 60 * 60 * 1000).toISOString();
+              
+              const finalTrD = new Date(trDate.getTime());
+              const dd = finalTrD.getUTCDate();
+              const mm = finalTrD.getUTCMonth();
+              const dayIndex = finalTrD.getUTCDay();
+              const hh = String(finalTrD.getUTCHours()).padStart(2, '0');
+              const min = String(finalTrD.getUTCMinutes()).padStart(2, '0');
+              
+              if (replyLanguage === 'ar') {
+                responseText = "تم تسجيل تفضيلاتك للاتصال بك. سيتصل بك مستشار المرضى لدينا في الوقت المحدد بتوقيت تركيا. 🙏";
+              } else {
+                const dayName = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][dayIndex];
+                const monthNames = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+                const formattedDate = `${dd} ${monthNames[mm]} ${dayName}`;
+                
+                const hourInt = parseInt(hh, 10);
+                const suffixes: Record<number, string> = {
+                  0: 'de', 1: 'de', 2: 'de', 3: 'te', 4: 'te', 5: 'te', 6: 'da', 7: 'de', 8: 'de', 9: 'da',
+                  10: 'da', 11: 'de', 12: 'de', 13: 'te', 14: 'te', 15: 'te', 16: 'da', 17: 'de', 18: 'de',
+                  19: 'da', 20: 'de', 21: 'de', 22: 'de', 23: 'te'
+                };
+                const suffix = suffixes[hourInt] || 'da';
+                const formattedTime = `${hh}:${min}’${suffix}`;
+                
+                responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${formattedDate} Türkiye saatiyle ${formattedTime} araması için notunuzu iletiyorum. 🙏`;
+              }
+              isSuccess = true;
             }
+            
+            if (!isSuccess) {
+              const lower = inboundText.toLowerCase();
+              if (replyLanguage === 'ar') {
+                responseText = "تم تسجيل تفضيلاتك للاتصال بك. سيتصل بك مستشار المرضى لدينا في أقرب وقت مناسب. 🙏";
+              } else {
+                let period = 'sabah saatlerinde';
+                if (lower.includes('akşam') || lower.includes('aksam') || lower.includes('gece')) {
+                  period = 'akşam saatlerinde';
+                } else if (lower.includes('öğle') || lower.includes('ogle') || lower.includes('öğlen') || lower.includes('oglen') || lower.includes('öğleden sonra') || lower.includes('ogleden sonra')) {
+                  period = 'öğleden sonra saatlerinde';
+                }
+                responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${period} araması için notunuzu iletiyorum. 🙏`;
+              }
+            }
+            
+            if (isSuccess && shiftedDateStr && !sandbox) {
+              try {
+                const existing = await db.executeSafe({
+                  text: `SELECT id FROM follow_up_tasks 
+                         WHERE tenant_id = $1 
+                           AND conversation_id = $2 
+                           AND task_type = $3 
+                           AND due_at = $4 
+                           AND status IN ('pending', 'in_progress')`,
+                  values: [tenantId, conversationId, 'callback_scheduled', shiftedDateStr]
+                }) as any[];
+                
+                if (existing.length === 0) {
+                  const { TaskService } = require('../task.service');
+                  const taskService = new TaskService(db);
+                  const opportunityId = unifiedContext?.opportunity?.id || null;
+                  
+                  const crypto = require('crypto');
+                  const idempotencyKey = crypto.createHash('sha256')
+                    .update(`${tenantId}:${channelId || 'whatsapp'}:${conversationId}:callback_scheduled:${shiftedDateStr}`)
+                    .digest('hex');
+                  
+                  await taskService.create({
+                    tenantId,
+                    opportunityId: opportunityId || undefined,
+                    conversationId: conversationId || undefined,
+                    phoneNumber,
+                    taskType: 'callback_scheduled',
+                    title: '📞 Geri Arama',
+                    description: 'Telefon görüşmesi planlandı.',
+                    dueAt: shiftedDateStr,
+                    isAutomated: true,
+                    createdBy: 'system',
+                    metadata: {
+                      idempotency_key: idempotencyKey,
+                      callback_time_tr: parsedSugg.suggested_time,
+                      source: 'callback_time_answer'
+                    }
+                  });
+                }
+              } catch (taskErr) {
+                console.error('[AIResponseOrchestrator] Failed to create callback follow-up task for callback_time_answer:', taskErr);
+              }
+            }
+            
+            fallbackResult = { text: responseText, finalPath: 'callback_time_answer_bypass' };
+            isCallbackTimeAnswerPath = true; // flag to skip last_callback_offer writing
+            console.log(JSON.stringify({
+              tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+              path: 'callback_time_answer_bypass',
+              tenantId,
+              conversationId: conversationId || 'unknown',
+              workerPath
+            }));
           }
-          
-          fallbackResult = { text: responseText, finalPath: 'callback_time_answer_bypass' };
-          isCallbackTimeAnswerPath = true; // flag to skip last_callback_offer writing
-          console.log(JSON.stringify({
-            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-            path: 'callback_time_answer_bypass',
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            workerPath
-          }));
         }
 
         // ── Default: other bypass intents via ContextAwareSafeFallbackResolver ─
@@ -1709,7 +1823,10 @@ export class AIResponseOrchestrator {
             unifiedContext,
             channelId,
             systemPromptText,
-            resolvedActiveDepartment: resolvedActiveDepartment || null
+            resolvedActiveDepartment: resolvedActiveDepartment || null,
+            replyLanguage,
+            turkeyVisitIntent: currentVisitIntent,
+            formAlreadyAddressed
           });
         }
 
@@ -1763,7 +1880,7 @@ export class AIResponseOrchestrator {
           formattedMessages.push({ role: 'user' as const, content: inboundText });
         }
 
-        const llmModel = brain.context.settings.aiModel || 'gemini-2.5-flash';
+        const llmModel = brain.context.settings?.aiModel || 'gemini-2.5-flash';
         const apiKey = brain.context.config?.raw?.gemini_api_key || process.env.GEMINI_API_KEY || '';
 
         const aiConfig = {
@@ -1771,7 +1888,7 @@ export class AIResponseOrchestrator {
           modelId: llmModel,
           apiKey,
           temperature: 0.7,
-          maxTokens: brain.context.settings.maxResponseTokens || 1500
+          maxTokens: brain.context.settings?.maxResponseTokens || 1500
         };
 
         const orchestrator = new AIOrchestrator();
@@ -2186,7 +2303,7 @@ export class AIResponseOrchestrator {
       text = ResponseFormattingPolicy.format(text);
 
       // P0.27: Save last_callback_offer to conversation metadata if the bot response proposes a date/time
-      if (!sandbox && conversationId && text && !isCallbackTimeAnswerPath && effectiveIntent !== 'arrival_date_answer') {
+      if (!sandbox && conversationId && text && !isCallbackTimeAnswerPath && effectiveIntent !== 'arrival_date_answer' && effectiveIntent !== 'callback_time_answer' && effectiveIntent !== 'call_time_answer') {
         try {
           const { parseDeterministicSuggestion } = require('../../utils/date-parser');
           const parsedSugg = parseDeterministicSuggestion(text, new Date(), null, null);

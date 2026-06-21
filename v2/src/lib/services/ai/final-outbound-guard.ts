@@ -302,7 +302,10 @@ export class FinalOutboundGuard {
         unifiedContext: context.unifiedContext || {},
         channelId: context.channelId,
         systemPromptText: context.systemPromptText,
-        promptVersion: context.promptVersion
+        promptVersion: context.promptVersion,
+        replyLanguage: context.replyLanguage,
+        turkeyVisitIntent: context.unifiedContext?.turkeyVisitIntent,
+        formAlreadyAddressed: context.unifiedContext?.formAlreadyAddressed
       });
       const fallbackText = fallbackResult.text;
 

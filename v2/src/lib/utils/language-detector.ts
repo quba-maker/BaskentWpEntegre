@@ -60,10 +60,9 @@ export function detectLanguage(
     let scores = { tr: 0, de: 0, en: 0, ar: 0 };
     
     // ARABIC
-    const arabicRegex = /[\u0600-\u06FF]/;
     const arabicCharCount = (txt.match(/[\u0600-\u06FF]/g) || []).length;
-    if (arabicCharCount > 3) {
-      scores.ar += arabicCharCount * 2;
+    if (arabicCharCount > 0) {
+      scores.ar += arabicCharCount * 2 + 10;
     }
 
     // TURKISH

@@ -16,6 +16,9 @@ export interface DeterministicFallbackParams {
   promptVersion?: string | number;
   /** P0.16-H: Authoritative resolved department from orchestrator's 4-step priority chain */
   resolvedActiveDepartment?: string | null;
+  replyLanguage?: string;
+  turkeyVisitIntent?: string;
+  formAlreadyAddressed?: boolean;
 }
 
 export interface DeterministicFallbackResult {
@@ -28,6 +31,203 @@ export interface DeterministicFallbackResult {
 }
 
 export class ContextAwareSafeFallbackResolver {
+  private static resolveArabic(params: DeterministicFallbackParams): DeterministicFallbackResult {
+    const { inboundText, brain, identityConfig, unifiedContext } = params;
+    const orchestratorDept = params.resolvedActiveDepartment || null;
+    const lowerInbound = (inboundText || '').toLowerCase().trim();
+
+    const configIndustry = brain.context.config?.industry;
+    const metadataIndustry = (brain.prompts.metadata as any)?.industry;
+    const resolvedIndustry = (configIndustry || metadataIndustry || '').toLowerCase();
+    
+    const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health';
+    const hasFormContext = !!unifiedContext?.latestForm || 
+      (Array.isArray(unifiedContext?.patient_known_facts) && unifiedContext.patient_known_facts.length > 0);
+
+    const history = unifiedContext?.history || [];
+    const { PendingQuestionResolver } = require('./pending-question-resolver');
+    const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
+    const { ConversationStateArbitrator } = require('./conversation-state-arbitrator');
+    
+    const rawIntent = ConversationIntentRouter.route(inboundText);
+    const rawPendingSlot = PendingQuestionResolver.resolve(history);
+    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundText, rawPendingSlot);
+
+    const arbitration = ConversationStateArbitrator.arbitrate({
+      lastUserMessage: inboundText,
+      rawPendingSlot,
+      rawInterpretedIntent: interpretedIntent || '',
+      routerIntent: rawIntent,
+      history,
+      unifiedContext
+    });
+
+    const detectedIntent = arbitration.effectiveIntent;
+    const pendingSlot = arbitration.effectivePendingSlot;
+
+    const pName = identityConfig.personaName || '';
+    const orgName = identityConfig.organizationName || 'مستشفانا';
+    const agentName = pName || 'مستشارينا';
+
+    if (detectedIntent === 'address_full_request') {
+      return {
+        text: "العنوان الكامل: Hocacihan Mahallesi, Saray Caddesi No:1, Selçuklu / Konya, Türkiye.",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'address_full_request_arabic',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'location_direction') {
+      const isIraqQuery = [
+        'عراق', 'iraq', 'irak', 'فرع في عراق', 'فرع في العراق'
+      ].some(kw => lowerInbound.includes(kw));
+
+      if (isIraqQuery) {
+        return {
+          text: "لا يوجد لدينا فرع في العراق. مستشفانا في مدينة قونيا، تركيا. إذا كنت تفكر في القدوم إلى تركيا للعلاج، يمكنني شرح الخطوات ومساعدتك في التخطيط.",
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint: false,
+          finalPath: 'location_direction_iraq_arabic',
+          detectedIntent
+        };
+      }
+
+      return {
+        text: "نحن في مدينة قونيا، تركيا.",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'location_direction_basic_arabic',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'capability_question') {
+      return {
+        text: "أنا المساعد الرقمي للمستشفى. يمكنني مساعدتك في فهم الشكاوى، وتقديم معلومات عن الأطباء والأقسام، والتخطيط للاتصالات الهاتفية أو المواعيد. كيف يمكنني مساعدتك اليوم؟ 🙏",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'capability_question_arabic',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'identity_question') {
+      const text = pName 
+        ? `أنا *${pName}*، أتابعكم من ${orgName}. كيف يمكنني مساعدتكم؟ 🌿`
+        : "مرحباً، أنا هنا لمساعدتك. ما هو الموضوع الذي ترغب في الحصول على معلومات عنه؟";
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'identity_question_arabic',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'human_transfer_request' || detectedIntent === 'transfer_request') {
+      return {
+        text: `على حق، من الأفضل أن يهتم ${pName ? pName : "مستشارونا"} بهذا الأمر. سأقوم بتدوين طلبك ليتم تحويله.`,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'human_transfer_arabic',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'callback_confirmation') {
+      return {
+        text: "تم تسجيل تأكيدك. سيتصل بك مستشار المرضى لدينا في الوقت المحدد بتوقيت تركيا. 🙏",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'callback_confirmation_arabic',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'callback_time_answer' || detectedIntent === 'arrival_date_answer') {
+      const turkeyVisitIntent = params.turkeyVisitIntent || 'turkey_visit_intent_unknown';
+      if (turkeyVisitIntent === 'turkey_visit_intent_unknown') {
+        return {
+          text: "لقد سجلت الوقت الذي شاركته. قبل المتابعة في التخطيط للاتصال، هل تفكر في القدوم إلى تركيا للعلاج، أم ترغب فقط في الحصول على معلومات في هذه المرحلة؟",
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint: false,
+          finalPath: 'callback_time_answer_unknown_arabic',
+          detectedIntent
+        };
+      } else if (turkeyVisitIntent === 'turkey_visit_intent_negative' || turkeyVisitIntent === 'turkey_visit_intent_uncertain') {
+        return {
+          text: "لقد سجلت الوقت الذي شاركته. في هذه الحالة، لن أقوم بتوجيهك لحجز موعد. إذا كانت لديك أي أسئلة، يمكنني الاستمرار في تقديم المعلومات لك من هنا.",
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint: false,
+          finalPath: 'callback_time_answer_negative_arabic',
+          detectedIntent
+        };
+      } else {
+        return {
+          text: "تم تسجيل تفضيلاتك للاتصال بك. سيتصل بك مستشار المرضى لدينا في الوقت المحدد بتوقيت تركيا. 🙏",
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint: false,
+          finalPath: 'callback_time_answer_positive_arabic',
+          detectedIntent
+        };
+      }
+    }
+
+    if (detectedIntent === 'price_question') {
+      return {
+        text: "تتحدد تكاليف الخدمات والعلاج لدينا بعد المعاينة والتقييم الشخصي في مستشفانا. للحصول على معلومات تفصيلية، يمكننا التخطيط لاتصال هاتفي قصير.",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'price_question_arabic',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'distance_objection') {
+      return {
+        text: "أتفهم تماماً قلقك بشأن المسافة. بالنسبة لزوارنا القادمين من خارج البلاد، يقوم فريقنا بتنسيق النقل والسكن والتخطيط للعملية. يمكننا مناقشة التفاصيل عبر الهاتف.",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'distance_objection_arabic',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'doctor_lookup') {
+      return {
+        text: "يمكنني تقديم قائمة بأطبائنا المتخصصين. لمساعدتك بشكل أفضل، هل يمكنك مشاركة القسم أو التخصص الذي تبحث عنه؟",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'doctor_lookup_arabic',
+        detectedIntent
+      };
+    }
+
+    return {
+      text: "مرحباً، أنا هنا لمساعدتك. كيف يمكنني تقديم المساعدة لك اليوم؟",
+      sector: resolvedIndustry,
+      hasFormContext,
+      hasComplaint: false,
+      finalPath: 'default_fallback_arabic',
+      detectedIntent
+    };
+  }
+
   /**
    * Resolves a safe, deterministic fallback text based on tenant config,
    * industry (sector), and inbound message intents.
@@ -35,7 +235,10 @@ export class ContextAwareSafeFallbackResolver {
    */
   public static resolve(params: DeterministicFallbackParams): DeterministicFallbackResult {
     const { inboundText, brain, identityConfig, unifiedContext } = params;
-    // P0.16-H: Use orchestrator-resolved department (authoritative) over stale CRM
+    const lang = params.replyLanguage || 'tr';
+    const turkeyVisitIntent = params.turkeyVisitIntent || 'turkey_visit_intent_unknown';
+    const formAlreadyAddressed = params.formAlreadyAddressed ?? false;
+
     const orchestratorDept = params.resolvedActiveDepartment || null;
     const lowerInbound = (inboundText || '').toLowerCase().trim();
 
@@ -47,6 +250,116 @@ export class ContextAwareSafeFallbackResolver {
     const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health';
     const hasFormContext = !!unifiedContext?.latestForm || 
       (Array.isArray(unifiedContext?.patient_known_facts) && unifiedContext.patient_known_facts.length > 0);
+
+    const history = unifiedContext?.history || [];
+    const { PendingQuestionResolver } = require('./pending-question-resolver');
+    const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
+    const { ConversationStateArbitrator } = require('./conversation-state-arbitrator');
+    
+    // Route message to find raw intent
+    const rawIntent = ConversationIntentRouter.route(inboundText);
+    const rawPendingSlot = PendingQuestionResolver.resolve(history);
+    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundText, rawPendingSlot);
+
+    const arbitration = ConversationStateArbitrator.arbitrate({
+      lastUserMessage: inboundText,
+      rawPendingSlot,
+      rawInterpretedIntent: interpretedIntent || '',
+      routerIntent: rawIntent,
+      history,
+      unifiedContext
+    });
+
+    const detectedIntent = arbitration.effectiveIntent;
+    const pendingSlot = arbitration.effectivePendingSlot;
+
+    // Form Re-introduction Greeting Bypass
+    const isGreeting = detectedIntent === 'greeting';
+    if (formAlreadyAddressed && (isGreeting || detectedIntent === 'form_followup')) {
+      const deptName = orchestratorDept || unifiedContext?.opportunity?.department || unifiedContext?.latestForm?.data?.onerilen_bolum || unifiedContext?.latestForm?.name || 'tedavi';
+      
+      if (lang === 'ar') {
+        let deptPhraseAr = 'علاجكم';
+        const cleanDept = deptName.toLowerCase();
+        if (cleanDept.includes('check-up') || cleanDept.includes('checkup') || cleanDept.includes('check up')) {
+          deptPhraseAr = 'الفحص الطبي الشامل (Check-up)';
+        } else if (cleanDept.includes('kardiyoloji') || cleanDept.includes('kalp')) {
+          deptPhraseAr = 'قسم أمراض القلب';
+        } else if (cleanDept.includes('ortopedi')) {
+          deptPhraseAr = 'قسم جراحة العظام';
+        } else if (cleanDept.includes('tüp bebek') || cleanDept.includes('tup bebek')) {
+          deptPhraseAr = 'قسم أطفال الأنابيب';
+        } else if (cleanDept.includes('estetik')) {
+          deptPhraseAr = 'قسم التجميل';
+        } else if (cleanDept.includes('diş') || cleanDept.includes('dis')) {
+          deptPhraseAr = 'قسم طب الأسنان';
+        } else if (cleanDept.includes('organ nakli')) {
+          deptPhraseAr = 'قسم زراعة الأعضاء';
+        } else if (cleanDept.includes('beyin') || cleanDept.includes('omurga')) {
+          deptPhraseAr = 'قسم جراحة المخ والأعصاب';
+        }
+
+        let text = '';
+        if (turkeyVisitIntent === 'turkey_visit_intent_positive') {
+          text = `مرحباً، أهلاً بك مجدداً. يمكننا المتابعة من هنا بخصوص التخطيط لـ ${deptPhraseAr}. يرجى مشاركة اليوم والوقت المناسبين للاتصال بك. 🙏`;
+        } else if (turkeyVisitIntent === 'turkey_visit_intent_negative' || turkeyVisitIntent === 'turkey_visit_intent_uncertain') {
+          text = `مرحباً، أهلاً بك مجدداً. في هذه الحالة، لن أقوم بتوجيهك لحجز موعد. إذا كانت لديك أي أسئلة، يمكنني الاستمرار في تقديم المعلومات لك من هنا.`;
+        } else {
+          text = `مرحباً، أهلاً بك مجدداً. يمكننا المتابعة من هنا بخصوص التخطيط لـ ${deptPhraseAr}. هل تفكر في القدوم إلى تركيا، أم ترغب فقط في الحصول على معلومات في هذه المرحلة؟ 🙏`;
+        }
+
+        return {
+          text,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint: false,
+          finalPath: 'form_reintroduction_greeting_arabic',
+          detectedIntent
+        };
+      } else {
+        let deptPhraseTr = 'tedavi';
+        const cleanDept = deptName.toLowerCase();
+        if (cleanDept.includes('check-up') || cleanDept.includes('checkup') || cleanDept.includes('check up')) {
+          deptPhraseTr = 'Check-up';
+        } else if (cleanDept.includes('kardiyoloji') || cleanDept.includes('kalp')) {
+          deptPhraseTr = 'Kardiyoloji';
+        } else if (cleanDept.includes('ortopedi')) {
+          deptPhraseTr = 'Ortopedi';
+        } else if (cleanDept.includes('tüp bebek') || cleanDept.includes('tup bebek')) {
+          deptPhraseTr = 'Tüp Bebek';
+        } else if (cleanDept.includes('estetik')) {
+          deptPhraseTr = 'Estetik';
+        } else if (cleanDept.includes('diş') || cleanDept.includes('dis')) {
+          deptPhraseTr = 'Diş';
+        } else if (cleanDept.includes('organ nakli')) {
+          deptPhraseTr = 'Organ Nakli';
+        } else if (cleanDept.includes('beyin') || cleanDept.includes('omurga')) {
+          deptPhraseTr = 'Beyin Cerrahi';
+        }
+
+        let text = '';
+        if (turkeyVisitIntent === 'turkey_visit_intent_positive') {
+          text = `Merhaba, tekrar hoş geldiniz. ${deptPhraseTr} planlamanızla ilgili buradan devam edebiliriz. Size uygun arama günü ve saatini paylaşabilirsiniz. 🙏`;
+        } else if (turkeyVisitIntent === 'turkey_visit_intent_negative' || turkeyVisitIntent === 'turkey_visit_intent_uncertain') {
+          text = `Merhaba, tekrar hoş geldiniz. Bu durumda sizi randevuya yönlendirmeyeyim. Merak ettiğiniz konular olursa buradan bilgi vermeye devam edebilirim.`;
+        } else {
+          text = `Merhaba, tekrar hoş geldiniz. ${deptPhraseTr} planlamanızla ilgili buradan devam edebiliriz. Öncelikle Türkiye’ye gelmeyi düşünüyor musunuz, yoksa şu aşamada sadece bilgi almak mı istiyorsunuz? 🙏`;
+        }
+
+        return {
+          text,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint: false,
+          finalPath: 'form_reintroduction_greeting_turkish',
+          detectedIntent
+        };
+      }
+    }
+
+    if (lang === 'ar') {
+      return ContextAwareSafeFallbackResolver.resolveArabic(params);
+    }
 
     const isHealthcareOrForm = isHealthcare || hasFormContext;
 
@@ -139,29 +452,6 @@ export class ContextAwareSafeFallbackResolver {
         detectedIntent: 'price_question'
       };
     }
-
-    // Resolve pending slot and interpreted intent
-    const history = unifiedContext?.history || [];
-    const { PendingQuestionResolver } = require('./pending-question-resolver');
-    const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
-    const { ConversationStateArbitrator } = require('./conversation-state-arbitrator');
-    
-    // Route message to find raw intent
-    const rawIntent = ConversationIntentRouter.route(inboundText);
-    const rawPendingSlot = PendingQuestionResolver.resolve(history);
-    const interpretedIntent = ShortAnswerInterpreter.interpret(inboundText, rawPendingSlot);
-
-    const arbitration = ConversationStateArbitrator.arbitrate({
-      lastUserMessage: inboundText,
-      rawPendingSlot,
-      rawInterpretedIntent: interpretedIntent || '',
-      routerIntent: rawIntent,
-      history,
-      unifiedContext
-    });
-
-    const detectedIntent = arbitration.effectiveIntent;
-    const pendingSlot = arbitration.effectivePendingSlot;
 
     const isPromptChallenge = (detectedIntent as string) === 'prompt_challenge' || interpretedIntent === 'prompt_challenge';
     const isAbuseOrInsult = (detectedIntent as string) === 'abuse_or_insult' || interpretedIntent === 'abuse_or_insult';
@@ -849,7 +1139,27 @@ export class ContextAwareSafeFallbackResolver {
       };
     }
 
-    if (detectedIntent === 'time_availability') {
+    if (detectedIntent === 'callback_time_answer' || detectedIntent === 'time_availability') {
+      if (turkeyVisitIntent === 'turkey_visit_intent_unknown') {
+        return {
+          text: "Paylaştığınız saati not aldım. Arama planlamasına geçmeden önce Türkiye’ye gelmeyi düşünüyor musunuz, yoksa şu aşamada sadece bilgi almak mı istiyorsunuz?",
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'callback_time_answer_unknown_turkish',
+          detectedIntent
+        };
+      } else if (turkeyVisitIntent === 'turkey_visit_intent_negative' || turkeyVisitIntent === 'turkey_visit_intent_uncertain') {
+        return {
+          text: "Paylaştığınız saati not aldım. Bu durumda sizi randevuya yönlendirmeyeyim. Merak ettiğiniz konular olursa buradan bilgi vermeye devam edebilirim.",
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'callback_time_answer_negative_turkish',
+          detectedIntent
+        };
+      }
+
       const text = isHealthcare
         ? `Paylaştığınız zaman bilgisini not aldım. Hasta danışmanımız saat planlamasını teyit etmek üzere sizinle iletişime geçecektir.`
         : `Paylaştığınız zaman bilgisini not aldım. Temsilci arkadaşımız saat planlamasını teyit etmek üzere sizinle iletişime geçecektir.`;
@@ -928,8 +1238,6 @@ export class ContextAwareSafeFallbackResolver {
         };
       }
     }
-
-    const isGreeting = detectedIntent === 'greeting';
 
     // Intent: Greeting
     if (isGreeting) {

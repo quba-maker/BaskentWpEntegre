@@ -694,6 +694,7 @@ export class IdentityEngine {
 
 
         return {
+          id: lead.id,
           name: lead.form_name,
           data: safeData,
           created_at: lead.created_at
