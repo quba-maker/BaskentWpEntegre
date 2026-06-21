@@ -1050,15 +1050,17 @@ export class AIResponseOrchestrator {
 
       const isCallbackConfirmation = effectiveIntent === 'callback_confirmation' || effectiveIntent === 'schedule_confirmation';
       const isArrivalDateAnswer = effectiveIntent === 'arrival_date_answer' && !inboundText.includes('?') && inboundText.length < 50;
+      const isCallbackTimeAnswer = effectiveIntent === 'callback_time_answer';
 
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge || shouldBypassDoctorLookup || isRecallWithFacts || isNextStepRequest || isMultiIntentQuery || isDoctorNamesRequest
-        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose || isCallbackConfirmation || isArrivalDateAnswer; // P0.16-L
+        || isThanksButContinueBypass || isOpenContinuationBypass || isCannotTravelObjection || isDistanceObjection || isPoliteClose || isCallbackConfirmation || isArrivalDateAnswer || isCallbackTimeAnswer; // P0.16-L
 
       let text = '';
       let bypassed = false;
       let modelUsed = 'gemini-2.5-flash';
       let inputTokens = 0;
       let outputTokens = 0;
+      let isCallbackTimeAnswerPath = false;
 
       if (isLlmBypassChallenge) {
         // P0.16-H/K Telemetry: intent list
@@ -1352,8 +1354,9 @@ export class AIResponseOrchestrator {
           let responseText = '';
           const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
           const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
-          const agentLabelPossessive = isHealthcare ? 'Hasta danışmanımızın' : 'Müşteri temsilcimizin';
-          const agentLabel = isHealthcare ? 'Hasta danışmanımız' : 'Müşteri temsilcimiz';
+          // Deterministic cliches avoided per Rule 6 (no "Müşteri temsilcimiz")
+          const agentLabelPossessive = 'Hasta danışmanımızın';
+          const agentLabel = 'Hasta danışmanımız';
           
           if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
             const [yyyy, mm, dd] = parsedSugg.suggested_date.split('-').map(Number);
@@ -1465,7 +1468,8 @@ export class AIResponseOrchestrator {
 
           const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
           const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
-          const agentLabelPossessive = isHealthcare ? 'Hasta danışmanımızın' : 'Müşteri temsilcimizin';
+          // Deterministic cliches avoided per Rule 6 (no "Müşteri temsilcimiz")
+          const agentLabelPossessive = 'Hasta danışmanımızın';
 
           const responseText = `Teşekkür ederim, ${normalizedDate} tarihini not aldım. ${agentLabelPossessive} sizi ${cleanCallTime} araması için notunuzu iletiyorum 🙏`;
 
@@ -1525,6 +1529,171 @@ export class AIResponseOrchestrator {
           console.log(JSON.stringify({
             tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
             path: 'arrival_date_bypass',
+            tenantId,
+            conversationId: conversationId || 'unknown',
+            workerPath
+          }));
+        }
+
+        // P0.28.2: callback_time_answer bypass
+        if (!fallbackResult && isCallbackTimeAnswer) {
+          const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+          // Parse using current local time as reference
+          const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, null);
+          
+          let responseText = '';
+          let isSuccess = false;
+          let proposedDateStr: string | null = null;
+          let shiftedDateStr: string | null = null;
+          
+          const wh = (brain.context.settings?.workingHours || brain.context.config?.workingHours || { enabled: true, start: "09:00", end: "21:00" }) as any;
+          
+          if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
+            proposedDateStr = parsedSugg.proposed_date;
+            
+            // Adjust to operating hours dynamically (not hardcoded)
+            let currentD = new Date(parsedSugg.proposed_date);
+            let trTime = currentD.getTime() + 3 * 60 * 60 * 1000;
+            let trDate = new Date(trTime);
+            
+            const isDayOpen = (dateObj: Date) => {
+              const day = dateObj.getUTCDay(); // 0 is Sunday, 1 is Monday...
+              if (wh && Array.isArray(wh.days)) {
+                return wh.days.includes(day);
+              }
+              return day !== 0; // Default: closed on Sunday (0)
+            };
+            
+            let shifted = false;
+            let loopCount = 0;
+            while (!isDayOpen(trDate) && loopCount < 7) {
+              trDate.setUTCDate(trDate.getUTCDate() + 1);
+              shifted = true;
+              loopCount++;
+            }
+            
+            let startMin = 9 * 60;
+            let endMin = 21 * 60;
+            if (wh?.start) {
+              const [h, m] = wh.start.split(':').map(Number);
+              startMin = h * 60 + (m || 0);
+            }
+            if (wh?.end) {
+              const [h, m] = wh.end.split(':').map(Number);
+              endMin = h * 60 + (m || 0);
+            }
+            
+            const trHour = trDate.getUTCHours();
+            const trMinute = trDate.getUTCMinutes();
+            const trTotalMinutes = trHour * 60 + trMinute;
+            
+            if (trTotalMinutes < startMin) {
+              trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+            } else if (trTotalMinutes > endMin) {
+              trDate.setUTCDate(trDate.getUTCDate() + 1);
+              let loopCount2 = 0;
+              while (!isDayOpen(trDate) && loopCount2 < 7) {
+                trDate.setUTCDate(trDate.getUTCDate() + 1);
+                loopCount2++;
+              }
+              trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+            }
+            
+            // Convert back to UTC
+            shiftedDateStr = new Date(trDate.getTime() - 3 * 60 * 60 * 1000).toISOString();
+            
+            // Format Turkish date
+            const finalTrD = new Date(trDate.getTime()); // Turkey time representation
+            const dd = finalTrD.getUTCDate();
+            const mm = finalTrD.getUTCMonth();
+            const dayIndex = finalTrD.getUTCDay();
+            const hh = String(finalTrD.getUTCHours()).padStart(2, '0');
+            const min = String(finalTrD.getUTCMinutes()).padStart(2, '0');
+            
+            const dayName = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][dayIndex];
+            const monthNames = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+            const formattedDate = `${dd} ${monthNames[mm]} ${dayName}`;
+            
+            // Turkish suffix rule for the hour
+            const hourInt = parseInt(hh, 10);
+            const suffixes: Record<number, string> = {
+              0: 'de', 1: 'de', 2: 'de', 3: 'te', 4: 'te', 5: 'te', 6: 'da', 7: 'de', 8: 'de', 9: 'da',
+              10: 'da', 11: 'de', 12: 'de', 13: 'te', 14: 'te', 15: 'te', 16: 'da', 17: 'de', 18: 'de',
+              19: 'da', 20: 'de', 21: 'de', 22: 'de', 23: 'te'
+            };
+            const suffix = suffixes[hourInt] || 'da';
+            const formattedTime = `${hh}:${min}’${suffix}`;
+            
+            responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${formattedDate} Türkiye saatiyle ${formattedTime} araması için notunuzu iletiyorum. 🙏`;
+            isSuccess = true;
+          }
+          
+          if (!isSuccess) {
+            // Determine time of day based on user message content
+            const lower = inboundText.toLowerCase();
+            let period = 'sabah saatlerinde';
+            if (lower.includes('akşam') || lower.includes('aksam') || lower.includes('gece')) {
+              period = 'akşam saatlerinde';
+            } else if (lower.includes('öğle') || lower.includes('ogle') || lower.includes('öğlen') || lower.includes('oglen') || lower.includes('öğleden sonra') || lower.includes('ogleden sonra')) {
+              period = 'öğleden sonra saatlerinde';
+            }
+            responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${period} araması için notunuzu iletiyorum. 🙏`;
+          }
+          
+          // Create follow-up task if we have a proposed date (success path)
+          if (isSuccess && shiftedDateStr && !sandbox) {
+            try {
+              // Task duplicate check on combined fields to enforce idempotency
+              const existing = await db.executeSafe({
+                text: `SELECT id FROM follow_up_tasks 
+                       WHERE tenant_id = $1 
+                         AND conversation_id = $2 
+                         AND task_type = $3 
+                         AND due_at = $4 
+                         AND status IN ('pending', 'in_progress')`,
+                values: [tenantId, conversationId, 'callback_scheduled', shiftedDateStr]
+              }) as any[];
+              
+              if (existing.length === 0) {
+                const { TaskService } = require('../task.service');
+                const taskService = new TaskService(db);
+                const opportunityId = unifiedContext?.opportunity?.id || null;
+                
+                // Construct a unique hash for metadata idempotency control (PII-free)
+                const crypto = require('crypto');
+                const idempotencyKey = crypto.createHash('sha256')
+                  .update(`${tenantId}:${channelId || 'whatsapp'}:${conversationId}:callback_scheduled:${shiftedDateStr}`)
+                  .digest('hex');
+                
+                // Save task - strictly PII-free description/title, no raw phone, name, or msg
+                await taskService.create({
+                  tenantId,
+                  opportunityId: opportunityId || undefined,
+                  conversationId: conversationId || undefined,
+                  phoneNumber,
+                  taskType: 'callback_scheduled',
+                  title: '📞 Geri Arama',
+                  description: 'Telefon görüşmesi planlandı.',
+                  dueAt: shiftedDateStr,
+                  isAutomated: true,
+                  createdBy: 'system',
+                  metadata: {
+                    idempotency_key: idempotencyKey,
+                    callback_time_tr: parsedSugg.suggested_time,
+                    source: 'callback_time_answer'
+                  }
+                });
+              }
+            } catch (taskErr) {
+              console.error('[AIResponseOrchestrator] Failed to create callback follow-up task for callback_time_answer:', taskErr);
+            }
+          }
+          
+          fallbackResult = { text: responseText, finalPath: 'callback_time_answer_bypass' };
+          isCallbackTimeAnswerPath = true; // flag to skip last_callback_offer writing
+          console.log(JSON.stringify({
+            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+            path: 'callback_time_answer_bypass',
             tenantId,
             conversationId: conversationId || 'unknown',
             workerPath
@@ -1687,7 +1856,8 @@ export class AIResponseOrchestrator {
 
             const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
             const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
-            const agentLabelPossessive = isHealthcare ? 'Hasta danışmanımızın' : 'Müşteri temsilcimizin';
+            // Deterministic cliches avoided per Rule 6 (no "Müşteri temsilcimiz")
+            const agentLabelPossessive = 'Hasta danışmanımızın';
 
             text = `Teşekkür ederim, ${normalizedDate} tarihini not aldım. ${agentLabelPossessive} sizi ${cleanCallTime} araması için notunuzu iletiyorum 🙏`;
             
@@ -1743,10 +1913,151 @@ export class AIResponseOrchestrator {
               }
             }
           } else if (isSpecificCallTimeOffer(lastAssistantMsg) && isAffirmative) {
-            const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
-            const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
-            const agentLabel = isHealthcare ? 'hasta danışmanımıza' : 'temsilcimize';
+            // Deterministic cliches avoided per Rule 6 (no "temsilci" or "Müşteri temsilcimiz")
+            const agentLabel = 'hasta danışmanımıza';
             text = `Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili ${agentLabel} iletiyorum. Görüşmek üzere. 🙏`;
+          } else if (isCallbackTimeAnswer) {
+            const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+            const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, null);
+            
+            let responseText = '';
+            let isSuccess = false;
+            let shiftedDateStr: string | null = null;
+            
+            const wh = (brain.context.settings?.workingHours || brain.context.config?.workingHours || { enabled: true, start: "09:00", end: "21:00" }) as any;
+            
+            if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time && parsedSugg.proposed_date) {
+              let currentD = new Date(parsedSugg.proposed_date);
+              let trTime = currentD.getTime() + 3 * 60 * 60 * 1000;
+              let trDate = new Date(trTime);
+              
+              const isDayOpen = (dateObj: Date) => {
+                const day = dateObj.getUTCDay();
+                if (wh && Array.isArray(wh.days)) {
+                  return wh.days.includes(day);
+                }
+                return day !== 0;
+              };
+              
+              let shifted = false;
+              let loopCount = 0;
+              while (!isDayOpen(trDate) && loopCount < 7) {
+                trDate.setUTCDate(trDate.getUTCDate() + 1);
+                shifted = true;
+                loopCount++;
+              }
+              
+              let startMin = 9 * 60;
+              let endMin = 21 * 60;
+              if (wh?.start) {
+                const [h, m] = wh.start.split(':').map(Number);
+                startMin = h * 60 + (m || 0);
+              }
+              if (wh?.end) {
+                const [h, m] = wh.end.split(':').map(Number);
+                endMin = h * 60 + (m || 0);
+              }
+              
+              const trHour = trDate.getUTCHours();
+              const trMinute = trDate.getUTCMinutes();
+              const trTotalMinutes = trHour * 60 + trMinute;
+              
+              if (trTotalMinutes < startMin) {
+                trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+              } else if (trTotalMinutes > endMin) {
+                trDate.setUTCDate(trDate.getUTCDate() + 1);
+                let loopCount2 = 0;
+                while (!isDayOpen(trDate) && loopCount2 < 7) {
+                  trDate.setUTCDate(trDate.getUTCDate() + 1);
+                  loopCount2++;
+                }
+                trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+              }
+              
+              shiftedDateStr = new Date(trDate.getTime() - 3 * 60 * 60 * 1000).toISOString();
+              
+              const finalTrD = new Date(trDate.getTime());
+              const dd = finalTrD.getUTCDate();
+              const mm = finalTrD.getUTCMonth();
+              const dayIndex = finalTrD.getUTCDay();
+              const hh = String(finalTrD.getUTCHours()).padStart(2, '0');
+              const min = String(finalTrD.getUTCMinutes()).padStart(2, '0');
+              
+              const dayName = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][dayIndex];
+              const monthNames = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+              const formattedDate = `${dd} ${monthNames[mm]} ${dayName}`;
+              
+              const hourInt = parseInt(hh, 10);
+              const suffixes: Record<number, string> = {
+                0: 'de', 1: 'de', 2: 'de', 3: 'te', 4: 'te', 5: 'te', 6: 'da', 7: 'de', 8: 'de', 9: 'da',
+                10: 'da', 11: 'de', 12: 'de', 13: 'te', 14: 'te', 15: 'te', 16: 'da', 17: 'de', 18: 'de',
+                19: 'da', 20: 'de', 21: 'de', 22: 'de', 23: 'te'
+              };
+              const suffix = suffixes[hourInt] || 'da';
+              const formattedTime = `${hh}:${min}’${suffix}`;
+              
+              responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${formattedDate} Türkiye saatiyle ${formattedTime} araması için notunuzu iletiyorum. 🙏`;
+              isSuccess = true;
+            }
+            
+            if (!isSuccess) {
+              const lower = inboundText.toLowerCase();
+              let period = 'sabah saatlerinde';
+              if (lower.includes('akşam') || lower.includes('aksam') || lower.includes('gece')) {
+                period = 'akşam saatlerinde';
+              } else if (lower.includes('öğle') || lower.includes('ogle') || lower.includes('öğlen') || lower.includes('oglen') || lower.includes('öğleden sonra') || lower.includes('ogleden sonra')) {
+                period = 'öğleden sonra saatlerinde';
+              }
+              responseText = `Teyidinizi aldım. Hasta danışmanımızın sizi ${period} araması için notunuzu iletiyorum. 🙏`;
+            }
+            
+            if (isSuccess && shiftedDateStr && !sandbox) {
+              try {
+                const existing = await db.executeSafe({
+                  text: `SELECT id FROM follow_up_tasks 
+                         WHERE tenant_id = $1 
+                           AND conversation_id = $2 
+                           AND task_type = $3 
+                           AND due_at = $4 
+                           AND status IN ('pending', 'in_progress')`,
+                  values: [tenantId, conversationId, 'callback_scheduled', shiftedDateStr]
+                }) as any[];
+                
+                if (existing.length === 0) {
+                  const { TaskService } = require('../task.service');
+                  const taskService = new TaskService(db);
+                  const opportunityId = unifiedContext?.opportunity?.id || null;
+                  
+                  const crypto = require('crypto');
+                  const idempotencyKey = crypto.createHash('sha256')
+                    .update(`${tenantId}:${channelId || 'whatsapp'}:${conversationId}:callback_scheduled:${shiftedDateStr}`)
+                    .digest('hex');
+                  
+                  await taskService.create({
+                    tenantId,
+                    opportunityId: opportunityId || undefined,
+                    conversationId: conversationId || undefined,
+                    phoneNumber,
+                    taskType: 'callback_scheduled',
+                    title: '📞 Geri Arama',
+                    description: 'Telefon görüşmesi planlandı.',
+                    dueAt: shiftedDateStr,
+                    isAutomated: true,
+                    createdBy: 'system',
+                    metadata: {
+                      idempotency_key: idempotencyKey,
+                      callback_time_tr: parsedSugg.suggested_time,
+                      source: 'callback_time_answer'
+                    }
+                  });
+                }
+              } catch (taskErr) {
+                console.error('[AIResponseOrchestrator] Failed to create callback follow-up task for callback_time_answer in fallback:', taskErr);
+              }
+            }
+            
+            text = responseText;
+            isCallbackTimeAnswerPath = true; // flag to skip last_callback_offer writing
           }
         }
       }
@@ -1875,7 +2186,7 @@ export class AIResponseOrchestrator {
       text = ResponseFormattingPolicy.format(text);
 
       // P0.27: Save last_callback_offer to conversation metadata if the bot response proposes a date/time
-      if (!sandbox && conversationId && text) {
+      if (!sandbox && conversationId && text && !isCallbackTimeAnswerPath && effectiveIntent !== 'arrival_date_answer') {
         try {
           const { parseDeterministicSuggestion } = require('../../utils/date-parser');
           const parsedSugg = parseDeterministicSuggestion(text, new Date(), null, null);

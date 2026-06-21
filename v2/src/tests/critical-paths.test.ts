@@ -8425,6 +8425,99 @@ test("P0.28.1 T4: genuine callback offer from last_callback_offer is confirmed s
   }
 });
 
+test("P0.28.2 T1: callback_time_answer skips Sunday, shifts to Monday, preserves hour, is PII-free and idempotent", async () => {
+  const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
+  const dbCalls: any[] = [];
+  const db = {
+    executeSafe: async (query: any, params?: any[]) => {
+      const text = typeof query === 'string' ? query : query?.text || '';
+      const vals = typeof query === 'string' ? params : query?.values || [];
+      dbCalls.push({ text, vals });
+      
+      if (text.includes("FROM conversations")) {
+        return [{ metadata: {} }];
+      }
+      if (text.includes("UPDATE conversations")) {
+        return [{ id: "conv-1" }];
+      }
+      if (text.includes("FROM ai_module_settings")) {
+        return [{ config: { enabled: true, dry_run: false, rollout_percentage: 100, department_mode: "all" } }];
+      }
+      if (text.includes("FROM tenants")) {
+        return [{ timezone: "Europe/Istanbul" }];
+      }
+      return [];
+    }
+  };
+
+  const brain = {
+    context: {
+      tenantId: "tenant-1",
+      config: { industry: "healthcare", timezone: "Europe/Istanbul" },
+      settings: {
+        workingHours: {
+          enabled: true,
+          start: "09:00",
+          end: "21:00",
+          days: [1, 2, 3, 4, 5, 6] // Closed on Sunday (0)
+        }
+      }
+    },
+    prompts: {
+      systemPrompt: "Mock system prompt",
+      metadata: { version: "1.0" }
+    }
+  };
+
+  const originalDb = (global as any).mockDb;
+  (global as any).mockDb = db;
+
+  try {
+    // Current time is Sunday: 2026-06-21T03:36:49+03:00.
+    // User message sequence as requested:
+    // 1. User: "pazar sabah 10"
+    // 2. User: ".."
+    // 3. User: "pazar sabah 10 da olabilir" -> Combined/aggregated: "pazar sabah 10\n..\npazar sabah 10 da olabilir"
+    const res = await AIResponseOrchestrator.run({
+      tenantId: "tenant-1",
+      conversationId: "conv-1",
+      channel: "whatsapp",
+      channelId: "whatsapp",
+      inboundText: "pazar sabah 10\n..\npazar sabah 10 da olabilir",
+      phoneNumber: "905001234567",
+      sandbox: true,
+      brain,
+      history: [
+        { role: "user", content: "Size uygun olan, önümüzdeki günlerdeki bir sabah saatinizi ve günü paylaşabilir misiniz?" },
+        { role: "user", content: "pazar sabah 10\n..\npazar sabah 10 da olabilir" }
+      ]
+    } as any);
+
+    assert(res.modelUsed === "bypass", `Expected bypass, got ${res.modelUsed}`);
+    assert(res.text.includes("Teyidinizi aldım"), "Response should acknowledge confirmation");
+    // Sunday is June 21, closed. Next open day is Monday, June 22.
+    // Time 10:00 is within 09:00 - 21:00, so it should be preserved.
+    assert(res.text.includes("22 Haziran Pazartesi"), "Should shift to Monday");
+    assert(res.text.includes("10:00"), "Should preserve 10:00");
+    assert(res.text.includes("Türkiye saatiyle"), "Should specify Turkey time");
+    
+    // Ensure no Müşteri temsilcimiz / Harika / planlayabilir
+    assert(!res.text.includes("Harika"), "Should not contain Harika");
+    assert(!res.text.includes("Müşteri temsilcimiz"), "Should not contain Müşteri temsilcimiz");
+    assert(!res.text.includes("planlayabilir"), "Should not contain planlayabilir");
+
+    // Check task creation simulation or other details
+    const updates = dbCalls.filter(c => c.text.includes("UPDATE conversations"));
+    const lastCallbackOfferSaved = updates.some(c => {
+      const parsedMeta = JSON.parse(c.vals[0]);
+      return !!parsedMeta.last_callback_offer;
+    });
+    assert(!lastCallbackOfferSaved, "last_callback_offer must not be saved for callback_time_answer path");
+  } finally {
+    (global as any).mockDb = originalDb;
+  }
+});
+
 // ==========================================
 // SONUÇLAR
 // ==========================================

@@ -60,7 +60,9 @@ const SLOT_OVERRIDE_INTENTS: ConversationIntent[] = [
   'process_question',
   'callback_confirmation',
   'schedule_confirmation',
-  'arrival_date_answer'
+  'arrival_date_answer',
+  'callback_time_answer',
+  'call_time_answer'
 ];
 
 export class ConversationStateArbitrator {
@@ -154,6 +156,33 @@ export class ConversationStateArbitrator {
         effectivePendingSlot: 'arrival_date',
         effectiveIntent: 'arrival_date_answer',
         staleSlotSuppressed: false
+      };
+    }
+
+    // P0.28.2: callback_time_answer check
+    const hasCallbackTimeKw = [
+      'saat', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
+      'yarın', 'yarin', 'bugün', 'bugun', 'sabah', 'öğlen', 'oglen', 'öğleden sonra', 'ogleden sonra', 'akşam', 'aksam', 'gece',
+      'hafta içi', 'haftaici', 'hafta sonu', 'haftasonu'
+    ].some(kw => lowerUser.includes(kw)) || /(?:\b\d{1,2}[:. ]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(lowerUser);
+
+    const hasMonthKw = [
+      'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
+      'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
+    ].some(kw => lowerUser.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(lowerUser);
+
+    const isCallSchedulingContext = 
+      rawPendingSlot === 'call_time' || 
+      rawPendingSlot === 'call_date' || 
+      rawPendingSlot === 'timezone_clarification' ||
+      isCallOffer(lastAssistantMsg);
+
+    if (hasCallbackTimeKw && !hasMonthKw && isCallSchedulingContext && lowerUser !== '..') {
+      return {
+        effectivePendingSlot: 'generic_none',
+        effectiveIntent: 'callback_time_answer',
+        staleSlotSuppressed: true,
+        suppressionReason: 'callback_time_preference_provided'
       };
     }
 

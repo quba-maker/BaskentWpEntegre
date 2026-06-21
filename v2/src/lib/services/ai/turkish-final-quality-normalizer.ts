@@ -195,6 +195,24 @@ const REWRITE_RULES: RewriteRule[] = [
     pattern: /\brandev[ıi]z[ıi]\b/gi,
     replacement: 'randevunuzu',
   },
+  // "sabah saatlerininiz" → "sabah saatlerinde"
+  {
+    id: 'sabah_saatlerininiz_fix',
+    pattern: /sabah\s+saatlerininiz\b/gi,
+    replacement: 'sabah saatlerinde',
+  },
+  // "uygun olduğunuzu" → "uygun olduğunuz"
+  {
+    id: 'uygun_oldugunuzu_fix',
+    pattern: /uygun\s+oldu[gğ]unuzu\b/gi,
+    replacement: 'uygun olduğunuz',
+  },
+  // "sabah_saatlerinde_(09:00_-_12:00)" → "sabah saatlerinde"
+  {
+    id: 'sabah_saatlerinde_range_fix',
+    pattern: /sabah_saatlerinde_\(?09:00_-_12:00\)?|sabah\s+saatlerinde\s+\(?09:00\s*-\s*12:00\)?/gi,
+    replacement: 'sabah saatlerinde',
+  },
 ];
 
 // ─── Normalizer ───────────────────────────────────────────────────────────────

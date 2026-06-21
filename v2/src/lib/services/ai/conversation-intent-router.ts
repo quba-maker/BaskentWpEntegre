@@ -32,7 +32,10 @@ export type ConversationIntent =
   | 'callback_confirmation'
   | 'schedule_confirmation'
   | 'arrival_date_answer'
+  | 'callback_time_answer'
+  | 'call_time_answer'
   | 'generic_other';
+
 
 
 export class ConversationIntentRouter {
@@ -207,6 +210,22 @@ export class ConversationIntentRouter {
     );
     if (callSchedulingKeywords.some(kw => clean.includes(kw)) || /\barayın\b/i.test(clean) || /\barayin\b/i.test(clean) || hasCallRequestCombined) {
       return 'call_scheduling_request';
+    }
+
+    // P0.28.2: callback_time_answer
+    const hasCallbackTimeKw = [
+      'saat', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
+      'yarın', 'yarin', 'bugün', 'bugun', 'sabah', 'öğlen', 'oglen', 'öğleden sonra', 'ogleden sonra', 'akşam', 'aksam', 'gece',
+      'hafta içi', 'haftaici', 'hafta sonu', 'haftasonu'
+    ].some(kw => clean.includes(kw)) || /(?:\b\d{1,2}[:. ]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(clean);
+
+    const hasMonthKw = [
+      'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
+      'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
+    ].some(kw => clean.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(clean);
+
+    if (hasCallbackTimeKw && !hasMonthKw) {
+      return 'callback_time_answer';
     }
 
     // 10. Time Availability
@@ -477,9 +496,25 @@ export class ConversationIntentRouter {
 
     // Time / callback
     const timeIndicators = ['saat', 'uygun', 'musait', 'pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'pazar', 'yarin', 'bugun'];
-    const numericTimePattern = /\d{1,2}[:. ]\d{2}|\d{1,2}\s*(?:de|da|te|ta|gibi|sular)/;
+    const numericTimePattern = / \d{1,2}[:. ]\d{2} | \d{1,2}\s*(?:de|da|te|ta|gibi|sular)/;
     if (timeIndicators.some(kw => clean.includes(kw)) && (numericTimePattern.test(clean) || clean.includes('uygun'))) {
       intents.push('time_availability');
+    }
+
+    // P0.28.2: callback_time_answer
+    const hasCallbackTimeKwAll = [
+      'saat', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
+      'yarın', 'yarin', 'bugün', 'bugun', 'sabah', 'öğlen', 'oglen', 'öğleden sonra', 'ogleden sonra', 'akşam', 'aksam', 'gece',
+      'hafta içi', 'haftaici', 'hafta sonu', 'haftasonu'
+    ].some(kw => clean.includes(kw)) || /(?:\b\d{1,2}[:. ]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(clean);
+
+    const hasMonthKwAll = [
+      'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
+      'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
+    ].some(kw => clean.includes(kw)) || /\d{1,2}[./]\d{1,2}/.test(clean);
+
+    if (hasCallbackTimeKwAll && !hasMonthKwAll) {
+      intents.push('callback_time_answer');
     }
 
     // Next step
