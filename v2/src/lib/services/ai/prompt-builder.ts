@@ -344,10 +344,15 @@ export class PromptBuilder {
         ctaOfferedRecently = last3Assistant.some((m: any) => {
           const text = (m.content || '').toLowerCase();
           return [
-            'randevu', 'görüşme', 'gorusme', 'arayalım', 'arayalim', 'arayabiliriz', 'arama',
+            'randevu', 'görüşme', 'gorusme', 'arayalım', 'arayalim', 'arayebiliriz', 'arama',
             'telefon', 'appointment', 'call', 'contact you', 'telefonla'
           ].some(kw => text.includes(kw));
         });
+
+        const callbackIntents = ['call_scheduling_request', 'callback_time_answer', 'callback_confirmation', 'schedule_confirmation'];
+        if (unifiedContext?.effectiveIntent && callbackIntents.includes(unifiedContext.effectiveIntent)) {
+          ctaOfferedRecently = false;
+        }
       }
 
       if (currentMessageTextLower) {
@@ -618,7 +623,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
    - "ekibimiz size dönecektir"
    
 2. Eğer net tarih/saat varsa mesajda mutlaka o tarih/saati de göster. Örnek format:
-    “Harika, teyidinizi aldım.
+    “Teyidinizi aldım.
    \${resolvedTaskType === 'phone_callback' ? 'Telefon görüşmesi' : 'Klinik randevusu/planlaması'} için belirttiğiniz zamanı ilgili hasta danışmanımıza iletiyorum.
    
    Planlanan görüşme:

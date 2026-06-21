@@ -4108,7 +4108,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     }
 
     // Check 2: Status is not human takeover
-    if (currentStatus === 'human') {
+    if (currentStatus === 'human' && !autopilotEnabled) {
       this.log.info(`[DEBOUNCE_WORKER] Conversation status is human, exit`, { traceId });
       return;
     }
@@ -4527,7 +4527,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
         await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
         await db.executeSafe({
-          text: `UPDATE conversations SET status = 'human' WHERE id = $1 AND tenant_id = $2`,
+          text: `UPDATE conversations SET status = 'human', autopilot_enabled = false WHERE id = $1 AND tenant_id = $2`,
           values: [conversationId, tenantId]
         });
         return;
@@ -4555,7 +4555,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
         // Takeover conversation to human
         await db.executeSafe({
-          text: `UPDATE conversations SET status = 'human' WHERE id = $1 AND tenant_id = $2`,
+          text: `UPDATE conversations SET status = 'human', autopilot_enabled = false WHERE id = $1 AND tenant_id = $2`,
           values: [conversationId, tenantId]
         });
         return;

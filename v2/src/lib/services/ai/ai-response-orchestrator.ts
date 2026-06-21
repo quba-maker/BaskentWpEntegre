@@ -2258,6 +2258,11 @@ export class AIResponseOrchestrator {
         });
       }
 
+      const callbackIntents = ['call_scheduling_request', 'callback_time_answer', 'callback_confirmation', 'schedule_confirmation'];
+      if (callbackIntents.includes(effectiveIntent)) {
+        ctaOfferedRecently = false;
+      }
+
       const qgOptions = {
         ctaOfferedRecently,
         angryPatientMode: isAngryPromptChallenge,
