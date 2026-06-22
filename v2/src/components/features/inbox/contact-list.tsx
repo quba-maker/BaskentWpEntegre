@@ -1843,7 +1843,7 @@ export function ContactRail() {
               const patientName = contextMenu.patientName || 'Bu kişi';
               // eslint-disable-next-line quba/no-native-dialog
               const confirmed = window.confirm(
-                `"${patientName}" adlı kişiye ait tüm sohbet mesajları silinecek ve CRM bağlamı sıfırlanacak.\n\nBu işlem geri alınamaz. Devam etmek istiyor musunuz?`
+                `"${patientName}" adlı kişiye ait sohbet mesajları temizlenecek.\n\nForm, CRM ve hasta takip bilgileri korunacak. Bu işlem geri alınamaz. Devam etmek istiyor musunuz?`
               );
               if (!confirmed) return;
               setContextMenu(null);
@@ -1866,7 +1866,7 @@ export function ContactRail() {
               }
             }}
             className="w-full px-3.5 py-2 text-xs font-semibold hover:bg-red-50 flex items-center gap-2 cursor-pointer transition-colors text-left text-red-600"
-            title="Sohbeti temizle ve CRM bağlamını sıfırla"
+            title="Sohbet mesajlarını temizle; form ve CRM bilgilerini koru"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>Sohbeti temizle</span>
@@ -1880,7 +1880,7 @@ export function ContactRail() {
 
               const isConfirmed = await confirm({
                 title: "Sohbeti Sil",
-                message: "Bu sohbet inbox listesinden kaldırılacak. Mesaj geçmişi ve kayıtlar güvenlik amacıyla sistemde arşivli kalabilir. Aynı kişi tekrar yazarsa yeni sohbet olarak açılır. Devam edilsin mi?",
+                message: "Bu sohbet inbox listesinden kaldırılacak. Form kayıtları korunur; mesaj geçmişi ve kayıtlar güvenlik amacıyla sistemde arşivli kalabilir. Aynı kişi tekrar yazarsa yeni sohbet olarak açılır. Devam edilsin mi?",
                 variant: "danger",
                 confirmLabel: "Sohbeti Sil",
                 cancelLabel: "Vazgeç"

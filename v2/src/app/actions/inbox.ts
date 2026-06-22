@@ -6790,7 +6790,8 @@ export async function sendApprovedInboxBotDraftAction(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // clearConversation — Sohbeti Temizle
-// Deletes all messages for a conversation and resets CRM context.
+// Deletes chat messages and volatile AI memory only.
+// Form/lead/opportunity/CRM context is intentionally preserved.
 // Tenant-safe: every query is scoped to ctx.tenantId.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function clearConversation(conversationId: string): Promise<{ success: boolean; error?: string }> {
@@ -6804,15 +6805,13 @@ export async function clearConversation(conversationId: string): Promise<{ succe
     async (ctx) => {
       // 1. Verify conversation belongs to this tenant
       const convRows = await ctx.db.executeSafe({
-        text: `SELECT id, active_opportunity_id, tags FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        text: `SELECT id FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
         values: [conversationId, ctx.tenantId]
       }) as any[];
 
       if (!convRows || convRows.length === 0) {
         return { success: false, error: 'Konusma bulunamadi veya erisim yetkisi yok.' };
       }
-
-      const conv = convRows[0];
 
       // 2. Delete all messages (tenant-scoped)
       await ctx.db.executeSafe({
@@ -6828,62 +6827,39 @@ export async function clearConversation(conversationId: string): Promise<{ succe
         });
       } catch (_) { /* Non-fatal */ }
 
-      // 4. Full opportunity reset: summary, ai_reason, stage, priority
-      if (conv.active_opportunity_id) {
-        await ctx.db.executeSafe({
-          text: `UPDATE opportunities
-                 SET summary    = NULL,
-                     ai_reason  = NULL,
-                     stage      = 'new_lead',
-                     priority   = 'warm',
-                     updated_at = NOW()
-                 WHERE id = $1 AND tenant_id = $2`,
-          values: [conv.active_opportunity_id, ctx.tenantId]
-        });
-      }
-
-      // 5. Full conversation reset: unlink opp, reset stage/department/tags in one query
+      // 4. Clear chat preview and volatile AI execution flags.
+      // IMPORTANT: preserve form/lead/opportunity/CRM fields such as
+      // active_opportunity_id, lead_stage, department, country, tags, patient_name.
       await ctx.db.executeSafe({
         text: `UPDATE conversations
-               SET active_opportunity_id = NULL,
-                   lead_stage            = 'new_lead',
-                   department            = NULL,
-                   tags                  = '[]'::jsonb,
-                   updated_at            = NOW()
+               SET message_count          = 0,
+                   last_message_at        = NULL,
+                   last_message_content   = NULL,
+                   last_message_direction = NULL,
+                   last_message_status    = NULL,
+                   last_message_model     = NULL,
+                   metadata               = (
+                     COALESCE(metadata, '{}'::jsonb)
+                       - 'last_processed_dedupe_key'
+                       - 'response_dedupe_key'
+                       - 'processing_locked_at'
+                       - 'ai_response_incomplete'
+                       - 'quality_gate_handled'
+                       - 'retry_attempted'
+                   ) || '{"consecutive_fallback_count":0}'::jsonb,
+                   updated_at             = NOW()
                WHERE id = $1 AND tenant_id = $2`,
         values: [conversationId, ctx.tenantId]
       });
 
-      // 6. Optionally re-seed single tag from lead's form_name
-      try {
-        if (conv.active_opportunity_id) {
-          const leadRows = await ctx.db.executeSafe({
-            text: `SELECT l.form_name
-                   FROM leads l
-                   JOIN opportunities o ON o.lead_id = l.id
-                   WHERE o.id = $1 AND l.tenant_id = $2
-                   LIMIT 1`,
-            values: [conv.active_opportunity_id, ctx.tenantId]
-          }) as any[];
-
-          if (leadRows && leadRows.length > 0 && leadRows[0].form_name) {
-            const freshTags = JSON.stringify([leadRows[0].form_name]);
-            await ctx.db.executeSafe({
-              text: `UPDATE conversations SET tags = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3`,
-              values: [freshTags, conversationId, ctx.tenantId]
-            });
-          }
-        }
-      } catch (_) { /* Non-fatal: tags seed is best-effort */ }
-
-      // 7. Audit log
+      // 5. Audit log
       await logAudit({
         tenantId: ctx.tenantId,
         userId: ctx.userId,
         action: 'clear_conversation',
         entityType: 'conversation',
         entityId: conversationId,
-        details: { clearedBy: ctx.userId, scope: 'full_crm_reset' }
+        details: { clearedBy: ctx.userId, scope: 'messages_and_ai_memory_only', preservesFormAndCrm: true }
       });
 
       return { success: true };
@@ -7137,5 +7113,4 @@ export async function deleteConversationAction(conversationId: string) {
     return { success: true };
   });
 }
-
 

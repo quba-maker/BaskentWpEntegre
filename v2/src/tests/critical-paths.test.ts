@@ -12050,6 +12050,41 @@ test("Başkent v75 Live T34: Lost-stage and LLM lost+cold are softened for activ
   assert(workerCode.includes("isActiveHealthcareEngagementText"), "Worker should detect active healthcare engagement before terminal handoff");
 });
 
+test("Başkent v75 Inbox T35: clearConversation preserves form and CRM context", () => {
+  const inboxCode = require("fs").readFileSync("src/app/actions/inbox.ts", "utf8");
+  const start = inboxCode.indexOf("export async function clearConversation");
+  const end = inboxCode.indexOf("export async function toggleCustomerInboundAutopilotAction");
+  const clearBlock = inboxCode.slice(start, end);
+
+  assert(start >= 0 && end > start, "clearConversation block should be found");
+  assert(clearBlock.includes("DELETE FROM messages"), "Clear should delete chat messages");
+  assert(clearBlock.includes("DELETE FROM conversation_memory"), "Clear should delete volatile AI memory");
+  assert(clearBlock.includes("messages_and_ai_memory_only"), "Audit should declare message/memory-only scope");
+  assert(clearBlock.includes("preservesFormAndCrm"), "Audit should mark form/CRM preservation");
+
+  assert(!clearBlock.includes("UPDATE opportunities"), "Clear must not reset opportunity records");
+  assert(!clearBlock.includes("active_opportunity_id = NULL"), "Clear must preserve active opportunity linkage");
+  assert(!clearBlock.includes("lead_stage            = 'new_lead'"), "Clear must preserve CRM stage");
+  assert(!clearBlock.includes("department            = NULL"), "Clear must preserve department");
+  assert(!clearBlock.includes("tags                  = '[]'::jsonb"), "Clear must preserve tags and form-derived labels");
+});
+
+test("Başkent v75 Inbox T36: deleteConversationAction is soft delete and keeps form records", () => {
+  const inboxCode = require("fs").readFileSync("src/app/actions/inbox.ts", "utf8");
+  const start = inboxCode.indexOf("export async function deleteConversationAction");
+  const end = inboxCode.indexOf("const maskPhoneNumber", start);
+  const deleteBlock = inboxCode.slice(start, end);
+
+  assert(start >= 0 && end > start, "deleteConversationAction block should be found");
+  assert(deleteBlock.includes("deleted_at"), "Delete should mark deleted_at in metadata");
+  assert(deleteBlock.includes("phone_number = $2"), "Delete should rename phone for soft deletion");
+  assert(deleteBlock.includes("user_deleted_chat"), "Delete should record user delete reason");
+
+  assert(!deleteBlock.includes("DELETE FROM leads"), "Delete must not delete lead/form records");
+  assert(!deleteBlock.includes("DELETE FROM opportunities"), "Delete must not delete opportunity records");
+  assert(!deleteBlock.includes("DELETE FROM messages"), "Delete must not hard-delete messages");
+});
+
 
 async function runAllTests() {
   try {
