@@ -433,7 +433,7 @@ export class AIOrchestrator {
       } else if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
         fallbackText = "Mesajınız alındı. Şu an yoğunluk nedeniyle kısa bir gecikme yaşanıyor. Lütfen biraz sonra tekrar yazınız. 🙏";
       } else if (e.message?.startsWith('CIRCUIT_OPEN')) {
-        fallbackText = "Mesajınız alındı. Kısa süreli bir teknik bakım yapılıyor, en kısa sürede tekrar hizmetinizdeyiz. 🙏";
+        fallbackText = "Mesajınız alındı. Kısa süreli bir teknik bakım yapılıyor. Lütfen biraz sonra tekrar yazınız. 🙏";
       }
 
       return {
@@ -560,4 +560,3 @@ export class AIOrchestrator {
     return { text: part.text || '', usageMetadata, finishReason: candidate.finishReason };
   }
 }
-

@@ -2666,7 +2666,7 @@ export async function recordBotDirectiveSent(taskId: string, type: 'teyit' | 'ha
       const directiveText = metadata.active_bot_directive || (
         type === 'teyit' ? 'Hastanın randevu/arama zamanını teyit et.' :
         type === 'hatirlat' ? 'Hastaya planlanan arama/randevu vaktini hatırlat.' :
-        'Hastadan arama veya klinik ön görüşmesi için uygun gün ve saat bilgisini öğren.'
+        'Hastadan arama veya klinik görüşmesi için uygun gün ve saat bilgisini öğren.'
       );
 
       let directiveType: 'ask_callback_time' | 'confirm_callback_time' | 'remind_callback' | 'ask_clinic_appointment_time' | 'confirm_clinic_appointment' | 'request_documents' = 'ask_callback_time';

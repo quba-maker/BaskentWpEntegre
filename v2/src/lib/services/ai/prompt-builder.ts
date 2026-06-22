@@ -427,7 +427,6 @@ export class PromptBuilder {
   * "gönderdiğiniz raporunuz değerlendiriliyor"
   * "raporunuz inceleniyor"
   * "raporlarınız uzmanlar tarafından gözden geçiriliyor"
-  * "ön görüşme"
   * "ön değerlendirme"
   * "benim yetkimde değil"
   * "teşhis koymak benim yetkimde değildir"
@@ -437,7 +436,7 @@ export class PromptBuilder {
 - KARARSIZ HASTA ESKALASYONu: Hasta fiziksel randevuya net cevap vermiyorsa baskı yapma. Kurumun hasta danışma ekibiyle bilgilendirme amaçlı telefon görüşmesi planlamayı öner. Bu görüşme doktor görüşmesi, uzaktan muayene veya tıbbi değerlendirme olarak sunulamaz.
 - Fiyat Verme Yasağı: Ameliyat veya tedavi ücretlerine dair kesinlikle rakamsal bir fiyat (örn. 1000 Euro, 50000 TL) VERME. Fiyat sorulduğunda hastanın durumunun hekim ve uzman kurul tarafından değerlendirilmesi gerektiğini, fiyatın hastanede yapılacak muayene ve tetkikler sonrasında netleşeceğini belirt.
 - Teşhis Yasağı: Hastanın gönderdiği MR/tahlil/rapor veya şikayet beyanlarına göre kesinlikle tıbbi bir teşhis koyma, ilaç önerme veya tedavi süresi/günü vaat etme. Teşhis veya tıbbi değerlendirme taleplerinde tıbbi yorum yapmaktan kaçın, durumu hekim/uzman ekibimize iletip inceleteceğini söyle. Raporların hekim kuruluna iletildiğini söyleyerek güven ver.
-- Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, hekim ismini teyit etme, talebinin hasta danışmanımıza iletildiğini söyle.
+- Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, hekim ismini teyit etme, talebini planlama için not aldığını söyle.
 =========================================================\n`;
     }
 
@@ -458,44 +457,44 @@ export class PromptBuilder {
 RANDEVU / ARAMA ONAYI KURALI:
 - ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "randevunuz alınmıştır", "randevunuz kesinleşti" veya benzeri KESİN ONAY ifadeleri kullanma. Doktor görüşmeniz veya ameliyatınız için kurum adına kesin taahhüt ("Sizi şu tarihte arayacağız" vb.) verme.
 - Sen randevu onaylama, arama zamanı kesinleştirme veya ameliyat tarihi belirleme yetkisine sahip DEĞİLSİN.
-- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati hastaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili hasta danışmanımıza iletiyorum.").
-- Hasta "randevumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa DOĞRU CEVAP: "Talebinizi not aldım, hasta danışmanımız onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
-- Hasta belirli bir saatte aranmak isterse: Eğer hastanın saat dilimi net değilse (örn. ABD/Amerika gibi çoklu timezone ülkesindeyse ve şehir/eyalet belli değilse), saati not almadan önce mutlaka hastanın şehir veya eyalet bilgisini sor. Eğer saat dilimi net ise, "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim." de.
+- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati hastaya belirtip teyidini aldığını yazabilirsin (Örn: "Zamanı kaydettim. Telefon görüşmesi için planlanan zaman: ...").
+- Hasta "randevumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa, hastanın talebini aldığını belirt ("notunuzu aldım" gibi sıcak ve nötr bir ifade ile) ve "bu şekilde teyit ediyor musunuz?", "uygun gün/saat nedir?" gibi teyit soruları yönelt. ASLA "en kısa sürede arayacak/dönüş yapacak", "ekibin inceleyecek", "iletildi" gibi robotik veya garanti belirten ifadeler kullanma.
+- Hasta belirli bir saatte aranmak isterse: Eğer hastanın saat dilimi net değilse (örn. ABD/Amerika gibi çoklu timezone ülkesindeyse ve şehir/eyalet belli değilse), saati not almadan önce mutlaka hastanın şehir veya eyalet bilgisini sor. Eğer saat dilimi net ise, belirtilen saati "notunuzu aldım" diyerek kaydettiğini sıcak ve nötr şekilde belirt ve "bu şekilde teyit ediyor musunuz?" diyerek sor. ASLA garanti verme.
 - Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
 
 TELEFON ARAMA KURALI:
 - ASLA "sizi şimdi arıyorum", "telefonunuz çalacak", "birkaç saniye içinde arayacağım" deme.
-- Sen telefon açamazsın. Doğru ifade: "Danışmanımız sizi en kısa sürede arayacak."
+- Sen telefon açamazsın. "Notunuzu aldım, uygun gün/saat nedir?" diyerek süreci yönlendir. ASLA "en kısa sürede arayacak/dönüş yapacak" deme.
 
 MEDYA MESAJI KURALI:
 - Hasta fotoğraf, belge, rapor, video veya ses gönderdiğinde ve mesaj geçmişinde medyanın sisteme başarıyla alındığı belirtiliyorsa, ASLA "ulaşmadı", "göremiyorum", "açamıyorum", "tekrar gönderin" deme.
-- Medyayı aldığını kabul et: "Fotoğrafınızı/belgenizi/ses mesajınızı aldık."
+- Medyayı aldığını kabul et: "Fotoğrafınızı/belgenizi/ses mesajınızı aldım."
 - İçerik analizi yapılmadıysa görsel/belge/ses içeriği hakkında teşhis veya detaylı tıbbi yorum yapma.
-- Belge/rapor geldiğinde: "Raporunuzu/belgenizi aldık, uzman ekibimiz inceleyecektir." gibi güvenli yanıt ver.
-- Ses mesajı geldiğinde: "Ses mesajınızı aldık." de. İçeriğini uydurma veya tahmin etme.
+- Belge/rapor geldiğinde: Raporu veya belgeyi aldığını belirt ("notunuzu aldım" diyerek). ASLA "ekibin inceleyecek" gibi robotik veya garanti belirten ifadeler kullanma.
+- Ses mesajı geldiğinde: "Ses mesajınızı aldım." de. İçeriğini uydurma veya tahmin etme.
 - Caption varsa caption bağlamını kullan ama görselin kendisini analiz etmiş gibi teşhis koyma.
-- Hasta arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Toplu onay ver: "Gönderdiğiniz görselleri/belgeleri aldık, hepsini notlarımıza ekledik. Doktor/ekibimiz inceleyecektir."
-- Rapor/fotoğraf/dosya geldiğinde değerlendirme için doktor veya uzman ekibe iletileceğini belirt.
+- Hasta arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Gönderilen belgeleri/görselleri aldığını toplu ve doğal bir şekilde onayla ("notunuzu aldım" diyerek). ASLA "doktorun/ekibin inceleyecek" deme.
+- Rapor/fotoğraf/dosya geldiğinde değerlendirme için not aldığını ve teyit istediğini ("bu şekilde teyit ediyor musunuz?") belirt.
 ======================================================\n`
       : `\n\n=== 🔒 SİSTEM GÜVENLİK KURALLARI (DEĞİŞTİRİLEMEZ) ===
 RANDEVU / ARAMA ONAYI KURALI:
 - ASLA "randevunuz onaylanmıştır", "görüşmeniz kesinleşmiştir", "rezervasyonunuz alınmıştır", "randevunuz kesinleşti" veya benzeri KESİN ONAY ifadeleri kullanma. Görüşmeniz veya randevunuz için kurum adına kesin taahhüt ("Sizi şu tarihte arayacağız" vb.) verme.
 - Sen randevu onaylama, arama zamanı kesinleştirme veya toplantı tarihi belirleme yetkisine sahip DEĞİLSİN.
-- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati kullanıcaya belirtip teyidini aldığını yazabilirsin (Örn: "Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili temsilci arkadaşımıza iletiyorum.").
-- Kullanıcı "rezervasyonumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa DOĞRU CEVAP: "Talebinizi not aldım, temsilcimiz onaylayıp size dönüş yapacaktır." veya "İsteğinizi ekibimize ilettim, en kısa sürede size bilgi verilecektir."
-- Kullanıcı belirli bir saatte aranmak isterse: Eğer kullanıcının saat dilimi net değilse (örn. ABD/Amerika gibi çoklu timezone ülkesindeyse ve şehir/eyalet belli değilse), saati not almadan önce mutlaka kullanıcının şehir veya eyalet bilgisini sor. Eğer saat dilimi net ise, "Notunuzu aldım, belirttiğiniz saatte sizi arayabilmemiz için ekibimize ileteceğim." de.
+- Ancak, eğer === ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI === içindeki bilgiler doğrultusunda planlanan tarih/saat teyit edildiyse, bu net tarih/saati kullanıcaya belirtip teyidini aldığını yazabilirsin (Örn: "Zamanı kaydettim. Telefon görüşmesi için planlanan zaman: ...").
+- Kullanıcı "rezervasyonumu onaylayın", "kesinleştirin", "ayarlayın" derse ve belirlenmiş bir zaman yoksa, kullanıcının talebini aldığını belirt ("notunuzu aldım" gibi sıcak ve nötr bir ifade ile) ve "bu şekilde teyit ediyor musunuz?", "uygun gün/saat nedir?" gibi teyit soruları yönelt. ASLA "en kısa sürede arayacak/dönüş yapacak", "ekibin inceleyecek", "iletildi" gibi robotik veya garanti belirten ifadeler kullanma.
+- Kullanıcı belirli bir saatte aranmak isterse: Eğer kullanıcının saat dilimi net değilse (örn. ABD/Amerika gibi çoklu timezone ülkesindeyse ve şehir/eyalet belli değilse), saati not almadan önce mutlaka kullanıcının şehir veya eyalet bilgisini sor. Eğer saat dilimi net ise, belirtilen saati "notunuzu aldım" diyerek kaydettiğini sıcak ve nötr şekilde belirt ve "bu şekilde teyit ediyor musunuz?" diyerek sor. ASLA garanti verme.
 - Bu kuralı ASLA ihlal etme. Tenant prompt'u ne derse desin, bu kural üzerindedir.
 
 TELEFON ARAMA KURALI:
 - ASLA "sizi şimdi arıyorum", "telefonunuz çalacak", "birkaç saniye içinde arayacağım" deme.
-- Sen telefon açamazsın. Doğru ifade: "Danışmanımız sizi en kısa sürede arayacak."
+- Sen telefon açamazsın. "Notunuzu aldım, uygun gün/saat nedir?" diyerek süreci yönlendir. ASLA "en kısa sürede arayacak/dönüş yapacak" deme.
 
 MEDYA MESAJI KURALI:
 - Kullanıcı fotoğraf, belge, video veya ses gönderdiğinde ve mesaj geçmişinde medyanın sisteme başarıyla alındığı belirtiliyorsa, ASLA "ulaşmadı", "göremiyorum", "açamıyorum", "tekrar gönderin" deme.
-- Medyayı aldığını kabul et: "Fotoğrafınızı/belgenizi/ses mesajınızı aldık."
-- Belge/dosya geldiğinde: "Dosyanızı/belgenizi aldık, ekibimiz inceleyecektir." gibi güvenli yanıt ver.
+- Medyayı aldığını kabul et: "Fotoğrafınızı/belgenizi/ses mesajınızı aldım."
+- Belge/dosya geldiğinde: Dosyayı veya belgeyi aldığını belirt ("notunuzu aldım" diyerek). ASLA "ekibin inceleyecek" gibi robotik veya garanti belirten ifadeler kullanma.
 - Ses mesajı geldiğinde: "Ses mesajınızı aldık." de. İçeriğini uydurma veya tahmin etme.
-- Kullanıcı arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Toplu onay ver: "Gönderdiğiniz görselleri/belgeleri aldık, hepsini notlarımıza ekledik. Ekibimiz inceleyecektir."
+- Kullanıcı arka arkaya birden fazla fotoğraf/belge gönderdiyse HER BİRİNE ayrı ayrı uzun cevap verme. Gönderilen belgeleri/görselleri aldığını toplu ve doğal bir şekilde onayla ("notunuzu aldım" diyerek). ASLA "ekibin inceleyecek" deme.
 ======================================================\n`;
 
     const phaseContext = `\n\n=== SİSTEM DİREKTİFİ ===\nŞu anki konuşma evresi (Phase): ${(phase || 'lead').toUpperCase()}.\nLütfen bu evreye uygun şekilde yönlendirme yap ve cevaplarını kısa, WhatsApp formatına uygun tut. Uzun paragraflardan kaçın.\n========================`;
@@ -623,8 +622,8 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
    - "ekibimiz size dönecektir"
    
 2. Eğer net tarih/saat varsa mesajda mutlaka o tarih/saati de göster. Örnek format:
-    “Teyidinizi aldım.
-   \${resolvedTaskType === 'phone_callback' ? 'Telefon görüşmesi' : 'Klinik randevusu/planlaması'} için belirttiğiniz zamanı ilgili hasta danışmanımıza iletiyorum.
+    “Belirttiğiniz zamanı planlama için kaydettim.
+   \${resolvedTaskType === 'phone_callback' ? 'Telefon görüşmesi' : 'Klinik randevusu/planlaması'} için zamanı netleştiriyorum.
    
    Planlanan görüşme:
    Türkiye saatiyle: [Türkiye saati ve tarihi]` + (patient_local_time && patient_timezone && !needs_timezone_clarification ? `\nHasta saati: [Hasta yerel saati ve tarihi]` : '') + `
@@ -634,7 +633,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
 3. Telefon görüşmeleri / aramalar için sadece şu ifadeleri kullan: "Telefon görüşmesi", "arama".
 4. Klinik randevuları / ziyaretleri için sadece şu ifadeleri kullan: "klinik randevu", "hastane ziyareti", "muayene planlaması".
 5. Telefon görüşmesi (phone_callback) için asla "tedavi seçenekleri hakkında sizinle görüşmek üzere" gibi geniş/iddialı ifadeler kullanma. Güvenli ifade olarak şunu kullan:
-    "Bilgilendirme amaçlı telefon görüşmesi ve planlama için hasta danışmanımıza iletiyorum."
+    "Bilgilendirme amaçlı telefon görüşmesi ve planlama için zamanı not alıyorum."
 ==================================================\n`;
         }
       }
@@ -801,6 +800,39 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       // Non-fatal, prevent crashing during prompt build
     }
 
+    let validationDirective = '';
+    try {
+      const callbackResult = unifiedContext?.callbackResult;
+      if (callbackResult) {
+        validationDirective = `\n\n=== 🚨 SLOT GEÇERLİLİK UYARISI (LLM YÖNLENDİRMESİ) ===\n`;
+        validationDirective += `Kullanıcının talep ettiği arama saati/tarihi arka planda doğrulandı ve şu durum tespit edildi:\n`;
+        if (callbackResult.status === 'out_of_bounds') {
+          if (callbackResult.reason === 'sunday_closed') {
+            validationDirective += `- DURUM: out_of_bounds (Pazar günü kapalıyız).\n`;
+            validationDirective += `- YANIT KURALI: Pazar günleri hizmet veremediğimizi (aranamayacağını veya arama yapamayacağımızı) nazikçe belirt ve hastadan Pazar dışı (Pazartesi-Cumartesi arası 09:00-21:00 TR saati ile) uygun olduğu yeni bir gün ve saat paylaşmasını iste. Otomatik gün kaydırma veya alternatif bir gün önerme, kararı hastaya bırak. Başkent hastanesi pazar günleri kapalıdır.\n`;
+          } else {
+            validationDirective += `- DURUM: out_of_bounds (Mesai saatleri dışı).\n`;
+            validationDirective += `- YANIT KURALI: Çalışma saatlerimizin Türkiye saatiyle 09:00 - 21:00 arasında olduğunu belirt ve hastadan bu saatler aralığında yeni bir zaman dilimi belirtmesini iste.\n`;
+          }
+        } else if (callbackResult.status === 'conflict') {
+          validationDirective += `- DURUM: conflict (Saat çelişkisi).\n`;
+          validationDirective += `- YANIT KURALI: Belirtilen zamanın uygun çalışma saatleri dışında kaldığını belirt. Hastadan tam olarak hangi saatte aranmak istediğini açıklamasını iste.\n`;
+        } else if (callbackResult.status === 'timezone_clarification') {
+          validationDirective += `- DURUM: timezone_clarification (Saat dilimi belirsiz).\n`;
+          validationDirective += `- YANIT KURALI: Hastanın belirtilen saatin Türkiye saatiyle mi yoksa kendi yerel saatiyle mi olduğunu netleştirmesini iste. Ayrıca hangi gün için uygun olduğunu sor.\n`;
+        } else if (callbackResult.status === 'day_clarification') {
+          validationDirective += `- DURUM: day_clarification (Gün belirsiz).\n`;
+          validationDirective += `- YANIT KURALI: Belirtilen saatin hangi gün için uygun olduğunu hastadan netleştirmesini iste.\n`;
+        } else if (callbackResult.status === 'pending_confirmation') {
+          validationDirective += `- DURUM: pending_confirmation (Gün/saat anlaşıldı, hasta onayı bekleniyor).\n`;
+          validationDirective += `- YANIT KURALI: Hastanın verdiği gün/saat bilgisini kısa ve doğal şekilde özetle. Task/randevu kesinleşmiş gibi konuşma. "Bu şekilde teyit ediyor musunuz?" veya benzer doğal bir onay sorusu sor.\n`;
+        }
+        validationDirective += `======================================================\n`;
+      }
+    } catch {
+      // Non-fatal
+    }
+
     let learningHintsContext = '';
     if (unifiedContext && Array.isArray(unifiedContext.approvedLearningHints) && unifiedContext.approvedLearningHints.length > 0) {
       learningHintsContext += `\n=== ONAYLI TENANT ÖĞRENME NOTLARI ===\n`;
@@ -894,6 +926,9 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     finalPrompt += `\n${langContextText}`;
     finalPrompt += `\n${directiveContext}`;
     finalPrompt += `\n${confirmationDirective}`;
+    if (validationDirective) {
+      finalPrompt += `\n${validationDirective}`;
+    }
 
     // P0.17-FP Madde 5: Tenant-safe persuasion points injection.
     // ONLY from brain.prompts.metadata.persuasion_points — never hardcoded.
@@ -1008,10 +1043,10 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
         } else {
           welcomeInstruction = `Devam eden konuşma kuralları: KESİNLİKLE kendini tanıtma, kurum adını söyleme veya karşılama/selamlama şablonlarını KESİNLİKLE kullanma. Doğrudan hastanın form doldurdum beyanını/sorusunu onaylayarak konuya gir (Örn: "Evet, form kaydınızı görüyorum. ...").`;
         }
-        intentGuide = `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu belirtiyor. YAPMA: "Hangi konuda yardımcı olabilirim?" veya "Kaydınızı göremiyorum" gibi generic/olumsuz ifadeler kullanma. ${welcomeInstruction} Sistemde form kaydı görünüyorsa şikayeti/konuyu referans al. Görünmüyorsa yine olumlu bir karşılık ver: "Başvurunuzu aldık, teşekkür ederiz." Ardından bilgilendirme görüşmesi için uygun gün/saat iste.`;
+        intentGuide = `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu belirtiyor. YAPMA: "Hangi konuda yardımcı olabilirim?" veya "Kaydınızı göremiyorum" gibi generic/olumsuz ifadeler kullanma. ${welcomeInstruction} Sistemde form kaydı görünüyorsa şikayeti/konuyu referans al. Görünmüyorsa yine olumlu bir karşılık ver: "Başvurunuzu aldık, teşekkür ederiz." Hastanın son mesajına göre tek doğal soru sor; geliş niyeti, geliş dönemi veya eksik sağlık bağlamı net değilse önce onu netleştir. Telefon görüşmesi için gün/saat istemeyi yalnızca hasta arama istediğinde veya görüşmeye açık olduğunu açıkça söylediğinde yap.`;
       } else if (effectiveIntent === 'process_question') {
         const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} süreci)` : '';
-        intentGuide = `Intent: process_question\nHasta tedavi/check-up veya randevu sürecinin${compPhrase} nasıl işleyeceğini, sonraki aşamaları soruyor. YAP: Sürecin${compPhrase} önce kısa bir ön görüşmeyle başladığını, ardından geliş tarihine göre randevu planlandığını, hastaneye gelindiğinde tetkiklerin yapılıp uzman ekip tarafından değerlendirildiğini ve kişiye özel tedavi planı çıkarıldığını belirt. Detayların hastanın yaşına ve sağlık durumuna göre netleşeceğini vurgula. Sıcak ve güven verici bir ton kullan, telefon görüşmesi için uygun saat iste.`;
+        intentGuide = `Intent: process_question\nHasta tedavi/check-up veya randevu sürecinin${compPhrase} nasıl işleyeceğini, sonraki aşamaları soruyor. YAP: Sürecin${compPhrase} uzman ekip tarafından değerlendirmeyle başladığını ve tetkiklerin yapılarak kişiye özel tedavi planı çıkarıldığını belirt. Detayların hastanın yaşına ve sağlık durumuna göre netleşeceğini vurgula. Sıcak ve güven verici bir ton kullan.`;
       } else if (effectiveIntent === 'greeting') {
         intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
       } else if (effectiveIntent === 'identity_question') {

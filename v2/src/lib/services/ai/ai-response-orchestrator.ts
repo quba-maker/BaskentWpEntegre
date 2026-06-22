@@ -149,54 +149,11 @@ export class AIResponseOrchestrator {
       return new Date(localUtc - offsetMin * 60000).toISOString();
     };
 
-    const countryTranslations: Record<string, Record<string, string>> = {
-      tr: { Germany: 'Almanya', Deutschland: 'Almanya', Netherlands: 'Hollanda', Holland: 'Hollanda', 'United Kingdom': 'İngiltere', France: 'Fransa', Belgium: 'Belçika', Switzerland: 'İsviçre', Denmark: 'Danimarka', Sweden: 'İsveç' },
-      en: { Almanya: 'Germany', Deutschland: 'Germany', Hollanda: 'Netherlands', Holland: 'Netherlands', 'United Kingdom': 'UK', Fransa: 'France', Belçika: 'Belgium', İsviçre: 'Switzerland', Danimarka: 'Denmark', İsveç: 'Sweden' },
-      de: { Germany: 'Deutschland', Almanya: 'Deutschland', Hollanda: 'Niederlande', Netherlands: 'Niederlande', 'United Kingdom': 'UK', Fransa: 'Frankreich', Belçika: 'Belgien', İsviçre: 'Schweiz', Danimarka: 'Dänemark', İsveç: 'Schweden' },
-      nl: { Germany: 'Duitsland', Almanya: 'Duitsland', Hollanda: 'Nederland', Netherlands: 'Nederland', 'United Kingdom': 'VK', Fransa: 'Frankrijk', Belçika: 'België', İsviçre: 'Zwitserland', Danimarka: 'Denemarken', İsveç: 'Zweden' },
-      ar: { Germany: 'ألمانيا', Almanya: 'ألمانيا', Hollanda: 'هولندا', Netherlands: 'هولندا', 'United Kingdom': 'بريطانيا', Fransa: 'فرنسا', Belçika: 'بلجيكا', İsviçre: 'سويسرا', Danimarka: 'الدانمارك', İsveç: 'السويد' }
-    };
-    
-    const getPatientTimeStr = (utcDate: Date, patientTz: string): string => {
-      return utcDate.toLocaleTimeString('tr-TR', {
-        timeZone: patientTz,
-        hour: '2-digit', minute: '2-digit', hour12: false
-      });
-    };
-
-    const formatLocalDate = (dateObj: Date, lang: string): string => {
-      const locales: Record<string, string> = {
-        tr: 'tr-TR',
-        en: 'en-US',
-        de: 'de-DE',
-        nl: 'nl-NL',
-        ar: 'ar-EG'
-      };
-      const locale = locales[lang] || 'en-US';
-      try {
-        return new Intl.DateTimeFormat(locale, {
-          day: 'numeric',
-          month: 'long',
-          weekday: 'long'
-        }).format(dateObj);
-      } catch {
-        const dd = dateObj.getUTCDate();
-        const mm = dateObj.getUTCMonth();
-        const dayIndex = dateObj.getUTCDay();
-        const dayName = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][dayIndex];
-        const monthNames = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
-        return `${dd} ${monthNames[mm]} ${dayName}`;
-      }
-    };
-
     const processCallbackSuggestion = async (input: {
       parsedSugg: any;
       convMeta: any;
       unifiedContext: any;
       country: string | null;
-      replyLanguage: string;
-      tenantDefaultLang: string;
-      timezone: string;
       sandbox: boolean;
       tenantId: string;
       channelId: string;
@@ -206,15 +163,22 @@ export class AIResponseOrchestrator {
       isTurkeyBasisInherited: boolean;
       isPatientBasisInherited?: boolean;
       inboundText?: string;
-    }): Promise<{ responseText: string; isSuccess: boolean }> => {
+      allowTaskCreation?: boolean;
+    }): Promise<{
+      isSuccess: boolean;
+      status?: string;
+      reason?: string;
+      requestedTime?: string;
+      requestedTimeEnd?: string;
+      requestedDate?: string;
+      timezoneBasis?: string;
+      patientCountry?: string | null;
+    }> => {
       const {
         parsedSugg,
         convMeta,
         unifiedContext,
         country,
-        replyLanguage,
-        tenantDefaultLang,
-        timezone,
         sandbox,
         tenantId,
         channelId,
@@ -223,14 +187,22 @@ export class AIResponseOrchestrator {
         db,
         isTurkeyBasisInherited,
         isPatientBasisInherited = false,
-        inboundText
+        inboundText,
+        allowTaskCreation = false
       } = input;
 
       const { resolvePatientTimezone } = require('../../utils/timezone');
       const tzRes = resolvePatientTimezone(country);
-
-      const supportedLangs = ['tr', 'en', 'de', 'ar', 'nl'];
-      const lang = supportedLangs.includes(replyLanguage) ? replyLanguage : (supportedLangs.includes(tenantDefaultLang) ? tenantDefaultLang : 'en');
+      const buildCallbackState = (status: string, reason?: string, timezoneBasis?: string) => ({
+        isSuccess: false,
+        status,
+        reason,
+        requestedTime: parsedSugg?.suggested_time || undefined,
+        requestedTimeEnd: parsedSugg?.suggested_time_end || undefined,
+        requestedDate: parsedSugg?.suggested_date || undefined,
+        timezoneBasis,
+        patientCountry: country || null
+      });
 
       if (parsedSugg && parsedSugg.suggested_time && !parsedSugg.suggested_date) {
         const lastOffer = convMeta?.last_callback_offer;
@@ -258,53 +230,10 @@ export class AIResponseOrchestrator {
         }
         
         const isPatientTzDifferent = tzRes.timezone && tzRes.timezone !== 'Europe/Istanbul';
-        const rangeStr = parsedSugg.suggested_time_end
-          ? `${parsedSugg.suggested_time}–${parsedSugg.suggested_time_end}`
-          : parsedSugg.suggested_time;
-
         if (timezoneBasisToUse === 'unknown' && isPatientTzDifferent) {
-          const patientCountryName = country ? (countryTranslations[lang]?.[country] || (lang === 'tr' ? country : null) || countryTranslations.en[country] || country) : '';
-          
-          let responseText = '';
-          if (lang === 'tr') {
-            responseText = `${rangeStr} aralığını not alabilirim. Bu saat Türkiye saatiyle mi, ${patientCountryName} saatinizle mi? Ayrıca hangi gün için uygun olur? 🙏`;
-          } else if (lang === 'de') {
-            responseText = `Ich kann den Zeitraum ${rangeStr} notieren. Ist dies in Türkei-Zeit oder in Ihrer ${patientCountryName}-Zeit? Und an welchem Tag würde es Ihnen passen? 🙏`;
-          } else if (lang === 'nl') {
-            responseText = `Ik kan het tijdsbereik ${rangeStr} notieren. Is dit in Turkse tijd of in uw ${patientCountryName}-tijd? En op welke dag zou het schikken? 🙏`;
-          } else if (lang === 'ar') {
-            responseText = `يمكنني تسجيل الفترة الزمنية ${rangeStr}. هل هذا بتوقيت تركيا أم بتوقيتك المحلي في ${patientCountryName}؟ وأي يوم سيكون مناسباً لك؟ 🙏`;
-          } else {
-            responseText = `I can note the time range ${rangeStr}. Is this in Turkey time or your ${patientCountryName} time? And which day would be suitable? 🙏`;
-          }
-          return { responseText, isSuccess: false };
+          return buildCallbackState('timezone_clarification', 'missing_day_and_timezone', timezoneBasisToUse);
         }
-
-        const isTrTz = timezoneBasisToUse === 'turkey_time' || tzRes.timezone === 'Europe/Istanbul';
-
-        const tzLabels: Record<string, Record<string, string>> = {
-          tr: { tr: 'Türkiye saatiyle', local: 'yerel saatinizle' },
-          en: { tr: 'Turkey time', local: 'your local time' },
-          de: { tr: 'Türkei-Zeit', local: 'Ihre Ortszeit' },
-          nl: { tr: 'Turkse tijd', local: 'uw lokale tijd' },
-          ar: { tr: 'بتوقيت تركيا', local: 'بتوقيتك المحلي' }
-        };
-        const langLabels = tzLabels[lang] || tzLabels.en;
-        const tzLabel = isTrTz ? langLabels.tr : langLabels.local;
-
-        let responseText = '';
-        if (lang === 'tr') {
-          responseText = `${tzLabel} ${rangeStr} aralığını not alabilirim. Hangi gün için uygun olur?`;
-        } else if (lang === 'de') {
-          responseText = `Ich kann den Zeitraum ${rangeStr} (${tzLabel}) notieren. Welcher Tag wäre für Sie geeignet?`;
-        } else if (lang === 'nl') {
-          responseText = `Ik kan het tijdsbereik ${rangeStr} (${tzLabel}) notieren. Welke dag zou schikken?`;
-        } else if (lang === 'ar') {
-          responseText = `يمكنني تسجيل الفترة الزمنية ${rangeStr} (${tzLabel}). أي يوم سيكون مناسباً لك؟`;
-        } else {
-          responseText = `I can note the time range ${rangeStr} (${tzLabel}). Which day would be suitable?`;
-        }
-        return { responseText, isSuccess: false };
+        return buildCallbackState('day_clarification', 'missing_day', timezoneBasisToUse);
       }
 
       if (parsedSugg && parsedSugg.suggested_date && parsedSugg.suggested_time) {
@@ -318,27 +247,7 @@ export class AIResponseOrchestrator {
         const isPatientTzDifferent = tzRes.timezone && tzRes.timezone !== 'Europe/Istanbul';
 
         if (timezoneBasisToUse === 'unknown' && isPatientTzDifferent) {
-          const formattedDate = formatLocalDate(new Date(parsedSugg.suggested_date), lang);
-          const isRange = !!parsedSugg.suggested_time_end;
-          const rangeStr = isRange
-            ? `${parsedSugg.suggested_time}–${parsedSugg.suggested_time_end}`
-            : parsedSugg.suggested_time;
-
-          const patientCountryName = country ? (countryTranslations[lang]?.[country] || (lang === 'tr' ? country : null) || countryTranslations.en[country] || country) : '';
-
-          let responseText = '';
-          if (lang === 'tr') {
-            responseText = `${formattedDate} ${rangeStr} ${isRange ? 'aralığını' : 'saatini'} not alabilirim. Bu saat Türkiye saatiyle mi, ${patientCountryName} saatinizle mi? 🙏`;
-          } else if (lang === 'de') {
-            responseText = `Ich kann ${isRange ? 'den Zeitraum' : 'die Uhrzeit'} ${rangeStr} für ${formattedDate} notieren. Ist dies in Türkei-Zeit oder in Ihrer ${patientCountryName}-Zeit? 🙏`;
-          } else if (lang === 'nl') {
-            responseText = `Ik kan ${isRange ? 'het tijdsbereik' : 'de tijd'} ${rangeStr} voor ${formattedDate} noteren. Is dit in Turkse tijd of in uw ${patientCountryName}-tijd? 🙏`;
-          } else if (lang === 'ar') {
-            responseText = `يمكنني تسجيل ${isRange ? 'الفترة الزمنية' : 'الساعة'} ${rangeStr} في يوم ${formattedDate}. هل هذا بتوقيت تركيا أم بتوقيتك المحلي في ${patientCountryName}؟ 🙏`;
-          } else {
-            responseText = `I can note the ${isRange ? 'time range' : 'time'} ${rangeStr} for ${formattedDate}. Is this in Turkey time or your ${patientCountryName} time? 🙏`;
-          }
-          return { responseText, isSuccess: false };
+          return buildCallbackState('timezone_clarification', 'missing_timezone', timezoneBasisToUse);
         }
 
         const timeZone = (timezoneBasisToUse === 'turkey_time' || tzRes.timezone === 'Europe/Istanbul')
@@ -361,11 +270,7 @@ export class AIResponseOrchestrator {
           return day !== 0;
         };
 
-        let loopCount = 0;
-        while (!isDayOpen(trDate) && loopCount < 7) {
-          trDate.setUTCDate(trDate.getUTCDate() + 1);
-          loopCount++;
-        }
+        const dayOpen = isDayOpen(trDate);
 
         let startMin = 9 * 60;
         let endMin = 21 * 60;
@@ -381,17 +286,14 @@ export class AIResponseOrchestrator {
         const trHour = trDate.getUTCHours();
         const trMinute = trDate.getUTCMinutes();
         const trTotalMinutes = trHour * 60 + trMinute;
+        const insideHours = trTotalMinutes >= startMin && trTotalMinutes <= endMin;
 
-        if (trTotalMinutes < startMin) {
-          trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
-        } else if (trTotalMinutes > endMin) {
-          trDate.setUTCDate(trDate.getUTCDate() + 1);
-          let loopCount2 = 0;
-          while (!isDayOpen(trDate) && loopCount2 < 7) {
-            trDate.setUTCDate(trDate.getUTCDate() + 1);
-            loopCount2++;
-          }
-          trDate.setUTCHours(Math.floor(startMin / 60), startMin % 60, 0, 0);
+        if (!dayOpen || !insideHours) {
+          return {
+            isSuccess: false,
+            status: 'out_of_bounds',
+            reason: !dayOpen ? 'sunday_closed' : 'outside_hours'
+          };
         }
 
         const proposedUtc = new Date(trDate.getTime() - 3 * 60 * 60 * 1000).toISOString();
@@ -426,126 +328,13 @@ export class AIResponseOrchestrator {
             
             if (!isMatchingTime && !isInsideRange) {
               console.warn(`[processCallbackSuggestion] Time conflict detected: user specified ${userParsed.suggested_time} but proposed is ${trH}:${trM}. Aborting task creation.`);
-              let responseText = '';
-              if (lang === 'tr') {
-                responseText = `Belirttiğiniz ${inboundText.includes('-') || inboundText.includes('arası') || inboundText.includes('ve') ? 'saat aralığı' : 'saat'} ile planlanan arama saati (${String(trH).padStart(2, '0')}:${String(trM).padStart(2, '0')}) çelişmektedir. Hasta danışmanımızın sizi tam olarak hangi saatte aramasını istersiniz? 🙏`;
-              } else {
-                responseText = `The time you specified conflicts with the scheduled time (${String(trH).padStart(2, '0')}:${String(trM).padStart(2, '0')}). Exactly what time would you like our patient advisor to call you? 🙏`;
-              }
-              return { responseText, isSuccess: false };
+              return { isSuccess: false, status: 'conflict', reason: 'time_conflict' };
             }
           }
         }
 
-        const formattedDate = formatLocalDate(trDate, lang);
-
-        const { resolvePatientTimeDisplay } = require('../../utils/timezone');
-        const timeDisplay = resolvePatientTimeDisplay({
-          country,
-          timezone: convMeta?.patient_timezone || null,
-          referenceDate: proposedUtc
-        });
-
-        const isDifferentTimezone = timeDisplay.patientTimezone && timeDisplay.patientTimezone !== 'Europe/Istanbul';
-        const patientCountryName = country ? (countryTranslations[lang]?.[country] || (lang === 'tr' ? country : null) || countryTranslations.en[country] || country) : '';
-
-        let responseText = '';
-        const startT = parsedSugg.suggested_time;
-        const endT = parsedSugg.suggested_time_end;
-
-        if (endT) {
-          if (isDifferentTimezone) {
-            const patientTz = timeDisplay.patientTimezone;
-            const patientDStart = new Date(proposedUtc);
-            const patientDEnd = new Date(parseToUtcWithTz(parsedSugg.suggested_date, endT, timeZone));
-
-            const shiftMs = new Date(proposedUtc).getTime() - new Date(correctedUtc).getTime();
-            const shiftedPatientDStart = new Date(patientDStart.getTime() + shiftMs);
-            const shiftedPatientDEnd = new Date(patientDEnd.getTime() + shiftMs);
-
-            const patientStartStr = getPatientTimeStr(shiftedPatientDStart, patientTz);
-            const patientEndStr = getPatientTimeStr(shiftedPatientDEnd, patientTz);
-
-            if (lang === 'tr') {
-              responseText = `Teyidinizi aldım. Görüşme talebinizi ${formattedDate} Türkiye saatiyle ${startT}–${endT} aralığı için not alıyorum. Bu saat ${patientCountryName}'da ${patientStartStr}–${patientEndStr} aralığına denk gelir. Hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-            } else if (lang === 'de') {
-              responseText = `Ich habe Ihre Gesprächsanfrage für ${formattedDate} zwischen ${startT}–${endT} (Türkei-Zeit) notiert. Dies entspricht ${patientStartStr}–${patientEndStr} in ${patientCountryName}. Ich werde dies an unseren Patientenberater weiterleiten 🙏`;
-            } else if (lang === 'nl') {
-              responseText = `Ik heb uw oproepverzoek voor ${formattedDate} tussen ${startT}–${endT} (Turkse tijd) genoteerd. Dit komt overeen met ${patientStartStr}–${patientEndStr} in ${patientCountryName}. Ik geef dit door aan onze patiëntadviseur 🙏`;
-            } else if (lang === 'ar') {
-              responseText = `لقد سجلت طلب الاتصال بك يوم ${formattedDate} بين الساعة ${startT}–${endT} بتوقيت تركيا. هذا التوقيت يعادل ${patientStartStr}–${patientEndStr} في ${patientCountryName}. سأقوم بنقل الطلب لمستشار المرضى لدينا 🙏`;
-            } else {
-              responseText = `I have noted your call request for ${formattedDate} between ${startT}–${endT} Turkey time. This corresponds to ${patientStartStr}–${patientEndStr} in ${patientCountryName}. I will share this with our patient advisor 🙏`;
-            }
-          } else {
-            if (lang === 'tr') {
-              responseText = `Teyidinizi aldım. Görüşme talebinizi ${formattedDate} Türkiye saatiyle ${startT}–${endT} aralığı için hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-            } else if (lang === 'de') {
-              responseText = `Ich habe Ihre Gesprächsanfrage für ${formattedDate} zwischen ${startT}–${endT} (Türkei-Zeit) für unseren Patientenberater notiert 🙏`;
-            } else if (lang === 'nl') {
-              responseText = `Ik heb uw oproepverzoek voor ${formattedDate} tussen ${startT}–${endT} (Turkse tijd) genoteerd voor onze patiëntadviseur 🙏`;
-            } else if (lang === 'ar') {
-              responseText = `لقد سجلت طلب الاتصال بك يوم ${formattedDate} بين الساعة ${startT}–${endT} بتوقيت تركيا لمستشار المرضى لدينا 🙏`;
-            } else {
-              responseText = `I have noted your call request for ${formattedDate} between ${startT}–${endT} (Turkey time) for our patient advisor 🙏`;
-            }
-          }
-        } else {
-          const trHour2 = trDate.getUTCHours();
-          const trMin2 = trDate.getUTCMinutes();
-          const formattedHHMM = `${String(trHour2).padStart(2, '0')}:${String(trMin2).padStart(2, '0')}`;
-          
-          const hourInt = trHour2;
-          const suffixes: Record<number, string> = {
-            0: 'de', 1: 'de', 2: 'de', 3: 'te', 4: 'te', 5: 'te', 6: 'da', 7: 'de', 8: 'de', 9: 'da',
-            10: 'da', 11: 'de', 12: 'de', 13: 'te', 14: 'te', 15: 'te', 16: 'da', 17: 'de', 18: 'de',
-            19: 'da', 20: 'de', 21: 'de', 22: 'de', 23: 'te'
-          };
-          const suffix = suffixes[hourInt] || 'da';
-          const formattedTime = `${formattedHHMM}’${suffix}`;
-
-          if (isDifferentTimezone) {
-            const patientTz = timeDisplay.patientTimezone;
-            const patientD = new Date(proposedUtc);
-            
-            const patientTimeStr = patientD.toLocaleTimeString('tr-TR', {
-              timeZone: patientTz,
-              hour: '2-digit', minute: '2-digit', hour12: false
-            });
-            const patientHourInt = parseInt(patientTimeStr.split(':')[0], 10);
-            const patientSuffix = suffixes[patientHourInt] || 'da';
-            const formattedPatientTime = `${patientTimeStr}’${patientSuffix}`;
-
-            const patientDatePartsFormatter = new Intl.DateTimeFormat(lang === 'tr' ? 'tr-TR' : 'en-US', {
-              timeZone: patientTz,
-              day: 'numeric', month: 'long', weekday: 'long'
-            });
-            const patientDateStr = patientDatePartsFormatter.format(patientD);
-            
-            if (lang === 'tr') {
-              responseText = `Teyidinizi aldım. Görüşme talebinizi yerel saatinizle ${patientDateStr} ${formattedPatientTime} (Türkiye saatiyle ${formattedDate} ${formattedTime}) olarak hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-            } else if (lang === 'de') {
-              responseText = `Ich habe Ihre Gesprächsanfrage für ${formattedDate} um ${formattedHHMM} (Türkei-Zeit) notiert. Dies entspricht ${patientTimeStr} in Ihrer Ortszeit. Ich werde dies an unseren Patientenberater weiterleiten 🙏`;
-            } else if (lang === 'nl') {
-              responseText = `Ik heb uw oproepverzoek voor ${formattedDate} om ${formattedHHMM} (Turkse tijd) genoteerd. Dit komt overeen met ${patientTimeStr} in uw lokale tijd. Ik geef dit door aan onze patiëntadviseur 🙏`;
-            } else if (lang === 'ar') {
-              responseText = `لقد سجلت طلب الاتصال بك يوم ${formattedDate} في تمام الساعة ${formattedHHMM} بتوقيت تركيا. هذا التوقيت يعادل ${patientTimeStr} بتوقيتك المحلي. سأقوم بنقل الطلب لمستشار المرضى لدينا 🙏`;
-            } else {
-              responseText = `I have noted your call request for ${formattedDate} at ${formattedHHMM} Turkey time. This corresponds to ${patientTimeStr} in your local time. I will share this with our patient advisor 🙏`;
-            }
-          } else {
-            if (lang === 'tr') {
-              responseText = `Teyidinizi aldım. Görüşme talebinizi ${formattedDate} Türkiye saatiyle ${formattedTime} olarak hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-            } else if (lang === 'de') {
-              responseText = `Ich habe Ihre Gesprächsanfrage für ${formattedDate} um ${formattedHHMM} (Türkei-Zeit) für unseren Patientenberater notiert 🙏`;
-            } else if (lang === 'nl') {
-              responseText = `Ik heb uw oproepverzoek voor ${formattedDate} om ${formattedHHMM} (Turkse tijd) genoteerd voor onze patiëntadviseur 🙏`;
-            } else if (lang === 'ar') {
-              responseText = `لقد سجلت طلب الاتصال بك يوم ${formattedDate} في تمام الساعة ${formattedHHMM} بتوقيت تركيا لمستشار المرضى لدينا 🙏`;
-            } else {
-              responseText = `I have noted your call request for ${formattedDate} at ${formattedHHMM} (Turkey time) for our patient advisor 🙏`;
-            }
-          }
+        if (!allowTaskCreation) {
+          return buildCallbackState('pending_confirmation', 'awaiting_patient_confirmation', timezoneBasisToUse);
         }
 
         if (!sandbox) {
@@ -594,10 +383,10 @@ export class AIResponseOrchestrator {
           }
         }
 
-        return { responseText, isSuccess: true };
+        return { isSuccess: true, status: 'success' };
       }
 
-      return { responseText: '', isSuccess: false };
+      return buildCallbackState('failed', 'missing_fields');
     };
 
     let dryRun = true;
@@ -1255,7 +1044,7 @@ export class AIResponseOrchestrator {
 
       if (currentVisitIntent !== convMeta.turkey_visit_intent) {
         convMeta.turkey_visit_intent = currentVisitIntent;
-        if (!sandbox && conversationId) {
+        if (conversationId) {
           try {
             const conv = await db.executeSafe({
               text: `SELECT metadata FROM conversations WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
@@ -1542,6 +1331,228 @@ export class AIResponseOrchestrator {
         }
       }
 
+      // 5c. Resolve Intent Flags and process Callback/Arrival Date Answers early (v75 Paradigm)
+      const isCallbackConfirmation = effectiveIntent === 'callback_confirmation' || effectiveIntent === 'schedule_confirmation';
+      const isArrivalDateAnswer = effectiveIntent === 'arrival_date_answer' && !inboundText.includes('?');
+      const isCallbackTimeAnswer = effectiveIntent === 'callback_time_answer';
+
+      let hasExplicitTimeInUserMsg = false;
+      if (isCallbackConfirmation && inboundText) {
+        const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+        const userParsed = parseDeterministicSuggestion(inboundText, new Date(), null, null);
+        if (userParsed.suggested_time || userParsed.suggested_date) {
+          hasExplicitTimeInUserMsg = true;
+        }
+      }
+
+      const effectiveIsCallbackConfirmation = isCallbackConfirmation && !hasExplicitTimeInUserMsg;
+      const effectiveIsCallbackTimeAnswer = isCallbackTimeAnswer || (isCallbackConfirmation && hasExplicitTimeInUserMsg);
+
+      const isPositiveIntent = currentVisitIntent === 'turkey_visit_intent_positive';
+      const lastBotAskedTime = history.length > 0 &&
+        history[history.length - 1].role === 'assistant' &&
+        /saat|zaman|gün|gun|tarih|ne zaman|uygun/i.test(history[history.length - 1].content || '');
+      const isAppointmentContext = history.some(m =>
+        /randevu|arama|görüşme|gorusme|telefon/i.test(m.content || '')
+      );
+      const callbackAlreadyConfirmed = !!(
+        convMeta?.last_callback_offer?.source === 'callback_confirmation_bypass' ||
+        convMeta?.last_callback_offer?.confirmed_at
+      );
+
+      const lastAssistantMsg = (assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '') || '';
+      const hasStoredCallbackOffer = !!(
+        convMeta?.last_callback_offer?.proposed_due_at &&
+        convMeta?.last_callback_offer?.source === 'bot_callback_offer'
+      );
+      const botSummarizedSlot = hasStoredCallbackOffer || (
+        /(?:\d{1,2}[:.]\d{2}|\d{1,2}\s*[-–]\s*\d{1,2}|saat|aralık|aralig|tarih|gün|gun)/i.test(lastAssistantMsg) &&
+        /(?:teyit|onay|uygun|doğru|dogru|not|planla|görüşme|gorusme|telefon|arama)/i.test(lastAssistantMsg)
+      );
+      const patientExplicitlyConfirmed = /\b(?:tamam|uygundur|uygun|olur|evet|onaylıyorum|onayliyorum|teyit ediyorum|doğrudur|dogrudur|doğru|dogru|ok|okay|yes|confirm|confirmed|approve|approved|ja|نعم|موافق)\b/i.test(inboundText || '');
+      const allowCallbackTaskCreation = botSummarizedSlot && patientExplicitlyConfirmed && !callbackAlreadyConfirmed;
+      const shouldProcessCallbackTimeAnswer = !callbackAlreadyConfirmed && (
+        lastBotAskedTime ||
+        isAppointmentContext ||
+        hasExplicitCall ||
+        isPositiveIntent
+      );
+
+      let callbackResult: any = null;
+      let shouldBypassCallbackTimeAnswer = false;
+      let shouldBypassCallbackConfirmation = false;
+
+      if (effectiveIsCallbackTimeAnswer && shouldProcessCallbackTimeAnswer) {
+        const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+        const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, lastAssistantMsg);
+
+        if (parsedSugg) {
+          const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
+          const userMessages = history.filter(m => m.role === 'user');
+          const recentUserTexts = userMessages.slice(-3).map(m => (m.content || '').toLowerCase()).join(' ');
+          const hasRecentTurkeyTimeExplicit = /\b(t%C3%BCrkiye saati|türkiye saati|tr saat|ts\b)/i.test(recentUserTexts) || /\b(türkiye saatiyle)\b/i.test(inboundText.toLowerCase());
+          const hasRecentPatientTimeExplicit = /\b(yerel saat|kendi saat|benim saat|hollanda saat|almanya saat|local time)\b/i.test(recentUserTexts) || /\b(yerel saatle|kendi saatimle|local saatle)\b/i.test(inboundText.toLowerCase());
+
+          callbackResult = await processCallbackSuggestion({
+            parsedSugg,
+            convMeta,
+            unifiedContext,
+            country,
+            sandbox,
+            tenantId,
+            channelId: channelId || 'whatsapp',
+            phoneNumber,
+            history,
+            db,
+            isTurkeyBasisInherited: hasRecentTurkeyTimeExplicit,
+            isPatientBasisInherited: hasRecentPatientTimeExplicit,
+            inboundText,
+            allowTaskCreation: allowCallbackTaskCreation
+          });
+          
+          unifiedContext.callbackResult = callbackResult;
+          shouldBypassCallbackTimeAnswer = callbackResult.isSuccess;
+        }
+      } else if (effectiveIsCallbackConfirmation) {
+        const lastOffer = convMeta?.last_callback_offer;
+        let parsedSugg: any = null;
+        
+        if (lastOffer && lastOffer.proposed_due_at) {
+          const dt = new Date(lastOffer.proposed_due_at);
+          if (!isNaN(dt.getTime())) {
+            const formatter = new Intl.DateTimeFormat('en-US', {
+              timeZone: 'Europe/Istanbul',
+              year: 'numeric', month: '2-digit', day: '2-digit',
+              hour: '2-digit', minute: '2-digit',
+              hour12: false
+            });
+            const parts = formatter.formatToParts(dt);
+            const getVal = (type: string) => parts.find(p => p.type === type)?.value || '';
+            const yyyy = getVal('year');
+            const mm = getVal('month');
+            const dd = getVal('day');
+            const hh = getVal('hour');
+            const min = getVal('minute');
+            
+            parsedSugg = {
+              suggested_date: `${yyyy}-${mm}-${dd}`,
+              suggested_time: `${hh}:${min}`,
+              proposed_date: lastOffer.proposed_due_at,
+              suggested_timezone_basis: lastOffer.timezone === 'patient_local_time'
+                ? 'patient_local_time'
+                : 'turkey_time'
+            };
+          }
+        }
+        
+        if (!parsedSugg) {
+          const isGenuineOffer = 
+            lastOffer?.source === 'bot_callback_offer' || 
+            lastOffer?.source === 'callback_confirmation_bypass' ||
+            effectiveIntent === 'call_scheduling_request' || 
+            effectiveIntent === 'callback_confirmation';
+            
+          const isArrivalBypassResponse = 
+            lastAssistantMsg.includes('geliş tarihi') || 
+            lastAssistantMsg.includes('geliş tarihiniz') ||
+            lastAssistantMsg.includes('not aldım');
+
+          if (isGenuineOffer && !isArrivalBypassResponse) {
+            const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+            parsedSugg = parseDeterministicSuggestion(lastAssistantMsg, new Date(), null, null);
+          }
+        }
+
+        if (parsedSugg) {
+          const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
+          const userMessages = history.filter(m => m.role === 'user');
+          const recentUserTexts = userMessages.slice(-3).map(m => (m.content || '').toLowerCase()).join(' ');
+          const hasRecentTurkeyTimeExplicit = /\b(t%C3%BCrkiye saati|türkiye saati|tr saat|ts\b)/i.test(recentUserTexts) || /\b(türkiye saatiyle)\b/i.test(inboundText.toLowerCase());
+          const hasRecentPatientTimeExplicit = /\b(yerel saat|kendi saat|benim saat|hollanda saat|almanya saat|local time)\b/i.test(recentUserTexts) || /\b(yerel saatle|kendi saatimle|local saatle)\b/i.test(inboundText.toLowerCase());
+
+          callbackResult = await processCallbackSuggestion({
+            parsedSugg,
+            convMeta,
+            unifiedContext,
+            country,
+            sandbox,
+            tenantId,
+            channelId: channelId || 'whatsapp',
+            phoneNumber,
+            history,
+            db,
+            isTurkeyBasisInherited: hasRecentTurkeyTimeExplicit,
+            isPatientBasisInherited: hasRecentPatientTimeExplicit,
+            inboundText,
+            allowTaskCreation: allowCallbackTaskCreation
+          });
+          
+          unifiedContext.callbackResult = callbackResult;
+          shouldBypassCallbackConfirmation = callbackResult.isSuccess;
+        }
+      } else if (isArrivalDateAnswer) {
+        const parsed = DateAnswerResolver.parse(inboundText, brain.context.config?.timezone || 'Europe/Istanbul');
+        const normalizedDate = parsed.raw || inboundText.trim();
+
+        if (conversationId) {
+          try {
+            const convCheck = await db.executeSafe({
+              text: `SELECT metadata FROM conversations WHERE id = $1 LIMIT 1`,
+              values: [conversationId]
+            }) as any[];
+            const existingMeta = convCheck[0]?.metadata || {};
+            const updatedMeta = {
+              ...existingMeta,
+              arrival_date: normalizedDate
+            };
+            delete updatedMeta.phone_number;
+            delete updatedMeta.patient_name;
+            delete updatedMeta.raw_message;
+
+            if (updatedMeta.last_callback_offer) {
+              let shouldDeleteOffer = false;
+              const proposedDueAt = updatedMeta.last_callback_offer.proposed_due_at;
+              if (proposedDueAt) {
+                const proposedDateOnly = proposedDueAt.split('T')[0];
+                if (parsed.date) {
+                  const parsedDateOnly = parsed.date.toISOString().split('T')[0];
+                  if (proposedDateOnly === parsedDateOnly) {
+                    shouldDeleteOffer = true;
+                  }
+                }
+              }
+              if (updatedMeta.last_callback_offer.source === 'bot_callback_offer') {
+                shouldDeleteOffer = true;
+              }
+              if (shouldDeleteOffer) {
+                delete updatedMeta.last_callback_offer;
+              }
+            }
+
+            await db.executeSafe({
+              text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2`,
+              values: [JSON.stringify(updatedMeta), conversationId]
+            });
+
+            if (unifiedContext?.opportunity?.id) {
+              await db.executeSafe({
+                text: `UPDATE opportunities SET travel_date = $1, updated_at = NOW() WHERE id = $2`,
+                values: [normalizedDate, unifiedContext.opportunity.id]
+              });
+            }
+            
+            if (convMeta) {
+              convMeta.arrival_date = normalizedDate;
+              if (updatedMeta.last_callback_offer === undefined) {
+                delete convMeta.last_callback_offer;
+              }
+            }
+          } catch (dbErr) {
+            console.error('[AIResponseOrchestrator] Failed to update arrival date in DB before prompt builder:', dbErr);
+          }
+        }
+      }
+
       // 6. Build Prompt
       const phase = unifiedContext.opportunity?.stage || 'lead';
       const systemPromptText = PromptBuilder.buildSystemPrompt(brain, phase, false, unifiedContext);
@@ -1621,58 +1632,9 @@ export class AIResponseOrchestrator {
       // P0.30 Gate Diet: isThanksButContinueBypass and isOpenContinuationBypass removed.
       // LLM handles these naturally via hint injection at L2121.
 
-      const isCallbackConfirmation = effectiveIntent === 'callback_confirmation' || effectiveIntent === 'schedule_confirmation';
-      // P0.30 Gate Diet: Removed inboundText.length < 50 limit — arbitrary cap caused longer arrival answers to bypass LLM
-      const isArrivalDateAnswer = effectiveIntent === 'arrival_date_answer' && !inboundText.includes('?');
-      const isCallbackTimeAnswer = effectiveIntent === 'callback_time_answer';
-
-      // Fix 2: Effective boolean flags for confirmation and time answer
-      let hasExplicitTimeInUserMsg = false;
-      if (isCallbackConfirmation && inboundText) {
-        const { parseDeterministicSuggestion } = require('../../utils/date-parser');
-        const userParsed = parseDeterministicSuggestion(inboundText, new Date(), null, null);
-        if (userParsed.suggested_time || userParsed.suggested_date) {
-          hasExplicitTimeInUserMsg = true;
-        }
-      }
-
-      const effectiveIsCallbackConfirmation = isCallbackConfirmation && !hasExplicitTimeInUserMsg;
-      const effectiveIsCallbackTimeAnswer = isCallbackTimeAnswer || (isCallbackConfirmation && hasExplicitTimeInUserMsg);
-
-      // P0.30 Gate Diet: shouldCreateTask narrowed.
-      // Problem: Any 'görüşme' in ANY history msg caused new msgs to be treated as callback answers.
-      // Fix: history-based path now requires:
-      //   - Bot asked for time in LAST msg (lastBotAskedTime)
-      //   - User's CURRENT msg is callback_time_answer intent (giving time, not asking a question)
-      //   - Callback not already confirmed
-      // This allows "ertesi gün" → bypass when bot asked for time, but blocks
-      // "ne zaman gelebilirim" → generic_other → LLM (won't reach callback_time_answer intent).
-      const isPositiveIntent = currentVisitIntent === 'turkey_visit_intent_positive';
-      const lastBotAskedTime = history.length > 0 &&
-        history[history.length - 1].role === 'assistant' &&
-        /saat|zaman|gün|gun|tarih|ne zaman|uygun/i.test(history[history.length - 1].content || '');
-      const isAppointmentContext = history.some(m =>
-        /randevu|arama|görüşme|gorusme|telefon/i.test(m.content || '')
-      );
-      // Callback already confirmed if: bypass source recorded OR DB-level confirmed_at set.
-      // Both must be checked — source covers in-memory bypass path, confirmed_at covers DB-written confirmations.
-      const callbackAlreadyConfirmed = !!(
-        convMeta?.last_callback_offer?.source === 'callback_confirmation_bypass' ||
-        convMeta?.last_callback_offer?.confirmed_at
-      );
-      // isCallbackTimeAnswer confirms user is providing time info (not asking a question)
-      const shouldCreateTask = isPositiveIntent || hasExplicitCall ||
-        (!callbackAlreadyConfirmed && lastBotAskedTime && isAppointmentContext && effectiveIsCallbackTimeAnswer);
-      const shouldBypassCallbackTimeAnswer = effectiveIsCallbackTimeAnswer && shouldCreateTask;
-
-
-      // P0.30 Gate Diet: Removed from bypass chain:
-      //   isNextStepRequest, isThanksButContinueBypass, isOpenContinuationBypass,
-      //   isCannotTravelObjection, isDistanceObjection, isPoliteClose
-      // These are conversational decisions — LLM + tenant prompt handles them better.
+      // Flags and bypass targets resolved early in step 5c
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge
-        || shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery || isDoctorNamesRequest
-        || effectiveIsCallbackConfirmation || isArrivalDateAnswer || shouldBypassCallbackTimeAnswer;
+        || shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery || isDoctorNamesRequest;
 
       let text = '';
       let bypassed = false;
@@ -1791,273 +1753,6 @@ export class AIResponseOrchestrator {
           }));
         }
 
-        // ── P0.27: Callback Confirmation Bypass ──────────────────
-        if (!fallbackResult && effectiveIsCallbackConfirmation) {
-          // 1. Try to read from conversation.metadata.last_callback_offer first
-          const lastOffer = convMeta?.last_callback_offer;
-          let parsedSugg: any = null;
-          
-          if (lastOffer && lastOffer.proposed_due_at) {
-            const dt = new Date(lastOffer.proposed_due_at);
-            if (!isNaN(dt.getTime())) {
-              const formatter = new Intl.DateTimeFormat('en-US', {
-                timeZone: 'Europe/Istanbul',
-                year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit',
-                hour12: false
-              });
-              const parts = formatter.formatToParts(dt);
-              const getVal = (type: string) => parts.find(p => p.type === type)?.value || '';
-              const yyyy = getVal('year');
-              const mm = getVal('month');
-              const dd = getVal('day');
-              const hh = getVal('hour');
-              const min = getVal('minute');
-              
-              parsedSugg = {
-                suggested_date: `${yyyy}-${mm}-${dd}`,
-                suggested_time: `${hh}:${min}`,
-                proposed_date: lastOffer.proposed_due_at,
-                suggested_timezone_basis: lastOffer.timezone || 'Europe/Istanbul'
-              };
-            }
-          }
-          
-          // 2. Fallback to parsing from last assistant message (restricted)
-          if (!parsedSugg) {
-            const assistantHistory = history.filter(m => m.role === 'assistant');
-            const lastAssistantMsg = (assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '') || '';
-            const isGenuineOffer = 
-              lastOffer?.source === 'bot_callback_offer' || 
-              lastOffer?.source === 'callback_confirmation_bypass' ||
-              effectiveIntent === 'call_scheduling_request' || 
-              effectiveIntent === 'callback_confirmation';
-              
-            const isArrivalBypassResponse = 
-              lastAssistantMsg.includes('geliş tarihi') || 
-              lastAssistantMsg.includes('geliş tarihiniz') ||
-              lastAssistantMsg.includes('not aldım');
-
-            if (isGenuineOffer && !isArrivalBypassResponse) {
-              const { parseDeterministicSuggestion } = require('../../utils/date-parser');
-              parsedSugg = parseDeterministicSuggestion(lastAssistantMsg, new Date(), null, null);
-            }
-          }
-          
-          let responseText = '';
-          let isSuccess = false;
-
-          if (parsedSugg) {
-            const userMessages = history.filter(m => m.role === 'user');
-            const recentUserTexts = userMessages.slice(-3).map(m => (m.content || '').toLowerCase()).join(' ');
-            const hasRecentTurkeyTimeExplicit = /\b(t%C3%BCrkiye saati|türkiye saati|tr saat|ts\b)/i.test(recentUserTexts) || /\b(türkiye saatiyle)\b/i.test(inboundText.toLowerCase());
-            const hasRecentPatientTimeExplicit = /\b(yerel saat|kendi saat|benim saat|hollanda saat|almanya saat|local time)\b/i.test(recentUserTexts) || /\b(yerel saatle|kendi saatimle|local saatle)\b/i.test(inboundText.toLowerCase());
-
-            const res = await processCallbackSuggestion({
-              parsedSugg,
-              convMeta,
-              unifiedContext,
-              country: unifiedContext?.opportunity?.country || convMeta?.patient_country || null,
-              replyLanguage: replyLanguage || 'en',
-              tenantDefaultLang: tenantDefaultLang || 'en',
-              timezone: timezone || brain.context.config?.timezone || 'Europe/Istanbul',
-              sandbox,
-              tenantId,
-              channelId: channelId || 'whatsapp',
-              phoneNumber,
-              history,
-              db,
-              isTurkeyBasisInherited: hasRecentTurkeyTimeExplicit,
-              isPatientBasisInherited: hasRecentPatientTimeExplicit,
-              inboundText
-            });
-            responseText = res.responseText;
-            isSuccess = res.isSuccess;
-          }
-
-          if (!isSuccess && !responseText) {
-            responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
-          }
-          
-          fallbackResult = { text: responseText, finalPath: 'callback_confirmation_bypass' };
-          console.log(JSON.stringify({
-            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-            path: 'callback_confirmation_bypass',
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            workerPath
-          }));
-        }
-
-        // P0.28: arrival_date_answer bypass
-        if (!fallbackResult && isArrivalDateAnswer) {
-          const parsed = DateAnswerResolver.parse(inboundText, brain.context.config?.timezone || 'Europe/Istanbul');
-          const normalizedDate = parsed.raw || inboundText.trim();
-
-          const facts = ConversationKnownFactsResolver.resolve({
-            history: history.filter((m: any) => m.content != null).map((m: any) => ({ role: m.role, content: m.content as string })),
-            opportunity: unifiedContext?.opportunity,
-            profile: unifiedContext?.profile,
-            latestForm: unifiedContext?.latestForm,
-            conversation: unifiedContext?.conversation
-          });
-          const { CallPreferenceLabelResolver } = require('./call-preference-label-resolver');
-          const callTime = facts.preferredCallTime || '';
-          const cleanCallTime = callTime ? CallPreferenceLabelResolver.resolve(callTime) : 'en yakın uygun çalışma saatlerinde';
-
-          const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
-          const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
-          // Deterministic cliches avoided per Rule 6 (no "Müşteri temsilcimiz")
-          const agentLabelPossessive = 'Hasta danışmanımızın';
-
-          const responseText = `Teşekkür ederim, ${normalizedDate} tarihini not aldım. ${agentLabelPossessive} sizi ${cleanCallTime} araması için notunuzu iletiyorum 🙏`;
-
-          if (!sandbox) {
-            try {
-              const convCheck = await db.executeSafe({
-                text: `SELECT metadata FROM conversations WHERE id = $1 LIMIT 1`,
-                values: [conversationId]
-              }) as any[];
-              const existingMeta = convCheck[0]?.metadata || {};
-              const updatedMeta = {
-                ...existingMeta,
-                arrival_date: normalizedDate
-              };
-              delete updatedMeta.phone_number;
-              delete updatedMeta.patient_name;
-              delete updatedMeta.raw_message;
-
-              // P0.28.1: Clean up old/stale last_callback_offer if it conflicts with arrival date or is unverified bot offer
-              if (updatedMeta.last_callback_offer) {
-                let shouldDeleteOffer = false;
-                const proposedDueAt = updatedMeta.last_callback_offer.proposed_due_at;
-                if (proposedDueAt) {
-                  const proposedDateOnly = proposedDueAt.split('T')[0]; // YYYY-MM-DD
-                  if (parsed.date) {
-                    const parsedDateOnly = parsed.date.toISOString().split('T')[0];
-                    if (proposedDateOnly === parsedDateOnly) {
-                      shouldDeleteOffer = true;
-                    }
-                  }
-                }
-                if (updatedMeta.last_callback_offer.source === 'bot_callback_offer') {
-                  shouldDeleteOffer = true;
-                }
-                if (shouldDeleteOffer) {
-                  delete updatedMeta.last_callback_offer;
-                }
-              }
-
-              await db.executeSafe({
-                text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2`,
-                values: [JSON.stringify(updatedMeta), conversationId]
-              });
-
-              if (unifiedContext?.opportunity?.id) {
-                await db.executeSafe({
-                  text: `UPDATE opportunities SET travel_date = $1, updated_at = NOW() WHERE id = $2`,
-                  values: [normalizedDate, unifiedContext.opportunity.id]
-                });
-              }
-            } catch (dbErr) {
-              console.error('[AIResponseOrchestrator] Failed to update arrival date in DB:', dbErr);
-            }
-          }
-
-          fallbackResult = { text: responseText, finalPath: 'arrival_date_bypass' };
-          console.log(JSON.stringify({
-            tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-            path: 'arrival_date_bypass',
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            workerPath
-          }));
-        }
-
-        // P0.28.2: callback_time_answer bypass
-        if (!fallbackResult && effectiveIsCallbackTimeAnswer) {
-          if (!shouldCreateTask) {
-            // Do NOT create task. Resolve using ContextAwareSafeFallbackResolver
-            fallbackResult = ContextAwareSafeFallbackResolver.resolve({
-              inboundText,
-              brain,
-              identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-              unifiedContext,
-              channelId,
-              systemPromptText,
-              resolvedActiveDepartment: resolvedActiveDepartment || null,
-              replyLanguage,
-              turkeyVisitIntent: currentVisitIntent,
-              formAlreadyAddressed
-            });
-            console.log(JSON.stringify({
-              tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-              path: 'callback_time_answer_intent_gated_fallback',
-              tenantId,
-              conversationId: conversationId || 'unknown',
-              workerPath,
-              currentVisitIntent
-            }));
-          } else {
-            // Task creation allowed! Execute normal P0.28.2 callback time answer parsing and task creation.
-            const { parseDeterministicSuggestion } = require('../../utils/date-parser');
-            const assistantHistory = history.filter(m => m.role === 'assistant');
-            const lastAssistantMsg = (assistantHistory.length > 0 ? assistantHistory[assistantHistory.length - 1].content : '') || '';
-            const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, lastAssistantMsg);
-
-            let responseText = '';
-            let isSuccess = false;
-            const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
-
-            if (parsedSugg) {
-              const userMessages = history.filter(m => m.role === 'user');
-              const recentUserTexts = userMessages.slice(-3).map(m => (m.content || '').toLowerCase()).join(' ');
-              const hasRecentTurkeyTimeExplicit = /\b(t%C3%BCrkiye saati|türkiye saati|tr saat|ts\b)/i.test(recentUserTexts) || /\b(türkiye saatiyle)\b/i.test(inboundText.toLowerCase());
-              const hasRecentPatientTimeExplicit = /\b(yerel saat|kendi saat|benim saat|hollanda saat|almanya saat|local time)\b/i.test(recentUserTexts) || /\b(yerel saatle|kendi saatimle|local saatle)\b/i.test(inboundText.toLowerCase());
-
-              const res = await processCallbackSuggestion({
-                parsedSugg,
-                convMeta,
-                unifiedContext,
-                country,
-                replyLanguage: replyLanguage || 'en',
-                tenantDefaultLang: tenantDefaultLang || 'en',
-                timezone: timezone || brain.context.config?.timezone || 'Europe/Istanbul',
-                sandbox,
-                tenantId,
-                channelId: channelId || 'whatsapp',
-                phoneNumber,
-                history,
-                db,
-                isTurkeyBasisInherited: hasRecentTurkeyTimeExplicit,
-                isPatientBasisInherited: hasRecentPatientTimeExplicit,
-                inboundText
-              });
-              responseText = res.responseText;
-              isSuccess = res.isSuccess;
-            }
-
-            if (!responseText) {
-              if (hasRelativeOrPeriodKeywords(inboundText)) {
-                responseText = buildRelativeDaypartClarification(inboundText, country, convMeta, unifiedContext, timezone || brain.context.config?.timezone || 'Europe/Istanbul', replyLanguage, tenantDefaultLang);
-              } else {
-                // Rule 3: Ask for clarification instead of uydurma when parsing fails
-                responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
-              }
-            }
-            
-            fallbackResult = { text: responseText, finalPath: 'callback_time_answer_bypass' };
-            isCallbackTimeAnswerPath = true; // flag to skip last_callback_offer writing
-            console.log(JSON.stringify({
-              tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-              path: 'callback_time_answer_bypass',
-              tenantId,
-              conversationId: conversationId || 'unknown',
-              workerPath
-            }));
-          }
-        }
-
         // ── Default: other bypass intents via ContextAwareSafeFallbackResolver ─
         if (!fallbackResult) {
           fallbackResult = ContextAwareSafeFallbackResolver.resolve({
@@ -2159,171 +1854,21 @@ export class AIResponseOrchestrator {
             workerPath
           }));
 
-          // P0.28: Context-aware fallback resolution
-          const assistantHistory = history.filter((m: any) => m.role === 'assistant');
-          const lastAssistantMsg = assistantHistory.length > 0 ? (assistantHistory[assistantHistory.length - 1].content || '') : '';
-          const lowerUser = inboundText.toLowerCase().trim();
-
-          const isArrivalDateQuestion = (text: string) => {
-            const lowerText = text.toLowerCase();
-            return [
-              'gelmeyi düşündüğünüz', 'gelmeyi dusundugunuz', 'ne zaman gelmeyi', 'ziyaret tarihi',
-              'tarih aralığı', 'tarih araligi', 'tahmini tarih', 'tahmini ziyaret', 'gelmeyi planlıyorsunuz',
-              'gelmeyi planliyorsunuz', 'geliş tarih'
-            ].some(kw => lowerText.includes(kw));
-          };
-
-          const isSpecificCallTimeOffer = (text: string) => {
-            const lowerText = text.toLowerCase();
-            const hasCallKw = [
-              'görüşmek', 'gorusmek', 'arayalım', 'arayalim', 'arayebiliriz',
-              'arama planlama', 'telefon görüşmesi', 'telefon gorusmesi',
-              'danışmanımızla', 'danismanimizla', 'arama teklif', 'telefonla gorusalim', 'telefonla görüşelim'
-            ].some(kw => lowerText.includes(kw));
-            if (!hasCallKw) return false;
-
-            const hasTimeOrDate = [
-              'saat', 'saatiyle', 'saatinde', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
-              'yarın', 'yarin', 'bugün', 'bugun', 'haziran', 'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
-            ].some(kw => lowerText.includes(kw)) || /\d{1,2}[:.]\d{2}/.test(lowerText);
-
-            return hasTimeOrDate;
-          };
-
-          const dateIndicators = [
-            'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
-            'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
-            'ay sonu', 'ay başı', 'ay basi', 'ayın sonu', 'ayın başı'
-          ];
-          const isDateMessage = dateIndicators.some(kw => lowerUser.includes(kw)) || hasRealDatePattern(lowerUser);
-
-          const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'arayın', 'arayin', 'ararlar'];
-          const isAffirmative = affirmatives.some(kw => lowerUser === kw || lowerUser.startsWith(kw + ' ') || lowerUser.endsWith(' ' + kw) || lowerUser.includes(' ' + kw + ' '));
-
-          if (isArrivalDateQuestion(lastAssistantMsg) && isDateMessage) {
-            const parsed = DateAnswerResolver.parse(inboundText, brain.context.config?.timezone || 'Europe/Istanbul');
-            const normalizedDate = parsed.raw || inboundText.trim();
-
-            const facts = ConversationKnownFactsResolver.resolve({
-              history: history.filter((m: any) => m.content != null).map((m: any) => ({ role: m.role, content: m.content as string })),
-              opportunity: unifiedContext?.opportunity,
-              profile: unifiedContext?.profile,
-              latestForm: unifiedContext?.latestForm,
-              conversation: unifiedContext?.conversation
-            });
-            const { CallPreferenceLabelResolver } = require('./call-preference-label-resolver');
-            const callTime = facts.preferredCallTime || '';
-            const cleanCallTime = callTime ? CallPreferenceLabelResolver.resolve(callTime) : 'en yakın uygun çalışma saatlerinde';
-
-            const resolvedIndustry = brain.context.config?.industry || (brain.prompts.metadata as any)?.industry || '';
-            const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'medical';
-            // Deterministic cliches avoided per Rule 6 (no "Müşteri temsilcimiz")
-            const agentLabelPossessive = 'Hasta danışmanımızın';
-
-            text = `Teşekkür ederim, ${normalizedDate} tarihini not aldım. ${agentLabelPossessive} sizi ${cleanCallTime} araması için notunuzu iletiyorum 🙏`;
-            
-            if (!sandbox) {
-              try {
-                const convCheck = await db.executeSafe({
-                  text: `SELECT metadata FROM conversations WHERE id = $1 LIMIT 1`,
-                  values: [conversationId]
-                }) as any[];
-                const existingMeta = convCheck[0]?.metadata || {};
-                const updatedMeta = {
-                  ...existingMeta,
-                  arrival_date: normalizedDate
-                };
-                delete updatedMeta.phone_number;
-                delete updatedMeta.patient_name;
-                delete updatedMeta.raw_message;
-
-                // P0.28.1: Clean up old/stale last_callback_offer if it conflicts with arrival date or is unverified bot offer
-                if (updatedMeta.last_callback_offer) {
-                  let shouldDeleteOffer = false;
-                  const proposedDueAt = updatedMeta.last_callback_offer.proposed_due_at;
-                  if (proposedDueAt) {
-                    const proposedDateOnly = proposedDueAt.split('T')[0]; // YYYY-MM-DD
-                    if (parsed.date) {
-                      const parsedDateOnly = parsed.date.toISOString().split('T')[0];
-                      if (proposedDateOnly === parsedDateOnly) {
-                        shouldDeleteOffer = true;
-                      }
-                    }
-                  }
-                  if (updatedMeta.last_callback_offer.source === 'bot_callback_offer') {
-                    shouldDeleteOffer = true;
-                  }
-                  if (shouldDeleteOffer) {
-                    delete updatedMeta.last_callback_offer;
-                  }
-                }
-
-                await db.executeSafe({
-                  text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2`,
-                  values: [JSON.stringify(updatedMeta), conversationId]
-                });
-
-                if (unifiedContext?.opportunity?.id) {
-                  await db.executeSafe({
-                    text: `UPDATE opportunities SET travel_date = $1, updated_at = NOW() WHERE id = $2`,
-                    values: [normalizedDate, unifiedContext.opportunity.id]
-                  });
-                }
-              } catch (dbErr) {
-                console.error('[AIResponseOrchestrator] Failed to update arrival date in DB during fallback recovery:', dbErr);
-              }
-            }
-          } else if (isSpecificCallTimeOffer(lastAssistantMsg) && isAffirmative) {
-            // Deterministic cliches avoided per Rule 6 (no "temsilci" or "Müşteri temsilcimiz")
-            const agentLabel = 'hasta danışmanımıza';
-            text = `Teyidinizi aldım. Telefon görüşmesi için belirttiğiniz zamanı ilgili ${agentLabel} iletiyorum. Görüşmek üzere. 🙏`;
-          } else if (effectiveIsCallbackTimeAnswer) {
-            const { parseDeterministicSuggestion } = require('../../utils/date-parser');
-            const parsedSugg = parseDeterministicSuggestion(inboundText, new Date(), null, lastAssistantMsg);
-
-            let responseText = '';
-            let isSuccess = false;
-            const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
-
-            if (parsedSugg) {
-              const userMessages = history.filter(m => m.role === 'user');
-              const recentUserTexts = userMessages.slice(-3).map(m => (m.content || '').toLowerCase()).join(' ');
-              const hasRecentTurkeyTimeExplicit = /\b(t%C3%BCrkiye saati|türkiye saati|tr saat|ts\b)/i.test(recentUserTexts) || /\b(türkiye saatiyle)\b/i.test(inboundText.toLowerCase());
-              const hasRecentPatientTimeExplicit = /\b(yerel saat|kendi saat|benim saat|hollanda saat|almanya saat|local time)\b/i.test(recentUserTexts) || /\b(yerel saatle|kendi saatimle|local saatle)\b/i.test(inboundText.toLowerCase());
-
-              const res = await processCallbackSuggestion({
-                parsedSugg,
-                convMeta,
-                unifiedContext,
-                country,
-                replyLanguage: replyLanguage || 'en',
-                tenantDefaultLang: tenantDefaultLang || 'en',
-                timezone: timezone || brain.context.config?.timezone || 'Europe/Istanbul',
-                sandbox,
-                tenantId,
-                channelId: channelId || 'whatsapp',
-                phoneNumber,
-                history,
-                db,
-                isTurkeyBasisInherited: hasRecentTurkeyTimeExplicit,
-                isPatientBasisInherited: hasRecentPatientTimeExplicit,
-                inboundText
-              });
-              responseText = res.responseText;
-              isSuccess = res.isSuccess;
-            }
-
-            if (!responseText) {
-              if (hasRelativeOrPeriodKeywords(inboundText)) {
-                responseText = buildRelativeDaypartClarification(inboundText, country, convMeta, unifiedContext, timezone || brain.context.config?.timezone || 'Europe/Istanbul', replyLanguage, tenantDefaultLang);
-              } else {
-                responseText = `Aranmak istediğiniz uygun bir gün ve saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum. 🙏`;
-              }
-            }
-
-            text = responseText;
-            isCallbackTimeAnswerPath = true; // flag to skip last_callback_offer writing
+          // Unconditionally set generic multilingual load/retry message
+          const lang = replyLanguage || tenantDefaultLang || 'tr';
+          let fallbackMsg = '';
+          if (lang === 'tr') {
+            fallbackMsg = "Sistemlerimizde geçici bir yoğunluk yaşanıyor. Lütfen birkaç dakika sonra tekrar dener misiniz? 🙏";
+          } else if (lang === 'de') {
+            fallbackMsg = "In unseren Systemen tritt derzeit eine vorübergehende Auslastung auf. Bitte versuchen Sie es in ein paar Minuten noch einmal. 🙏";
+          } else if (lang === 'nl') {
+            fallbackMsg = "Er is momenteel een tijdelijke drukte in onze systemen. Probeer het over een paar minuten nog eens. 🙏";
+          } else if (lang === 'ar') {
+            fallbackMsg = "نواجه حاليًا ضغطًا مؤقتًا في أنظمتنا. يرجى المحاولة مرة أخرى بعد بضع دقائق. 🙏";
+          } else {
+            fallbackMsg = "We are currently experiencing a temporary high load in our systems. Please try again in a few minutes. 🙏";
           }
+          text = fallbackMsg;
         }
       }
 
@@ -2589,241 +2134,6 @@ export class AIResponseOrchestrator {
           }
         }
       }
-    }
-  }
-}
-
-function hasRelativeOrPeriodKeywords(text: string): boolean {
-  const { MultilingualTimeIntentResolver } = require('./multilingual-time-intent-resolver');
-  const res = MultilingualTimeIntentResolver.resolve(text);
-  return res.hasRelativeDate || res.hasDaypart;
-}
-
-function buildRelativeDaypartClarification(
-  inboundText: string,
-  country: string | null,
-  convMeta: any,
-  unifiedContext: any,
-  tenantTz: string = 'Europe/Istanbul',
-  replyLanguage?: string,
-  tenantDefaultLang?: string
-): string {
-  const { MultilingualTimeIntentResolver } = require('./multilingual-time-intent-resolver');
-  const timeIntentRes = MultilingualTimeIntentResolver.resolve(inboundText);
-
-  // Fallback hierarchy:
-  // 1. Detected language from the latest message
-  // 2. Conversation/channel reply language
-  // 3. Tenant default language
-  // 4. System safe default ('en')
-  let langCandidate = 'en';
-  if (timeIntentRes.detectedLanguageHint && timeIntentRes.detectedLanguageHint !== 'unknown') {
-    langCandidate = timeIntentRes.detectedLanguageHint;
-  } else if (replyLanguage) {
-    langCandidate = replyLanguage;
-  } else if (tenantDefaultLang) {
-    langCandidate = tenantDefaultLang;
-  }
-
-  // Ensure the resolved language is supported, otherwise fallback to 'en'
-  const supportedLangs = ['tr', 'en', 'de', 'ar', 'nl'];
-  const lang = supportedLangs.includes(langCandidate) ? langCandidate : 'en';
-
-  // 1. Resolve daypart label
-  let requestedDaypart = '';
-  const daypartLabels: Record<string, Record<string, string>> = {
-    morning: { tr: 'sabah', en: 'morning', de: 'Morgen', ar: 'صباحاً', nl: 'ochtend' },
-    afternoon: { tr: 'öğle', en: 'afternoon', de: 'Nachmittag', ar: 'بعد الظهر', nl: 'middag' },
-    evening: { tr: 'akşam', en: 'evening', de: 'Abend', ar: 'مساءً', nl: 'avond' },
-    night: { tr: 'gece', en: 'night', de: 'Nacht', ar: 'ليلاً', nl: 'nacht' }
-  };
-  if (timeIntentRes.hasDaypart && timeIntentRes.daypart !== 'unknown') {
-    requestedDaypart = daypartLabels[timeIntentRes.daypart][lang] || '';
-  }
-
-  // 2. Resolve weekday/day label
-  const weekdaysMap: { [key: string]: number } = {
-    pazartesi: 1, salı: 2, sali: 2, çarşamba: 3, carsamba: 3,
-    perşembe: 4, persembe: 4, cuma: 5, cumartesi: 6, pazar: 0,
-    monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 0,
-    montag: 1, dienstag: 2, mittwoch: 3, donnerstag: 4, freitag: 5, samstag: 6, sonntag: 0,
-    maandag: 1, dinsdag: 2, woensdag: 3, donderdag: 4, vrijdag: 5, zaterdag: 6, zondag: 0,
-    الاثنين: 1, الثلاثاء: 2, الاربعاء: 3, الخميس: 4, الجمعة: 5, السبت: 6, الاحد: 0
-  };
-
-  const clean = MultilingualTimeIntentResolver.normalize(inboundText);
-  let matchedWeekday: string | null = null;
-  for (const dayName of Object.keys(weekdaysMap)) {
-    if (new RegExp(`\\b${dayName}\\b`, 'i').test(clean) || clean.includes(dayName)) {
-      matchedWeekday = dayName;
-      break;
-    }
-  }
-
-  const getTzDate = (d: Date, zone: string) => {
-    try {
-      const utc = d.getTime() + d.getTimezoneOffset() * 60000;
-      const formatter = new Intl.DateTimeFormat('en-US', { timeZone: zone, hour12: false, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
-      const parts = formatter.formatToParts(new Date(utc));
-      const map = new Map(parts.map(p => [p.type, p.value]));
-      return new Date(Date.UTC(
-        parseInt(map.get('year')!, 10),
-        parseInt(map.get('month')!, 10) - 1,
-        parseInt(map.get('day')!, 10),
-        parseInt(map.get('hour')!, 10),
-        parseInt(map.get('minute')!, 10),
-        parseInt(map.get('second')!, 10)
-      ));
-    } catch {
-      const trTime = d.getTime() + 3 * 3600000;
-      return new Date(trTime);
-    }
-  };
-
-  const nowTenant = getTzDate(new Date(), tenantTz);
-  const currentTrDay = nowTenant.getUTCDay();
-
-  let targetDayOfWeek = currentTrDay;
-
-  const dayLabels: Record<string, Record<string, string>> = {
-    today: { tr: 'Bugün', en: 'Today', de: 'Heute', ar: 'اليوم', nl: 'Vandaag' },
-    tomorrow: { tr: 'Yarın', en: 'Tomorrow', de: 'Morgen', ar: 'غداً', nl: 'Morgen' }
-  };
-
-  let targetDayLabel = dayLabels.today[lang];
-
-  if (timeIntentRes.relativeDateType === 'today') {
-    targetDayOfWeek = currentTrDay;
-    targetDayLabel = dayLabels.today[lang];
-  } else if (timeIntentRes.relativeDateType === 'tomorrow') {
-    targetDayOfWeek = (currentTrDay + 1) % 7;
-    targetDayLabel = dayLabels.tomorrow[lang];
-  } else if (matchedWeekday) {
-    targetDayOfWeek = weekdaysMap[matchedWeekday];
-    targetDayLabel = matchedWeekday.charAt(0).toUpperCase() + matchedWeekday.slice(1);
-  } else {
-    targetDayOfWeek = currentTrDay;
-    targetDayLabel = dayLabels.today[lang];
-  }
-
-  const isPastWorkingHours = nowTenant.getUTCHours() >= 21;
-  const isSunday = targetDayOfWeek === 0;
-
-  // Sunday rule: counselors offline, suggest Monday
-  if (isSunday || (timeIntentRes.relativeDateType === 'today' && currentTrDay === 0) || (timeIntentRes.relativeDateType === 'tomorrow' && currentTrDay === 6 && isPastWorkingHours)) {
-    if (lang === 'tr') {
-      const daypartSuffix = requestedDaypart ? ` ${requestedDaypart}ı` : '';
-      const isToday = targetDayLabel.toLowerCase() === dayLabels.today[lang].toLowerCase();
-      const isTomorrow = targetDayLabel.toLowerCase() === dayLabels.tomorrow[lang].toLowerCase();
-      const dayLabelToUse = (isToday || isTomorrow) ? (isToday ? dayLabels.today[lang] : dayLabels.tomorrow[lang]) : `${targetDayLabel} günü`;
-      return `${dayLabelToUse} için uygunluk net olmayabilir. Pazartesi${daypartSuffix} için uygun olduğunuz saat aralığını yazarsanız görüşme talebinizi hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-    } else if (lang === 'en') {
-      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
-      const dayLabelToUse = timeIntentRes.relativeDateType === 'today' ? 'Today' : (timeIntentRes.relativeDateType === 'tomorrow' ? 'Tomorrow' : targetDayLabel);
-      return `${dayLabelToUse} might not be available. Please write your preferred time range on Monday${daypartStr} so I can note your call request for our patient advisor 🙏`;
-    } else if (lang === 'de') {
-      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
-      const dayLabelToUse = timeIntentRes.relativeDateType === 'today' ? 'Heute' : (timeIntentRes.relativeDateType === 'tomorrow' ? 'Morgen' : targetDayLabel);
-      return `Die Verfügbarkeit für ${dayLabelToUse} ist möglicherweise nicht gewährleistet. Bitte teilen Sie uns Ihre bevorzugte Uhrzeit für Montag${daypartStr} mit, damit ich Ihre Gesprächsanfrage für unseren Patientenberater notieren kann 🙏`;
-    } else if (lang === 'ar') {
-      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
-      const dayLabelToUse = timeIntentRes.relativeDateType === 'today' ? 'اليوم' : (timeIntentRes.relativeDateType === 'tomorrow' ? 'غداً' : targetDayLabel);
-      return `قد لا تكون المواعيد متاحة في ${dayLabelToUse}. يرجى كتابة الفترة الزمنية المناسبة لك يوم الاثنين${daypartStr} لتسجيل طلب الاتصال لمستشار المرضى لدينا 🙏`;
-    } else { // nl
-      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
-      const dayLabelToUse = timeIntentRes.relativeDateType === 'today' ? 'Vandaag' : (timeIntentRes.relativeDateType === 'tomorrow' ? 'Morgen' : targetDayLabel);
-      return `Beschikbaarheid voor ${dayLabelToUse} is mogelijk niet gegarandeerd. Gelieve uw gewenste tijdsbereik voor maandag${daypartStr} door te geven, zodat ik uw oproepverzoek kan noteren voor onze patiëntadviseur 🙏`;
-    }
-  }
-
-  // If requested today but working hours are already over
-  if (timeIntentRes.relativeDateType === 'today' && isPastWorkingHours) {
-    if (lang === 'tr') {
-      const daypartSuffix = requestedDaypart ? ` ${requestedDaypart}ı` : '';
-      if (currentTrDay === 5) {
-        return `Bugün için çalışma saatlerimiz sona ermiştir. Yarın${daypartSuffix} için uygun olduğunuz saat aralığını yazarsanız görüşme talebinizi hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-      } else if (currentTrDay === 6) {
-        return `Bugün için çalışma saatlerimiz sona ermiştir. Pazartesi${daypartSuffix} için uygun olduğunuz saat aralığını yazarsanız görüşme talebinizi hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-      } else {
-        return `Bugün için çalışma saatlerimiz sona ermiştir. Yarın${daypartSuffix} için uygun olduğunuz saat aralığını yazarsanız görüşme talebinizi hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-      }
-    } else if (lang === 'en') {
-      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
-      const nextDay = currentTrDay === 5 ? 'tomorrow' : (currentTrDay === 6 ? 'Monday' : 'tomorrow');
-      return `Our working hours for today have ended. Please write your preferred time range for ${nextDay}${daypartStr} so I can note your call request for our patient advisor 🙏`;
-    } else if (lang === 'de') {
-      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
-      const nextDay = currentTrDay === 5 ? 'morgen' : (currentTrDay === 6 ? 'Montag' : 'morgen');
-      return `Unsere Arbeitszeiten für heute sind beendet. Bitte teilen Sie uns Ihre bevorzugte Uhrzeit für ${nextDay}${daypartStr} mit, damit ich Ihre Gesprächsanfrage für unseren Patientenberater notieren kann 🙏`;
-    } else if (lang === 'ar') {
-      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
-      const nextDay = currentTrDay === 5 ? 'غداً' : (currentTrDay === 6 ? 'يوم الاثنين' : 'غداً');
-      return `انتهت ساعات العمل اليوم. يرجى كتابة الفترة الزمنية المناسبة لك ${nextDay}${daypartStr} لتسجيل طلب الاتصال لمستشار المرضى لدينا 🙏`;
-    } else { // nl
-      const daypartStr = requestedDaypart ? ` ${requestedDaypart}` : '';
-      const nextDay = currentTrDay === 5 ? 'morgen' : (currentTrDay === 6 ? 'maandag' : 'morgen');
-      return `Onze werkuren voor vandaag zijn beëindigd. Gelieve uw gewenste tijdsbereik voor ${nextDay}${daypartStr} door te geven, zodat ik uw oproepverzoek kan noteren voor onze patiëntadviseur 🙏`;
-    }
-  }
-
-  // Valid day/time requested, ask for specific hour range
-  const { resolvePatientTimezone } = require('../../utils/timezone');
-  const tzRes = resolvePatientTimezone(country);
-  const isDifferentTimezone = tzRes.timezone && tzRes.timezone !== tenantTz;
-
-  const daypartSuffix = requestedDaypart ? ` ${requestedDaypart}` : '';
-
-  // Confirm phrases
-  const confirmPhrases: Record<string, string> = {
-    tr: `${targetDayLabel}${daypartSuffix} için görüşme talebinizi not alabilirim.`,
-    en: `I can note your call request for ${targetDayLabel}${daypartSuffix}.`,
-    de: `Ich kann Ihre Gesprächsanfrage für ${targetDayLabel}${daypartSuffix} notieren.`,
-    ar: `يمكنني تسجيل طلب الاتصال بك في ${targetDayLabel}${daypartSuffix}.`,
-    nl: `Ik kan uw oproepverzoek voor ${targetDayLabel}${daypartSuffix} noteren.`
-  };
-  const confirmPhrase = confirmPhrases[lang] || confirmPhrases.en;
-
-  if (isDifferentTimezone) {
-    const countryTranslations: Record<string, Record<string, string>> = {
-      tr: { Germany: 'Almanya', Deutschland: 'Almanya', Netherlands: 'Hollanda', Holland: 'Hollanda', 'United Kingdom': 'İngiltere', France: 'Fransa', Belgium: 'Belçika', Switzerland: 'İsviçre', Denmark: 'Danimarka', Sweden: 'İsveç' },
-      en: { Almanya: 'Germany', Deutschland: 'Germany', Hollanda: 'Netherlands', Holland: 'Netherlands', 'United Kingdom': 'UK', Fransa: 'France', Belçika: 'Belgium', İsviçre: 'Switzerland', Danimarka: 'Denmark', İsveç: 'Sweden' },
-      de: { Germany: 'Deutschland', Almanya: 'Deutschland', Hollanda: 'Niederlande', Netherlands: 'Niederlande', 'United Kingdom': 'UK', Fransa: 'Frankreich', Belçika: 'Belgien', İsviçre: 'Schweiz', Danimarka: 'Dänemark', İsveç: 'Schweden' },
-      nl: { Germany: 'Duitsland', Almanya: 'Duitsland', Hollanda: 'Nederland', Netherlands: 'Nederland', 'United Kingdom': 'VK', Fransa: 'Frankrijk', Belçika: 'België', İsviçre: 'Zwitserland', Danimarka: 'Denemarken', İsveç: 'Zweden' },
-      ar: { Germany: 'ألمانيا', Almanya: 'ألمانيا', Hollanda: 'هولندا', Netherlands: 'هولندا', 'United Kingdom': 'بريطانيا', Fransa: 'فرنسا', Belçika: 'بلجيكا', İsviçre: 'سويسرا', Danimarka: 'الدانمارك', İsveç: 'السويد' }
-    };
-
-    const patientCountryName = country ? (countryTranslations[lang]?.[country] || (lang === 'tr' ? country : null) || countryTranslations.en[country] || country) : '';
-
-    const clinicTzTranslations: Record<string, Record<string, string>> = {
-      'Europe/Istanbul': { tr: 'Türkiye', en: 'Turkey', de: 'Türkei', ar: 'تركيا', nl: 'Turkije' },
-      'Europe/Berlin': { tr: 'Almanya', en: 'Germany', de: 'Deutschland', ar: 'ألمانيا', nl: 'Duitsland' },
-      'Europe/Amsterdam': { tr: 'Hollanda', en: 'Netherlands', de: 'Niederlande', ar: 'هولندا', nl: 'Nederland' },
-      'Europe/London': { tr: 'İngiltere', en: 'UK', de: 'Vereinigtes Königreich', ar: 'بريطانيا', nl: 'VK' }
-    };
-    const clinicTimezoneName = clinicTzTranslations[tenantTz]?.[lang] || (tenantTz.split('/')[1] || 'clinic');
-
-    if (lang === 'tr') {
-      return `${confirmPhrase} Saat aralığını ${patientCountryName} saatinize göre mi, Türkiye saatine göre mi paylaşmak istersiniz? Örneğin 18:00–20:00 gibi net bir aralık yazarsanız hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-    } else if (lang === 'en') {
-      return `${confirmPhrase} Would you like the time range to be in your ${patientCountryName} time or ${clinicTimezoneName} time? For example, if you write a clear range like 18:00–20:00, I will note it for our patient advisor 🙏`;
-    } else if (lang === 'de') {
-      return `${confirmPhrase} Möchten Sie den Zeitraum in Ihrer ${patientCountryName}-Zeit oder in der ${clinicTimezoneName}-Zeit angeben? Wenn Sie beispielsweise einen klaren Bereich wie 18:00–20:00 schreiben, werde ich dies für unseren Patientenberater notieren 🙏`;
-    } else if (lang === 'ar') {
-      return `${confirmPhrase} هل ترغب في أن تكون الفترة الزمنية بتوقيت ${patientCountryName} أم بتوقيت ${clinicTimezoneName}؟ على سبيل المثال، إذا كتبت فترة محددة مثل 18:00-20:00، سأسجل ذلك لمستشار المرضى لدينا 🙏`;
-    } else { // nl
-      return `${confirmPhrase} Wilt u dat het tijdsbereik in uw ${patientCountryName}-tijd of in de ${clinicTimezoneName}-tijd is? Als u bijvoorbeeld een duidelijk bereik zoals 18:00–20:00 schrijft, zal ik dit noteren voor onze patiëntadviseur 🙏`;
-    }
-  } else {
-    if (lang === 'tr') {
-      return `${confirmPhrase} Örneğin 18:00–20:00 gibi net bir saat aralığı belirtebilir misiniz? Görüşme talebinizi bu saat aralığıyla birlikte hasta danışmanımıza iletilmesi için not alıyorum 🙏`;
-    } else if (lang === 'en') {
-      return `${confirmPhrase} Could you please specify a clear time range, such as 18:00–20:00? I will note your call request with this range for our patient advisor 🙏`;
-    } else if (lang === 'de') {
-      return `${confirmPhrase} Könnten Sie bitte einen genauen Zeitraum angeben, z. B. 18:00–20:00? Ich werde Ihre Gesprächsanfrage mit diesem Bereich für unseren Patientenberater notieren 🙏`;
-    } else if (lang === 'ar') {
-      return `${confirmPhrase} هل يمكنك تحديد فترة زمنية واضحة، مثل 18:00-20:00؟ سأسجل طلب الاتصال بك مع هذه الفترة لمستشار المرضى لدينا 🙏`;
-    } else { // nl
-      return `${confirmPhrase} Zou u een duidelijk tijdsbereik kunnen opgeven, zoals 18:00–20:00? Ik noteer uw oproepverzoek met dit bereik voor onze patiëntadviseur 🙏`;
     }
   }
 }

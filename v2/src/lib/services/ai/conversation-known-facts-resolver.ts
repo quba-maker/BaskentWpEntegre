@@ -1,5 +1,6 @@
 import { isValidPatientName } from '@/lib/utils/patient-name-resolver';
 import { normalizeFormValue } from '@/lib/utils/normalize-form-value';
+import { CallPreferenceLabelResolver } from './call-preference-label-resolver';
 
 export type RelatedPersonFact = {
   relation: 'mother' | 'father' | 'spouse' | 'relative' | 'acquaintance';
@@ -378,7 +379,7 @@ export class ConversationKnownFactsResolver {
       })() : latestForm.data;
       const formCallTime = data?.ne_zaman_arayalim || data?.arama_saati || data?.call_time || data?.callback_time || data?.aranma_zamani || data?.aranma_saati || data?.preferred_call_time || '';
       if (formCallTime) {
-        facts.preferredCallTime = String(formCallTime).trim();
+        facts.preferredCallTime = CallPreferenceLabelResolver.resolve(String(formCallTime).trim());
       }
     }
 

@@ -132,7 +132,7 @@ export class MultiIntentConsultantComposer {
       if (hasCardiology) {
         const secondaryLabel = state.participants.find(p => p.department?.toLowerCase().includes('kardiy') && p.relation !== 'self');
         const label = secondaryLabel ? `${secondaryLabel.relation === 'mother' ? 'Anneniz' : secondaryLabel.relation === 'father' ? 'Babanız' : 'Yakınınız'} için Kardiyoloji` : 'Kardiyoloji';
-        processBlocks.push(`${label}: ön görüşme ile başlanır, ardından muayene ve tetkikler planlanır.`);
+        processBlocks.push(`${label}: bilgi alınır, ardından muayene ve tetkikler planlanır.`);
       }
       if (processBlocks.length === 0) {
         processBlocks.push('Önce kısa bir telefon görüşmesiyle bilgi alınır, ardından uygun tarih ve hekim planlanır. Muayene ve gerekli tetkikler sonrası tedavi planı netleşir.');

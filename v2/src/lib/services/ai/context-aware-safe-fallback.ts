@@ -780,10 +780,10 @@ export class ContextAwareSafeFallbackResolver {
 
     // Human Transfer Resolver
     const isHumanTransfer = detectedIntent === 'human_transfer_request' || interpretedIntent === 'human_transfer_request';
-    if (isHumanTransfer) {
+      if (isHumanTransfer) {
       const text = isHealthcare
-        ? `Haklısınız, bu konuda ${agentName}nın ilgilenmesi daha doğru olur. Talebinizin iletilmesi için not alıyorum.`
-        : `Haklısınız, bu konuda bir temsilcimizin ilgilenmesi daha doğru olur. Talebinizi temsilcimize iletilmesi için not alıyorum.`;
+        ? `Haklısınız, bu konuda ${agentName}nın ilgilenmesi daha doğru olur. Talebinizin planlanması için not alıyorum.`
+        : `Haklısınız, bu konuda bir temsilcimizin ilgilenmesi daha doğru olur. Talebinizi temsilcimizle paylaşmak üzere not alıyorum.`;
       return {
         text,
         sector: resolvedIndustry,
@@ -905,7 +905,7 @@ export class ContextAwareSafeFallbackResolver {
       if (isRecallFrustration) {
         const recallSummary = buildRecallFactsSummary(history);
         if (recallSummary) {
-          replyText = `Haklısınız, ${recallSummary} yazmıştınız. Hasta danışmanımız randevu veya süreç planlaması için sizinle iletişime geçebilir.`;
+          replyText = `Haklısınız, ${recallSummary} yazmıştınız. Süreç planlaması için sağlık ekibimiz sizinle iletişime geçebilir.`;
         } else {
           replyText = `Haklısınız, önceki mesajlarınızı kontrol ettim. Size daha iyi yardımcı olabilmem için randevu veya hekim görüşmesi organize edebiliriz.`;
         }
@@ -935,15 +935,15 @@ export class ContextAwareSafeFallbackResolver {
           const lastUserMsgText = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : '';
           if (lastUserMsgText) {
             if (isHealthcare) {
-              replyText = `Haklısınız, cevabnızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz ${agentName}la telefon görüşmesi planlanması için not alabiliriz.`;
+              replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz ${agentName}la telefon görüşmesi planlanması için not alabiliriz.`;
             } else {
-              replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
+              replyText = `Haklısınız, cevabınızı aldım. ${lastUserMsgText} bilgisini not ettim; isterseniz bu bilgiyi temsilci ekibimizle paylaşmak üzere not alabilirim.`;
             }
           } else {
             if (isHealthcare) {
-              replyText = `Haklısınız, cevabnızı aldım ve not ettim; isterseniz ${agentName}la telefon görüşmesi planlanması için not alabiliriz.`;
+              replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz ${agentName}la telefon görüşmesi planlanması için not alabiliriz.`;
             } else {
-              replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi temsilci ekibimize iletilmesi için not alabilirim.`;
+              replyText = `Haklısınız, cevabınızı aldım ve not ettim; isterseniz bu bilgiyi temsilci ekibimizle paylaşmak üzere not alabilirim.`;
             }
           }
         }
@@ -1005,7 +1005,7 @@ export class ContextAwareSafeFallbackResolver {
       // Build topic list
       const topics: string[] = [];
       if (selfComplaint) topics.push(`Sizin için: ${selfComplaint}`);
-      if (hasSecondary && secondaryDept) topics.push(`${secondaryLabel ? secondaryLabel.charAt(0).toUpperCase() + secondaryLabel.slice(1) : 'Yakınınız'} için: ${secondaryDept} ön görüşme/randevu talebi`);
+      if (hasSecondary && secondaryDept) topics.push(`${secondaryLabel ? secondaryLabel.charAt(0).toUpperCase() + secondaryLabel.slice(1) : 'Yakınınız'} için: ${secondaryDept} görüşme/randevu talebi`);
       else if (hasSecondary && !secondaryDept) topics.push(`${secondaryLabel ? secondaryLabel.charAt(0).toUpperCase() + secondaryLabel.slice(1) : 'Yakınınız'} için: görüşme/randevu talebi`);
 
       // Compose response
@@ -1063,7 +1063,7 @@ export class ContextAwareSafeFallbackResolver {
 
     if (detectedIntent === 'transfer_request' || interpretedIntent === 'transfer_request') {
       return {
-        text: `Talebinizi ilgili ekibe aktarıyorum, en kısa sürede sizinle iletişime geçeceklerdir.`,
+        text: `Talebinizi not aldım. Size doğru yardımcı olabilmemiz için uygun olduğunuz gün ve saat aralığını paylaşır mısınız?`,
         sector: resolvedIndustry,
         hasFormContext,
         hasComplaint,
@@ -1118,13 +1118,13 @@ export class ContextAwareSafeFallbackResolver {
       let text = '';
       if (isHealthcare) {
         if (hasTime) {
-          text = `Not aldım. Hasta danışmanımızla görüşme planlanması için iletebiliriz 🙏`;
+          text = `Not aldım. Görüşme planlanması için sağlık ekibimize iletiyorum 🙏`;
         } else {
           text = `Size hangi saat aralığında ulaşılması uygun olur? 🙏`;
         }
       } else {
         if (hasTime) {
-          text = `Not aldım. Temsilcimizle görüşme planlanması için iletebiliriz 🙏`;
+          text = `Not aldım. Görüşme planlanması için ekibimize iletiyorum 🙏`;
         } else {
           text = `Size hangi saat aralığında ulaşılması uygun olur? 🙏`;
         }
@@ -1161,8 +1161,8 @@ export class ContextAwareSafeFallbackResolver {
       }
 
       const text = isHealthcare
-        ? `Paylaştığınız zaman bilgisini not aldım. Hasta danışmanımız saat planlamasını teyit etmek üzere sizinle iletişime geçecektir.`
-        : `Paylaştığınız zaman bilgisini not aldım. Temsilci arkadaşımız saat planlamasını teyit etmek üzere sizinle iletişime geçecektir.`;
+        ? `Paylaştığınız zaman bilgisini kaydettim. Sağlık ekibimiz saat planlamasını teyit etmek üzere sizinle iletişime geçebilir.`
+        : `Paylaştığınız zaman bilgisini kaydettim. Ekibimiz saat planlamasını teyit etmek üzere sizinle iletişime geçebilir.`;
       return {
         text,
         sector: resolvedIndustry,
@@ -1551,4 +1551,3 @@ export function buildHistoryAwareRecoveryFallback(
   }
   return 'Merhaba, size yardımcı olmak üzere buradayım. Hangi konuda bilgi almak istersiniz?';
 }
-

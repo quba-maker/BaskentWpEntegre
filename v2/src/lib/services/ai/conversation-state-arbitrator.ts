@@ -140,7 +140,7 @@ export class ConversationStateArbitrator {
     const hasOfferInMeta = !!(lastOffer && lastOffer.proposed_due_at);
 
     const isCallOffer = (text: string) => {
-      if (hasOfferInMeta) return true;
+      if (hasOfferInMeta && !isArrivalDateQuestion(text)) return true;
       const lowerText = text.toLowerCase();
       return [
         'görüşmek', 'gorusmek', 'görüşme', 'gorusme',
@@ -153,7 +153,7 @@ export class ConversationStateArbitrator {
     };
 
     const isSpecificCallTimeOffer = (text: string) => {
-      if (hasOfferInMeta) return true;
+      if (hasOfferInMeta && !isArrivalDateQuestion(text)) return true;
       const lowerText = text.toLowerCase();
       
       const hasCallKw = isCallOffer(text);
@@ -237,7 +237,20 @@ export class ConversationStateArbitrator {
     // Check if the message is a callback time preference
     const isCallbackTimePreference = (hasExplicitHourOrRange || (hasCallbackTimeKw && !hasMonthKw && isCallSchedulingContext)) && !userIsAsking;
 
-    const shouldBlockArrivalDateAnswer = hasExplicitCallbackTimeRequest || isCallbackTimePreference;
+    const shouldBlockArrivalDateAnswer = 
+      hasExplicitCallbackTimeRequest || 
+      isCallbackTimePreference || 
+      hasExplicitHourOrRange || 
+      hasCallbackVerb || 
+      isCallSchedulingContext || 
+      lowerUser.includes('arayin') || 
+      lowerUser.includes('arayın') || 
+      lowerUser.includes('telefon') || 
+      lowerUser.includes('whatsapp') || 
+      lowerUser.includes('watsap') ||
+      lowerUser.includes('arama') ||
+      lowerUser.includes('görüşme') ||
+      lowerUser.includes('gorusme');
 
     if (isDateMessage && hasArrivalContext && !shouldBlockArrivalDateAnswer) {
       return {
