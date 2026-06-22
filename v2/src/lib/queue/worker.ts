@@ -2179,7 +2179,7 @@ export class QueueWorkerEngine {
     }
 
     // Fetch conversation history first so we can use it for language detection and AI orchestration
-    const history = await convService.getHistory(phoneNumber, 10);
+    const history = await convService.getHistory(phoneNumber, 10, conversationIdVal || conversationId || undefined);
 
     // Run programmatic language detection
     let languageContext = null;
@@ -4414,7 +4414,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     try {
       const { ConversationService } = await import('../services/conversation.service');
       const convService = new ConversationService(db);
-      rawHistory = await convService.getHistory(phoneNumber, 10);
+      rawHistory = await convService.getHistory(phoneNumber, 10, conversationId);
 
       // Find all consecutive user messages at the end of rawHistory and combine them chronologically
       const unrepliedUserContents: string[] = [];

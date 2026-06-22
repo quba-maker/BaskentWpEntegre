@@ -88,12 +88,23 @@ export class ConversationService {
   /**
    * AI Workflow için Konuşma Geçmişi Alma
    */
-  async getHistory(phoneNumber: string, limit: number = 20) {
-    const prev = await this.db.executeSafe(sql`
-      SELECT direction, content, media_type, media_metadata FROM messages 
-      WHERE phone_number = ${phoneNumber} AND tenant_id = ${this.db.tenantId} AND direction IN ('in', 'out')
-      ORDER BY created_at DESC LIMIT ${limit}
-    `);
+  async getHistory(phoneNumber: string, limit: number = 20, conversationId?: string | null) {
+    const prev = conversationId
+      ? await this.db.executeSafe(sql`
+          SELECT direction, content, media_type, media_metadata FROM messages
+          WHERE phone_number = ${phoneNumber}
+            AND tenant_id = ${this.db.tenantId}
+            AND conversation_id = ${conversationId}
+            AND direction IN ('in', 'out')
+          ORDER BY created_at DESC LIMIT ${limit}
+        `)
+      : await this.db.executeSafe(sql`
+          SELECT direction, content, media_type, media_metadata FROM messages
+          WHERE phone_number = ${phoneNumber}
+            AND tenant_id = ${this.db.tenantId}
+            AND direction IN ('in', 'out')
+          ORDER BY created_at DESC LIMIT ${limit}
+        `);
     
     return prev.reverse().map((m: any) => {
       let messageContent: string;

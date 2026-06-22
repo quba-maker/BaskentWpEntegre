@@ -1211,7 +1211,7 @@ export class ContextAwareSafeFallbackResolver {
         const isCheckup = ContextAwareSafeFallbackResolver.isCheckupRequest(complaint);
         if (isCheckup) {
           return {
-            text: `Teşekkür ederim ${detectedName}. Check-up planlamanız için uygun zamanı netleştirebiliriz.`,
+            text: `Teşekkür ederim ${detectedName}. Check-up planlamanızla ilgili buradan yardımcı olabiliriz. Türkiye'ye/Konya'ya geliş döneminiz yaklaşık belli mi?`,
             sector: resolvedIndustry,
             hasFormContext,
             hasComplaint,
@@ -1245,7 +1245,7 @@ export class ContextAwareSafeFallbackResolver {
         const isCheckup = ContextAwareSafeFallbackResolver.isCheckupRequest(complaint);
         if (isCheckup) {
           return {
-            text: `${intro} Check-up talebinizle ilgili yardımcı olayım. Programlarımız hakkında detaylı bilgi almak veya randevu planlamak için size buradan yardımcı olabilirim.`,
+            text: `${intro} Check-up talebinizle ilgili buradan yardımcı olayım. Planlamayı doğru yapabilmemiz için Türkiye'ye/Konya'ya geliş döneminiz yaklaşık belli mi?`,
             sector: resolvedIndustry,
             hasFormContext,
             hasComplaint,
@@ -1320,7 +1320,7 @@ export class ContextAwareSafeFallbackResolver {
       const isCheckup = ContextAwareSafeFallbackResolver.isCheckupRequest(complaint);
       if (isCheckup) {
         return {
-          text: `${intro} Check-up talebinizle ilgili yardımcı olayım. Programlarımız hakkında detaylı bilgi almak veya randevu planlamak için size buradan yardımcı olabilirim.`,
+          text: `${intro} Check-up talebinizle ilgili buradan yardımcı olayım. Planlamayı doğru yapabilmemiz için Türkiye'ye/Konya'ya geliş döneminiz yaklaşık belli mi?`,
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,

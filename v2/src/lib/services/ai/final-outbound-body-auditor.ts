@@ -47,6 +47,7 @@ export interface FinalOutboundAuditResult {
 
 // Known bad morphology patterns that should NEVER appear in final outbound body
 const KNOWN_BAD_MORPHOLOGY_PATTERNS: RegExp[] = [
+  /m[üu]mk[üu]n[üu]z/i,         // mümkünüz
   /plan[ıi]z[ıi]\b/i,           // planızı
   /tahminiz\s+(?:maliyet|et)/i,  // tahminizi maliyet
   /Konya(?:'n[ıi]n[ıi]z|n[ıi]n[ıi]z)/i,  // Konya'nınız
@@ -97,8 +98,9 @@ export class FinalOutboundBodyAuditor {
     let formatterApplied = false;
 
     try {
-      // Step 1: Turkish Final Quality Normalizer (strictly gated to replyLanguage === 'tr')
-      if (ctx.replyLanguage === 'tr') {
+      // Step 1: Turkish Final Quality Normalizer
+      const looksTurkish = /[ışğçöüİŞĞÇÖÜ]|\b(?:merhaba|geçmiş\s+olsun|hastanemizde|türkiye|şikayet|randevu|görüşme)\b/i.test(result);
+      if (ctx.replyLanguage === 'tr' || (!ctx.replyLanguage && looksTurkish)) {
         const normResult = TurkishFinalQualityNormalizer.normalize(result);
         if (normResult.wasModified) {
           result = normResult.text;

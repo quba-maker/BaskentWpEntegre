@@ -47,6 +47,45 @@ export class TurkeyVisitIntentResolver {
     return null;
   }
 
+  public static detectWithContext(text: string, lastAssistantText?: string | null): TurkeyVisitIntent | null {
+    const direct = this.detect(text);
+    if (direct) return direct;
+
+    const clean = (text || '').toLowerCase().trim();
+    const last = (lastAssistantText || '').toLowerCase();
+    if (!clean || !last) return null;
+
+    const askedVisitIntent = [
+      'türkiye’ye gelme',
+      "türkiye'ye gelme",
+      'turkiye’ye gelme',
+      "turkiye'ye gelme",
+      'türkiye’ye gelmeyi',
+      "türkiye'ye gelmeyi",
+      'konya’ya gelme',
+      "konya'ya gelme",
+      'gelme ihtimaliniz',
+      'gelmeyi düşünüyor musunuz',
+      'gelmeyi dusunuyor musunuz',
+      'gelme planınız',
+      'gelme planiniz'
+    ].some(kw => last.includes(kw));
+
+    if (!askedVisitIntent) return null;
+
+    const negatives = ['olmaz', 'hayır', 'hayir', 'yok', 'gelmem', 'gelemem', 'istemiyorum', 'istemem', 'mümkün değil', 'mumkun degil'];
+    if (negatives.some(kw => clean === kw || clean.startsWith(`${kw} `) || clean.endsWith(` ${kw}`) || clean.includes(` ${kw} `))) {
+      return 'turkey_visit_intent_negative';
+    }
+
+    const positives = ['olur', 'evet', 'tamam', 'gelirim', 'gelebilirim', 'düşünürüm', 'dusunurum', 'mümkün', 'mumkun'];
+    if (positives.some(kw => clean === kw || clean.startsWith(`${kw} `) || clean.endsWith(` ${kw}`) || clean.includes(` ${kw} `))) {
+      return 'turkey_visit_intent_positive';
+    }
+
+    return null;
+  }
+
   public static hasExplicitCallRequest(text: string): boolean {
     const { MultilingualTimeIntentResolver } = require('./multilingual-time-intent-resolver');
     return MultilingualTimeIntentResolver.resolve(text).hasExplicitCallRequest;

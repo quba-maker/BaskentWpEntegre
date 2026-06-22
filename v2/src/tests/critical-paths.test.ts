@@ -11943,6 +11943,57 @@ test("Başkent v70 Hotfix T25: Verify HH.MM time is not treated as date, and cor
   }
 });
 
+test("Başkent v75 Live T26: Worker history is scoped to current conversation", () => {
+  const workerCode = require("fs").readFileSync("src/lib/queue/worker.ts", "utf8");
+  const conversationServiceCode = require("fs").readFileSync("src/lib/services/conversation.service.ts", "utf8");
+
+  assert(conversationServiceCode.includes("conversation_id = ${conversationId}"),
+    "ConversationService.getHistory should support conversation_id-scoped reads");
+  assert(workerCode.includes("getHistory(phoneNumber, 10, conversationIdVal || conversationId || undefined)"),
+    "Immediate worker should pass current conversation id to getHistory");
+  assert(workerCode.includes("getHistory(phoneNumber, 10, conversationId)"),
+    "Delayed worker should pass current conversation id to getHistory");
+});
+
+test("Başkent v75 Live T27: Contextual 'olmaz' after Turkey visit question persists negative visit intent", async () => {
+  const { TurkeyVisitIntentResolver } = await import("../lib/services/ai/turkey-visit-intent-resolver");
+
+  const withoutContext = TurkeyVisitIntentResolver.detectWithContext("olmaz", "Telefon görüşmesi için saat uygun mu?");
+  const withContext = TurkeyVisitIntentResolver.detectWithContext("olmaz", "İlerleyen dönemde Türkiye'ye gelme ihtimaliniz olur mu?");
+
+  assert(withoutContext === null, "Standalone 'olmaz' should not become visit-negative without visit context");
+  assert(withContext === "turkey_visit_intent_negative", "Contextual 'olmaz' should become negative Turkey visit intent");
+});
+
+test("Başkent v75 Live T28: Final outbound auditor cleans 'mümkünüz olmamaktadır' even when replyLanguage is unknown", async () => {
+  const { FinalOutboundBodyAuditor } = await import("../lib/services/ai/final-outbound-body-auditor");
+
+  const result = FinalOutboundBodyAuditor.audit(
+    "Uzaktan ve sadece mevcut bilgilerle net bir değerlendirme yapmak mümkünüz olmamaktadır.",
+    { tenantId: "tenant-123", channel: "whatsapp" }
+  );
+
+  assert(!result.text.includes("mümkünüz"), "Final body must not contain broken 'mümkünüz'");
+  assert(result.rewrote === true, "Final body should be rewritten");
+});
+
+test("Başkent v75 Live T29: Check-up safe fallback avoids old program/randevu sales wording", async () => {
+  const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "merhaba",
+    brain: {
+      context: { config: { industry: "healthcare" }, channel: "whatsapp" },
+      prompts: { metadata: { identity: { personaName: "Rüya", organizationShortName: "Başkent" }, industry: "healthcare" } }
+    } as any,
+    identityConfig: { personaName: "Rüya", organizationShortName: "Başkent", organizationName: "Başkent Üniversitesi Konya Hastanesi" },
+    unifiedContext: { patient_known_facts: ["Şikayet: check-up"] }
+  });
+
+  assert(!result.text.includes("Programlarımız hakkında"), "Fallback should not use old program sales wording");
+  assert(!result.text.includes("randevu planlamak"), "Fallback should not force appointment planning");
+  assert(result.text.includes("geliş döneminiz"), "Fallback should ask an engagement question about visit period");
+});
+
 
 async function runAllTests() {
   try {

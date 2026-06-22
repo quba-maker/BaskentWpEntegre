@@ -1031,7 +1031,11 @@ export class AIResponseOrchestrator {
 
       // P0.29: Turkey Visit Intent detection & persistence
       const { TurkeyVisitIntentResolver } = require('./turkey-visit-intent-resolver');
-      const resolvedIntentFromMsg = TurkeyVisitIntentResolver.detect(inboundText);
+      const assistantHistoryForVisitIntent = history.filter(m => m.role === 'assistant');
+      const lastAssistantForVisitIntent = assistantHistoryForVisitIntent.length > 0
+        ? assistantHistoryForVisitIntent[assistantHistoryForVisitIntent.length - 1].content
+        : '';
+      const resolvedIntentFromMsg = TurkeyVisitIntentResolver.detectWithContext(inboundText, lastAssistantForVisitIntent);
       const hasExplicitCall = TurkeyVisitIntentResolver.hasExplicitCallRequest(inboundText);
 
       let currentVisitIntent = convMeta.turkey_visit_intent || 'turkey_visit_intent_unknown';
