@@ -225,6 +225,32 @@ const REWRITE_RULES: RewriteRule[] = [
     pattern: /sabah_saatlerinde_\(?09:00_-_12:00\)?|sabah\s+saatlerinde\s+\(?09:00\s*-\s*12:00\)?/gi,
     replacement: 'sabah saatlerinde',
   },
+  // Live v75 morphology fixes
+  {
+    id: 'bugununuz_fix',
+    pattern: /\bbug[üu]n[üu]n[üu]z\b/gi,
+    replacement: 'bugün',
+  },
+  {
+    id: 'kisiniz_yasina_fix',
+    pattern: /\bki[sş]iniz\s+ya[sş][ıi]na\b/gi,
+    replacement: 'kişinin yaşına',
+  },
+  {
+    id: 'sureciniz_kapsami_fix',
+    pattern: /(^|\s)s[üu]reciniz\s+kapsam[ıi](?=\s|[.,;:!?]|$)/gi,
+    replacement: (_match: string, prefix: string) => `${prefix}sürecin kapsamı`,
+  },
+  {
+    id: 'uzmaninizi_explicit_fix',
+    pattern: /(^|\s)uzman[ıi](?:n[ıi]z[ıi]|z[ıi])(?=\s|[.,;:!?]|$)/gi,
+    replacement: (_match: string, prefix: string) => `${prefix}uzmanı`,
+  },
+  {
+    id: 'tetkikleriniz_yapilmasi_fix',
+    pattern: /(^|\s)tetkikleriniz\s+yap[ıi]lmas[ıi](?=\s|[.,;:!?]|$)/gi,
+    replacement: (_match: string, prefix: string) => `${prefix}tetkiklerin yapılması`,
+  },
 ];
 
 // ─── Normalizer ───────────────────────────────────────────────────────────────

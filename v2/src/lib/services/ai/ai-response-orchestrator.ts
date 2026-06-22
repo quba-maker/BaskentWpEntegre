@@ -339,12 +339,37 @@ export class AIResponseOrchestrator {
 
         if (!sandbox) {
           try {
+            await db.executeSafe({
+              text: `UPDATE follow_up_tasks
+                     SET status = 'cancelled',
+                         skipped_reason = $4,
+                         metadata = COALESCE(metadata, '{}'::jsonb) || $5::jsonb,
+                         updated_at = NOW()
+                     WHERE tenant_id = $1
+                       AND conversation_id = $2
+                       AND task_type = $3
+                       AND status IN ('pending', 'in_progress')
+                       AND due_at <> $6::timestamptz`,
+              values: [
+                tenantId,
+                conversationId,
+                'callback_scheduled',
+                'callback_rescheduled_by_patient',
+                JSON.stringify({
+                  superseded_by_callback_time: proposedUtc,
+                  superseded_at: new Date().toISOString(),
+                  superseded_source: 'callback_confirmation'
+                }),
+                proposedUtc
+              ]
+            });
+
             const existing = await db.executeSafe({
               text: `SELECT id FROM follow_up_tasks 
                      WHERE tenant_id = $1 
                        AND conversation_id = $2 
                        AND task_type = $3 
-                       AND due_at = $4 
+                       AND due_at = $4::timestamptz
                        AND status IN ('pending', 'in_progress')`,
               values: [tenantId, conversationId, 'callback_scheduled', proposedUtc]
             }) as any[];
@@ -372,6 +397,9 @@ export class AIResponseOrchestrator {
                 createdBy: 'system',
                 metadata: {
                   idempotency_key: idempotencyKey,
+                  scheduled_for_utc: proposedUtc,
+                  confirmation_status: 'confirmed',
+                  time_confirmed_by_patient: true,
                   callback_time_tr: parsedSugg.suggested_time,
                   callback_time_tr_end: parsedSugg.suggested_time_end || undefined,
                   source: 'callback_confirmation_bypass'

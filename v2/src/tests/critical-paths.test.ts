@@ -11994,6 +11994,62 @@ test("Başkent v75 Live T29: Check-up safe fallback avoids old program/randevu s
   assert(result.text.includes("geliş döneminiz"), "Fallback should ask an engagement question about visit period");
 });
 
+test("Başkent v75 Live T30: Delayed worker enforces WhatsApp burst quiet-window before sending", () => {
+  const workerCode = require("fs").readFileSync("src/lib/queue/worker.ts", "utf8");
+
+  assert(workerCode.includes("WHATSAPP_BURST_QUIET_MS"), "Worker should support burst quiet-window setting");
+  assert(workerCode.includes("burst_quiet_window_before_send"), "Worker should re-check quiet window before sending");
+  assert(workerCode.includes("newer_inbound_before_send"), "Worker should cancel/re-schedule if a newer inbound arrives before send");
+  assert(workerCode.includes("unrepliedUserContents.join('\\n')"), "Delayed worker should combine consecutive unreplied user messages");
+});
+
+test("Başkent v75 Live T31: Callback reschedule cancels older open callback tasks", () => {
+  const orchestratorCode = require("fs").readFileSync("src/lib/services/ai/ai-response-orchestrator.ts", "utf8");
+
+  assert(orchestratorCode.includes("callback_rescheduled_by_patient"), "Old callback task should be cancelled when patient confirms a new slot");
+  assert(orchestratorCode.includes("superseded_by_callback_time"), "Cancelled callback task should keep superseded target metadata");
+  assert(orchestratorCode.includes("scheduled_for_utc: proposedUtc"), "New callback task metadata should store canonical UTC time");
+  assert(orchestratorCode.includes("confirmation_status: 'confirmed'"), "New callback task should be marked confirmed");
+});
+
+test("Başkent v75 Live T32: Objection/comparison messages are not deterministic cancellations", async () => {
+  const { detectCancellation } = await import("../lib/services/ai/cancellation-detector");
+
+  const comparison = detectCancellation("neden siz ? başka hastaneye gidebilirim, fiyatlar pahalı");
+  assert(comparison.explicit_cancellation === false, "Comparison/objection must not be treated as explicit cancellation");
+  assert(comparison.should_stop_follow_up === false, "Comparison/objection must not stop follow-up");
+
+  const definitive = detectCancellation("başka hastaneye gideceğim, vazgeçtim");
+  assert(definitive.explicit_cancellation === true, "Definitive cancellation must still be detected");
+});
+
+test("Başkent v75 Live T33: Turkish normalizer fixes live morphology regressions", async () => {
+  const { TurkishFinalQualityNormalizer } = await import("../lib/services/ai/turkish-final-quality-normalizer");
+  const input = [
+    "Bugününüz 22 Haziran Pazartesi geçti.",
+    "Bu süreciniz kapsamı, kişiniz yaşına göre belirlenir.",
+    "Kardiyoloji uzmanızı tarafından muayene edilmesi ve tetkikleriniz yapılması önemlidir."
+  ].join("\n");
+
+  const result = TurkishFinalQualityNormalizer.normalize(input);
+
+  assert(!/bugününüz/i.test(result.text), "Broken 'bugününüz' must be fixed");
+  assert(!/süreciniz kapsamı/i.test(result.text), "Broken 'süreciniz kapsamı' must be fixed");
+  assert(!/kişiniz yaşına/i.test(result.text), "Broken 'kişiniz yaşına' must be fixed");
+  assert(!/uzmanızı/i.test(result.text), "Broken 'uzmanızı' must be fixed");
+  assert(!/tetkikleriniz yapılması/i.test(result.text), "Broken 'tetkikleriniz yapılması' must be fixed");
+  assert(result.wasModified === true, "Normalizer should report modifications");
+});
+
+test("Başkent v75 Live T34: Lost-stage and LLM lost+cold are softened for active objections", () => {
+  const workerCode = require("fs").readFileSync("src/lib/queue/worker.ts", "utf8");
+
+  assert(workerCode.includes("TERMINAL_STAGE_SOFT_REOPEN"), "Terminal stage should not silence active healthcare engagement");
+  assert(workerCode.includes("CANCELLATION_LAYER3_SOFT_BLOCK"), "LLM lost+cold heuristic should be blocked for objection/uncertain messages");
+  assert(workerCode.includes("isShortAmbiguousNegative"), "Short ambiguous negatives should not be treated as terminal cancellation");
+  assert(workerCode.includes("isActiveHealthcareEngagementText"), "Worker should detect active healthcare engagement before terminal handoff");
+});
+
 
 async function runAllTests() {
   try {

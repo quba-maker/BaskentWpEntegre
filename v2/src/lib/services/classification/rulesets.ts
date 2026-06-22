@@ -40,7 +40,7 @@ export const BaskentRuleset_V1: TenantRuleset = {
     { id: 'intent_appointment_confirm', pattern: /geleceğim|geliyorum|gelirim|hemen gel|ayarlayın|ayarlayalım|planlayalım|onaylıyorum|kabul/i, category: 'intent', tag: 'Randevu Onayı', scoreContribution: 25, confidence: 0.95, isTerminal: true },
     { id: 'intent_appointment_interest', pattern: /randevu|appointment|موعد|запись|termin|rendez|müsait|ne zaman|gelebilir|gelmek istiyorum|görüşelim|görşelim|uygun|saat\s*\d+|tarih|sabah|öğle|akşam|yarın|bugün/i, category: 'intent', tag: 'Randevu İlgisi', scoreContribution: 15, confidence: 0.8 },
     { id: 'intent_short_approval', pattern: /^(olur|tamam|evet|uygun)$/i, category: 'intent', tag: 'Kısa Onay', scoreContribution: 10, confidence: 0.7 },
-    { id: 'intent_lost_patient', pattern: /istemiyorum|gerek yok|başka hastane|başka yere|vazgeçtim|iptal|cancel|no thanks|لا شكرا|не нужно|kein interesse|pas intéressé|almıyorum|gitmeye.*karar|başka.*(doktor|yer)/i, category: 'intent', tag: 'Kaybedildi', scoreContribution: -50, confidence: 0.95, isTerminal: true },
+    { id: 'intent_lost_patient', pattern: /istemiyorum|gerek yok|başka\s+hastane(?:ye|de|den)?\s+(?:gittim|gideceğim|gitmeye\s+karar|tercih\s+ettim)|başka yere|vazgeçtim|iptal|cancel|no thanks|لا شكرا|не нужно|kein interesse|pas intéressé|almıyorum|gitmeye.*karar|başka.*(doktor|yer)/i, category: 'intent', tag: 'Kaybedildi', scoreContribution: -50, confidence: 0.95, isTerminal: true },
 
     // --- Patient Types ---
     { id: 'type_expat', pattern: /almanya|deutschland|germany|hollanda|fransa|belçika|avusturya|ingiltere|isviçre|gurbetçi|abroad|yurtdışı/i, category: 'patient_type', tag: 'Gurbetçi', scoreContribution: 30, confidence: 0.9 }
@@ -60,4 +60,3 @@ export const GenericRuleset_V1: TenantRuleset = {
     { id: 'intent_lost_patient', pattern: /istemiyorum|gerek yok|başka yere|vazgeçtim|iptal|cancel|no thanks|لا شكra|не нужно|kein interesse|pas intéressé|almıyorum/i, category: 'intent', tag: 'Vazgeçti', scoreContribution: -50, confidence: 0.95, isTerminal: true },
   ]
 };
-

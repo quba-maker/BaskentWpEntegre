@@ -159,6 +159,34 @@ function formatForWhatsApp(text: string): string {
   return formatted;
 }
 
+function isActiveHealthcareEngagementText(text: string): boolean {
+  const clean = (text || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return false;
+
+  return [
+    /fiyat|ücret|ucret|ödeme|odeme|maliyet|pahal[ıi]/i,
+    /\bta\s*12\b|sigorta|emekli|provizyon/i,
+    /konya\s+uzak|uzak\s+bana|nas[ıi]l\s+gelece|ula[sş][ıi]m|yol|kalacak|konaklama|otel/i,
+    /neden\s+siz|ba[sş]ka\s+hastane(?:ye)?\s+gidebilirim|[sş][üu]phe|karars[ıi]z|emin\s+de[gğ]ilim/i,
+    /bilgi|soru|detay|dan[ıi][sş]|irtibat/i,
+    /annem|babam|e[sş]im|karde[sş]im|o[gğ]lum|k[ıi]z[ıi]m/i,
+    /kardiyoloji|kalp|g[öo][gğ][üu]s|nefes|merdiven|rahats[ıi]zl[ıi]k|[sş]ikayet|muayene/i,
+    /gelmeyi\s+d[üu][sş][üu]n|gelebilirim|gelebiliriz|yaz\s+tatili|t[üu]rkiye'?ye\s+geldi[gğ]imde/i,
+    /arama|telefon|randevu|g[öo]r[üu][sş]me/i,
+  ].some((pattern) => pattern.test(clean));
+}
+
+function isShortAmbiguousNegative(text: string): boolean {
+  const clean = (text || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return /^(olmaz|hay[ıi]r|yok|[sş]imdilik yok|[sş]u an olmaz)$/.test(clean);
+}
+
 /**
  * Enterprise Queue Worker Engine
  * Abstracted worker logic to keep API routes clean and testable.
@@ -1838,6 +1866,7 @@ export class QueueWorkerEngine {
         const { classifyStopRuleIntent } = await import('@/lib/services/stop-rule-intent');
         const stopIntent = classifyStopRuleIntent(content || '');
         const isTerminalStage = leadStage && ['lost', 'not_interested', 'arrived', 'terminal'].includes(leadStage);
+        const hasReactivationSignal = isActiveHealthcareEngagementText(content || '');
 
         if (stopIntent.isCommunicationOptOut) {
           await disableAutopilot('stop_rule', `Communication opt-out detected: "${stopIntent.matchedPattern}"`);
@@ -1847,6 +1876,13 @@ export class QueueWorkerEngine {
           // Appointment/plan cancellation — NOT a communication opt-out.
           // Let the bot handle the conversation naturally.
           this.log.info(`[STOP_RULE_SOFT] Cancellation intent detected, bot continues. Pattern: "${stopIntent.matchedPattern}"`, { phoneNumber, tenantId, traceId });
+        } else if (isTerminalStage && hasReactivationSignal) {
+          this.log.info(`[TERMINAL_STAGE_SOFT_REOPEN] Terminal stage present but inbound has active healthcare engagement; autopilot continues.`, {
+            phoneNumber,
+            tenantId,
+            traceId,
+            leadStage
+          });
         } else if (isTerminalStage) {
           await disableAutopilot('coordinator_takeover', `Terminal stage detected: "${leadStage}"`);
           skipBotReply = true;
@@ -3095,10 +3131,27 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
       // Layer 3: LLM pipeline_stage=lost + priority=cold heuristic
       if (!explicitCancellation && crmData?.pipeline_stage === 'lost' && crmData?.opportunity_priority === 'cold') {
-        explicitCancellation = true;
-        shouldStopFollowUp = true;
-        cancellationReason = cancellationReason || `llm_stage_priority: lost+cold`;
-        this.log.info(`[CANCELLATION_LAYER3] LLM lost+cold heuristic`, { traceId, phoneNumber });
+        const hasActiveEngagement = isActiveHealthcareEngagementText(content || '');
+        const isAmbiguousShortNegative = isShortAmbiguousNegative(content || '');
+        if (hasActiveEngagement || isAmbiguousShortNegative) {
+          this.log.info(`[CANCELLATION_LAYER3_SOFT_BLOCK] LLM lost+cold ignored because inbound is objection/uncertain, not explicit cancellation`, {
+            traceId,
+            phoneNumber,
+            hasActiveEngagement,
+            isAmbiguousShortNegative
+          });
+          if (crmData) {
+            crmData.pipeline_stage = hasActiveEngagement ? 'discovery' : 'responded';
+            crmData.opportunity_priority = hasActiveEngagement ? 'warm' : 'cold';
+            crmData.explicit_cancellation = false;
+            crmData.should_stop_follow_up = false;
+          }
+        } else {
+          explicitCancellation = true;
+          shouldStopFollowUp = true;
+          cancellationReason = cancellationReason || `llm_stage_priority: lost+cold`;
+          this.log.info(`[CANCELLATION_LAYER3] LLM lost+cold heuristic`, { traceId, phoneNumber });
+        }
       }
 
       // Layer 4: Deterministic intent safety net (runs even when crmData is null/failed)
@@ -4123,7 +4176,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
     // Check 3: The targetMessageId is still the latest inbound message in the conversation
     const latestInboundQuery = await db.executeSafe({
-      text: `SELECT provider_message_id, content FROM messages WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'in' ORDER BY created_at DESC LIMIT 1`,
+      text: `SELECT provider_message_id, content, created_at FROM messages WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'in' ORDER BY created_at DESC LIMIT 1`,
       values: [tenantId, conversationId]
     }) as any[];
 
@@ -4134,6 +4187,25 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
     const latestInboundProviderId = latestInboundQuery[0].provider_message_id;
     const latestInboundContent = latestInboundQuery[0].content || '';
+    const latestInboundCreatedAt = latestInboundQuery[0].created_at ? new Date(latestInboundQuery[0].created_at) : null;
+
+    const burstQuietMsRaw = parseInt(process.env.WHATSAPP_BURST_QUIET_MS || process.env.WHATSAPP_AUTOPILOT_DEBOUNCE_MS || '12000', 10);
+    const burstQuietMs = Math.max(5000, Math.min(30000, Number.isFinite(burstQuietMsRaw) ? burstQuietMsRaw : 12000));
+    const rescheduleDelayedReply = async (nextTargetMessageId: string, reason: string, delayMs?: number) => {
+      const { QueueService } = await import('./queue.service');
+      const queue = new QueueService();
+      const safeDelayMs = Math.max(3000, Math.min(30000, delayMs ?? burstQuietMs));
+      await queue.publish(tenantId, `${channel}.message.received.delayed`, {
+        ...payload,
+        targetMessageId: nextTargetMessageId
+      }, { delayMs: safeDelayMs });
+      this.log.info(`[DEBOUNCE_WORKER] Re-scheduled delayed worker (${reason}) for message ${nextTargetMessageId} in ${safeDelayMs}ms`, {
+        tenantId,
+        channel,
+        conversationId,
+        traceId
+      });
+    };
 
     if (latestInboundProviderId !== targetMessageId) {
       this.log.info(
@@ -4141,6 +4213,14 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         { tenantId, channel, conversationId, targetMessageId, latestInboundProviderId, traceId }
       );
       return;
+    }
+
+    if (latestInboundCreatedAt) {
+      const ageMs = Date.now() - latestInboundCreatedAt.getTime();
+      if (ageMs >= 0 && ageMs < burstQuietMs) {
+        await rescheduleDelayedReply(latestInboundProviderId, 'burst_quiet_window', burstQuietMs - ageMs);
+        return;
+      }
     }
 
     let isRedisLockAcquired = false;
@@ -4601,6 +4681,26 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       } else if (finalResponseText && channel !== 'whatsapp') {
         // Non-WhatsApp: keep legacy formatter
         finalResponseText = formatForWhatsApp(finalResponseText);
+      }
+
+      const latestBeforeSend = await db.executeSafe({
+        text: `SELECT provider_message_id, created_at FROM messages
+               WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'in'
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [tenantId, conversationId]
+      }) as any[];
+      const latestBeforeSendId = latestBeforeSend[0]?.provider_message_id;
+      const latestBeforeSendAt = latestBeforeSend[0]?.created_at ? new Date(latestBeforeSend[0].created_at) : null;
+      if (latestBeforeSendId && latestBeforeSendId !== targetMessageId) {
+        await rescheduleDelayedReply(latestBeforeSendId, 'newer_inbound_before_send');
+        return;
+      }
+      if (latestBeforeSendAt) {
+        const latestAgeMs = Date.now() - latestBeforeSendAt.getTime();
+        if (latestAgeMs >= 0 && latestAgeMs < burstQuietMs) {
+          await rescheduleDelayedReply(latestBeforeSendId || targetMessageId, 'burst_quiet_window_before_send', burstQuietMs - latestAgeMs);
+          return;
+        }
       }
 
       // Send response

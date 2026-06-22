@@ -46,7 +46,7 @@ const CANCELLATION_PHRASES: RegExp[] = [
   /art[iı]k\s+gerek\s+yok/i,      // artık gerek yok
   /g[oö]r[uü][sş]mek\s+istemiyorum/i, // görüşmek istemiyorum
   /gelme[ky]\s*(istemiyorum|niyetim\s+yok)/i, // gelmek istemiyorum
-  /ba[sş]ka\s+hastane/i,           // başka hastaneye gitti
+  /ba[sş]ka\s+hastane(?:ye|de|den)?\s+(?:gittim|gidece[gğ]im|gitmeye\s+karar|tercih\s+ettim)/i, // kesin başka hastane tercihi
   /ba[sş]ka\s+yere?\s+gi[dt]/i,    // başka yere gitti
   /gelmiyorum/i,                   // gelmiyorum
   /gelmeyece[gğ]iz/i,             // gelmeyeceğiz  
