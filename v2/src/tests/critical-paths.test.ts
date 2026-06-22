@@ -12061,6 +12061,8 @@ test("Başkent v75 Inbox T35: clearConversation preserves form and CRM context",
   assert(clearBlock.includes("DELETE FROM conversation_memory"), "Clear should delete volatile AI memory");
   assert(clearBlock.includes("messages_and_ai_memory_only"), "Audit should declare message/memory-only scope");
   assert(clearBlock.includes("preservesFormAndCrm"), "Audit should mark form/CRM preservation");
+  assert(clearBlock.includes("last_message_at        = NOW()"), "Clear should keep the conversation visible in the inbox");
+  assert(clearBlock.includes("last_message_content   = 'Sohbet temizlendi'"), "Clear should leave a safe inbox preview");
 
   assert(!clearBlock.includes("UPDATE opportunities"), "Clear must not reset opportunity records");
   assert(!clearBlock.includes("active_opportunity_id = NULL"), "Clear must preserve active opportunity linkage");
@@ -12083,6 +12085,14 @@ test("Başkent v75 Inbox T36: deleteConversationAction is soft delete and keeps 
   assert(!deleteBlock.includes("DELETE FROM leads"), "Delete must not delete lead/form records");
   assert(!deleteBlock.includes("DELETE FROM opportunities"), "Delete must not delete opportunity records");
   assert(!deleteBlock.includes("DELETE FROM messages"), "Delete must not hard-delete messages");
+});
+
+test("Başkent v75 Inbox T37: cleared conversations still render in conversation list", () => {
+  const inboxCode = require("fs").readFileSync("src/app/actions/inbox.ts", "utf8");
+
+  assert(inboxCode.includes("COALESCE(m.content, c.last_message_content, c.metadata->>'clear_preview') as last_message"), "Conversation list should fall back to clear preview when messages are empty");
+  assert(inboxCode.includes("ORDER BY (cp.id IS NOT NULL) DESC, c.last_message_at DESC NULLS LAST"), "Conversation list should keep cleared chats sortable by last_message_at");
+  assert(!inboxCode.includes("last_message_at        = NULL"), "Clear must not null last_message_at because that makes the chat look deleted");
 });
 
 

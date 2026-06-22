@@ -135,10 +135,10 @@ export async function getConversations(
           c.notes as notes,
           c.last_message_at,
           EXTRACT(EPOCH FROM c.last_message_at) * 1000 as last_message_time_ms,
-          m.content as last_message,
-          m.status as last_message_status,
-          m.direction as last_message_direction,
-          m.model_used as last_message_model,
+          COALESCE(m.content, c.last_message_content, c.metadata->>'clear_preview') as last_message,
+          COALESCE(m.status, c.last_message_status) as last_message_status,
+          COALESCE(m.direction, c.last_message_direction) as last_message_direction,
+          COALESCE(m.model_used, c.last_message_model) as last_message_model,
           m.media_type as last_message_media_type,
           m.media_url as last_message_media_url,
           -- Fallbacks for CRM fields removed from sidebar query
@@ -6833,10 +6833,10 @@ export async function clearConversation(conversationId: string): Promise<{ succe
       await ctx.db.executeSafe({
         text: `UPDATE conversations
                SET message_count          = 0,
-                   last_message_at        = NULL,
-                   last_message_content   = NULL,
-                   last_message_direction = NULL,
-                   last_message_status    = NULL,
+                   last_message_at        = NOW(),
+                   last_message_content   = 'Sohbet temizlendi',
+                   last_message_direction = 'system',
+                   last_message_status    = 'sent',
                    last_message_model     = NULL,
                    metadata               = (
                      COALESCE(metadata, '{}'::jsonb)
@@ -6846,7 +6846,7 @@ export async function clearConversation(conversationId: string): Promise<{ succe
                        - 'ai_response_incomplete'
                        - 'quality_gate_handled'
                        - 'retry_attempted'
-                   ) || '{"consecutive_fallback_count":0}'::jsonb,
+                   ) || '{"consecutive_fallback_count":0,"clear_preview":"Sohbet temizlendi"}'::jsonb,
                    updated_at             = NOW()
                WHERE id = $1 AND tenant_id = $2`,
         values: [conversationId, ctx.tenantId]
@@ -7113,4 +7113,3 @@ export async function deleteConversationAction(conversationId: string) {
     return { success: true };
   });
 }
-
