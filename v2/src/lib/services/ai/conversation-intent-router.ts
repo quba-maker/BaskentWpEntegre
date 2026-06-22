@@ -435,7 +435,12 @@ export class ConversationIntentRouter {
       'iyi gunler', 'iyi günler', 'gorusmek uzere', 'görüşmek üzere'
     ];
     // Polite close only if NO continuation signal follows
-    const hasContinuationAfterThanks = ['ama', 'fakat', 'lakin', 'bir soru', 'bir sey', 'bir şey', 'peki', 'ya fiyat', 'doktor', 'surec', 'süreç'].some(kw => clean.includes(kw));
+    const hasContinuationAfterThanks = [
+      'ama', 'fakat', 'lakin', 'bir soru', 'bir sey', 'bir şey', 'peki',
+      'ya fiyat', 'doktor', 'surec', 'süreç', 'bilgi', 'haftaya', 'gelmeyi',
+      'gelmeyi dusun', 'gelmeyi düşünü', 'odeme', 'ödeme', 'ta 12', 'ta12',
+      'konaklama', 'kalacak yer'
+    ].some(kw => clean.includes(kw) || originalLower.includes(kw));
     if (!hasContinuationAfterThanks && politeCloseKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       intents.push('polite_close');
     }
@@ -447,7 +452,7 @@ export class ConversationIntentRouter {
       // "sağ olun bir şey daha"
       /sa[gğgG]\s+olun.{0,20}bir/i,
       // "teşekkürler bir soru daha"
-      /te[sşsS]ekk[uüuU]r(?:ler|ederim)?.{0,30}(?:bir\s+soru|bir\s+[sşsS]ey|sorum|sormak)/i,
+      /te[sşsS]ekk[uüuU]r(?:ler|ederim)?.{0,60}(?:bir\s+soru|bir\s+[sşsS]ey|sorum|sormak|bilgi|haftaya|gelmeyi|[oö]deme|ta\s*12|konaklama)/i,
       // ASCII variants: "tesekkur bir soru daha"
       /tesekkur(?:ler|ederim)?.{0,30}(?:bir\s+soru|sorum|sormak|bilgi)/i,
       // "bir sorum daha var" after teşekkür

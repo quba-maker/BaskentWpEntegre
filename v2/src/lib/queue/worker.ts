@@ -4376,10 +4376,25 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       /iyi akşamlar/i
     ];
 
+    const hasContinuationSignal = [
+      /bilgi\s+alabilir/i,
+      /bilgi\s+almak/i,
+      /haftaya/i,
+      /gelmeyi\s+d[üu]ş[üu]n/i,
+      /gelmeyi\s+dusun/i,
+      /fiyat|[üu]cret|[öo]deme|maliyet|ta\s*12|ta12/i,
+      /konya|eskişehir|eskisehir|ulaş[ıi]m|ulas[ıi]m|konaklama|kalacak\s+yer/i,
+      /soru|sormak|sorabilir/i,
+      /\?/,
+      /m[ıi]y[ıi]m|misiniz|musunuz|m[ıi]\s/i
+    ].some(pat => pat.test(normalizedContent));
+
+    const wordCount = normalizedContent.split(/\s+/).filter(Boolean).length;
+
     let deterministicReply = '';
     if (postponePatterns.some(pat => pat.test(normalizedContent))) {
       deterministicReply = 'Tabii, tarihiniz netleştiğinde bize bu numara üzerinden yazabilirsiniz. Size uygun şekilde randevu planlaması için yardımcı oluruz. Geçmiş olsun, sağlıklı günler dileriz.';
-    } else if (thankYouPatterns.some(pat => pat.test(normalizedContent))) {
+    } else if (!hasContinuationSignal && wordCount <= 6 && thankYouPatterns.some(pat => pat.test(normalizedContent))) {
       deterministicReply = 'Rica ederiz, size de iyi günler dileriz.';
     }
 

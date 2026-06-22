@@ -1078,9 +1078,9 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       } else if (effectiveIntent === 'time_availability') {
         intentGuide = `Intent: time_availability\nBu cevapta hastanın/müşterinin uygun zamanını not et ve onay al.\nKesin bir randevu saati taahhüt etme, ekibin arayacağını belirt.`;
       } else if (effectiveIntent === 'price_question') {
-        intentGuide = `Intent: price_question\nBu cevapta fiyatın kişiye özel değerlendirme sonrasında belirlendiğini açıkla.\nKesinlikle rakamsal fiyat verme, telefon görüşmesi teklif et.`;
+        intentGuide = `Intent: price_question\nBu cevapta fiyat/ödeme/TA12 gibi kaygıları önce anladığını göster. Fiyatın kişiye özel değerlendirme sonrasında belirlendiğini açıkla.\nKesinlikle rakamsal fiyat verme. Telefon görüşmesini dayatma; hastanın yazdığı ödeme, evrak, geliş ve konaklama sorularını tek tek sahiplenip, gerekirse "isterseniz bunu telefonla da netleştirebiliriz" şeklinde seçenek sun.`;
       } else if (effectiveIntent === 'distance_objection') {
-        intentGuide = `Intent: distance_objection\nBu cevapta mesafenin sorun olmadığını, transfer/konaklama desteği olduğunu vurgula.\nAkademik uzman ekibe değineceğini hissettir ve telefon görüşmesi öner.`;
+        intentGuide = `Intent: distance_objection\nBu cevapta mesafe/ulaşım/konaklama endişesini küçümsemeden anladığını belirt. Transfer, konaklama ve süreç planlamasında koordinasyon desteği verilebildiğini doğal biçimde anlat.\nAkademik uzman ekibe değin; telefon görüşmesini tek çıkış yolu gibi dayatma, önce endişeleri yazılı olarak toparla ve netleştirici tek soru sor.`;
       } else if (effectiveIntent === 'complaint_detail') {
         intentGuide = `Intent: complaint_detail\nBu cevapta hastanın şikayetini/durumunu anladığını belirt ve geçmiş olsun de.\nTıbbi yorum/teşhis yapma, durumun doktor kuruluna iletileceğini söyle.`;
       } else if (effectiveIntent === 'name_intent') {

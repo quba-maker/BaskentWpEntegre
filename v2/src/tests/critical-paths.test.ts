@@ -12095,6 +12095,46 @@ test("Başkent v75 Inbox T37: cleared conversations still render in conversation
   assert(!inboxCode.includes("last_message_at        = NULL"), "Clear must not null last_message_at because that makes the chat look deleted");
 });
 
+test("Başkent v75 Live T38: thanks plus visit/info request must not close the conversation", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const intents = ConversationIntentRouter.routeAll("teşekkürler olur haftaya gelmeyi düşünüyorum bilgi alabilir miyim");
+
+  assert(intents.includes("thanks_but_continue") || intents.includes("open_continuation"), `Expected continuing intent, got: ${JSON.stringify(intents)}`);
+  assert(!intents.includes("polite_close"), `Must not close when thanks includes visit/info request, got: ${JSON.stringify(intents)}`);
+});
+
+test("Başkent v75 Live T39: worker thank-you stop rule skips continuation messages", () => {
+  const workerCode = require("fs").readFileSync("src/lib/queue/worker.ts", "utf8");
+
+  assert(workerCode.includes("hasContinuationSignal"), "Worker should detect continuation signals before thank-you deterministic close");
+  assert(workerCode.includes("bilgi\\s+alabilir"), "Worker should treat bilgi alabilir miyim as continuation");
+  assert(workerCode.includes("gelmeyi\\s+d[üu]ş[üu]n"), "Worker should treat visit intent as continuation");
+  assert(workerCode.includes("!hasContinuationSignal && wordCount <= 6 && thankYouPatterns"), "Thank-you deterministic close should only run for short pure closing messages");
+});
+
+test("Başkent v75 Live T40: price/TA12/logistics objections are handled before phone CTA", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v75-t40",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    effectiveIntent: "price_question",
+    currentMessageText: "TA 12 kağıdım var, ödeme durumu, Konya uzak ve kalacak yerim yok",
+    history: []
+  });
+
+  assert(prompt.includes("ödeme/TA12"), "Price guide should explicitly handle payment/TA12 concerns");
+  assert(prompt.includes("konaklama"), "Price guide should cover accommodation/logistics concerns");
+  assert(prompt.includes("Telefon görüşmesini dayatma"), "Prompt should not force phone call as the first response");
+  assert(prompt.includes("seçenek sun"), "Prompt should offer phone call as an option, not a hard CTA");
+});
+
 
 async function runAllTests() {
   try {
