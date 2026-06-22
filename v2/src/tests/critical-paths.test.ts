@@ -6514,7 +6514,16 @@ test("P0.16-N: 13. Live worker immediate path uses FinalOutboundBodyAuditor (not
     "Worker should reference auditor module");
 });
 
-test("P0.16-N: 14. P0.16-M baseline 278 tests still PASS (import check)", async () => {
+test("P0.16-N: 14. Live worker quality gate failure uses safe recovery before cancelling send", () => {
+  const workerCode = require("fs").readFileSync("src/lib/queue/worker.ts", "utf8");
+  assert(workerCode.includes("QualityGateRecoveryHelper"), "Worker should use quality gate recovery helper");
+  assert(workerCode.includes("path: 'queue_immediate'"), "Immediate worker should recover quality gate failures");
+  assert(workerCode.includes("path: 'queue_delayed'"), "Delayed worker should recover quality gate failures");
+  assert(!workerCode.includes("Quality gate blocked final. Cancelling send."),
+    "Worker should not use the old direct quality-gate cancellation path");
+});
+
+test("P0.16-N: 15. P0.16-M baseline 278 tests still PASS (import check)", async () => {
   const { FinalPipelineEnforcer } = await import("../lib/services/ai/final-pipeline-enforcer");
   const { FinalOutboundBodyAuditor } = await import("../lib/services/ai/final-outbound-body-auditor");
   const { MultiIntentConsultantComposer } = await import("../lib/services/ai/multi-intent-consultant-composer");

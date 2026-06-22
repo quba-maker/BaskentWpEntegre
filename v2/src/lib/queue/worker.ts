@@ -2472,37 +2472,38 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
 
       if (orchestratorResult.qualityGateFailed) {
-        this.log.warn(`[QUALITY_GATE_BLOCKED_FINAL] Cancelling send pipeline. Reason: ${orchestratorResult.qualityGateReason}`, { traceId, tenantId });
-        
-        const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
-        await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationIdVal || conversationId!, db);
-      
-      await db.executeSafe({
-        text: `
-          UPDATE conversations 
-          SET status = 'human', 
-              metadata = jsonb_set(
-                           jsonb_set(
-                             jsonb_set(COALESCE(metadata, '{}'::jsonb), '{ai_response_incomplete}', 'true'),
-                             '{quality_gate_handled}', 'true'
-                           ),
-                           '{retry_attempted}', 'true'
-                         )
-          WHERE phone_number = $1 AND tenant_id = $2
-        `,
-        values: [phoneNumber, tenantId]
-      });
+        const qgReason = orchestratorResult.qualityGateReason || 'quality_gate_failed';
+        this.log.warn(`[QUALITY_GATE_BLOCKED_FINAL] Attempting safe recovery. Reason: ${qgReason}`, { traceId, tenantId });
 
-      await db.executeSafe({
-        text: `
-          INSERT INTO messages (tenant_id, phone_number, direction, content, channel, provider_message_id)
-          VALUES ($1, $2, 'system', $3, $4, 'system_alert')
-        `,
-        values: [tenantId, phoneNumber, 'AI yanıtı tamamlanmadı, manuel kontrol gerekli. (Quality Gate Blocked)', channel]
-      });
+        const { QualityGateRecoveryHelper } = await import("@/lib/services/ai/quality-gate-recovery");
+        const recoveryResult = await QualityGateRecoveryHelper.handleFailure({
+          tenantId,
+          conversationId: conversationIdVal || conversationId || 'unknown',
+          phoneNumber,
+          inboundText: content || '',
+          brain,
+          identityConfig: brain?.prompts?.metadata?.identity || brain?.context?.config?.identity || {},
+          unifiedContext: unifiedContext || {},
+          reason: qgReason,
+          channel,
+          path: 'queue_immediate',
+          channelId: resolvedChannelId || metadata.channelId || undefined,
+          systemPromptText,
+          promptVersion: brain.prompts.metadata?.version
+        });
 
-      return;
-    }
+        if (recoveryResult.recovered && recoveryResult.text) {
+          orchestratorResult.text = recoveryResult.text;
+          orchestratorResult.qualityGateFailed = false;
+          orchestratorResult.qualityGateReason = undefined;
+          orchestratorResult.modelUsed = `${orchestratorResult.modelUsed || 'llm'}_qg_recovered`;
+        } else {
+          const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+          const breaker = await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationIdVal || conversationId!, db);
+          this.log.warn(`[QUALITY_GATE_BLOCKED_FINAL] Safe recovery failed; send cancelled. Circuit breaker tripped=${breaker.tripped}`, { traceId, tenantId });
+          return;
+        }
+      }
 
     aiResponse = {
       text: orchestratorResult.text,
@@ -4522,15 +4523,37 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
 
       if (orchestratorResult.qualityGateFailed) {
-        this.log.warn(`[DEBOUNCE_WORKER] Quality gate blocked final. Cancelling send. Reason: ${orchestratorResult.qualityGateReason}`, { traceId });
-        
-        const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
-        await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
-        await db.executeSafe({
-          text: `UPDATE conversations SET status = 'human', autopilot_enabled = false WHERE id = $1 AND tenant_id = $2`,
-          values: [conversationId, tenantId]
+        const qgReason = orchestratorResult.qualityGateReason || 'quality_gate_failed';
+        this.log.warn(`[DEBOUNCE_WORKER] Quality gate blocked final. Attempting safe recovery. Reason: ${qgReason}`, { traceId });
+
+        const { QualityGateRecoveryHelper } = await import("@/lib/services/ai/quality-gate-recovery");
+        const recoveryResult = await QualityGateRecoveryHelper.handleFailure({
+          tenantId,
+          conversationId,
+          phoneNumber,
+          inboundText: combinedInboundText,
+          brain,
+          identityConfig: brain?.prompts?.metadata?.identity || brain?.context?.config?.identity || {},
+          unifiedContext: unifiedContext || {},
+          reason: qgReason,
+          channel,
+          path: 'queue_delayed',
+          channelId: resolvedChannelId || metadata.channelId || undefined,
+          systemPromptText,
+          promptVersion: brain.prompts.metadata?.version
         });
-        return;
+
+        if (recoveryResult.recovered && recoveryResult.text) {
+          orchestratorResult.text = recoveryResult.text;
+          orchestratorResult.qualityGateFailed = false;
+          orchestratorResult.qualityGateReason = undefined;
+          orchestratorResult.modelUsed = `${orchestratorResult.modelUsed || 'llm'}_qg_recovered`;
+        } else {
+          const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+          const breaker = await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
+          this.log.warn(`[DEBOUNCE_WORKER] Safe recovery failed; send cancelled. Circuit breaker tripped=${breaker.tripped}`, { traceId });
+          return;
+        }
       }
 
       aiResponse = {
@@ -4552,12 +4575,8 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         this.log.error(`[DEBOUNCE_WORKER] Policy block: ${validation.reason}`, undefined, { traceId });
         
         const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
-        await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
-        // Takeover conversation to human
-        await db.executeSafe({
-          text: `UPDATE conversations SET status = 'human', autopilot_enabled = false WHERE id = $1 AND tenant_id = $2`,
-          values: [conversationId, tenantId]
-        });
+        const breaker = await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
+        this.log.warn(`[DEBOUNCE_WORKER] Policy block cancelled send. Circuit breaker tripped=${breaker.tripped}`, { traceId });
         return;
       }
 
