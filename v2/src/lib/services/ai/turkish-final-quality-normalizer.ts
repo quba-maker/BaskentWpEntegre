@@ -251,6 +251,16 @@ const REWRITE_RULES: RewriteRule[] = [
     pattern: /(^|\s)tetkikleriniz\s+yap[ıi]lmas[ıi](?=\s|[.,;:!?]|$)/gi,
     replacement: (_match: string, prefix: string) => `${prefix}tetkiklerin yapılması`,
   },
+  {
+    id: 'tedavi_planinizi_sonrasinda_fix',
+    pattern: /\btedavi\s+plan[ıi]n[ıi]z[ıi]\s+sonras[ıi]nda\b/gi,
+    replacement: 'tedavi planı sonrasında',
+  },
+  {
+    id: 'tahminizi_maliyet_fix',
+    pattern: /\btahminizi\s+maliyet\b/gi,
+    replacement: 'tahmini maliyet',
+  },
 ];
 
 // ─── Normalizer ───────────────────────────────────────────────────────────────

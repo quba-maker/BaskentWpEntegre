@@ -110,7 +110,7 @@ export class MultiIntentConsultantComposer {
     }
 
     if (detected.find(d => d.intent === 'price_question')) {
-      blocks.push(`${blockIndex}. Fiyat bilgisi\nNet fiyat; muayene, tetkik ve kişiye özel tedavi planı sonrasında netleştiği için buradan kesin rakam vermem doğru olmaz. Tahmini maliyet hakkında size bilgi iletebilirim.`);
+      blocks.push(`${blockIndex}. Fiyat bilgisi\nNet fiyat; muayene, tetkik ve kişiye özel planlama sonrasında netleştiği için buradan kesin rakam paylaşmam doğru olmaz. Ancak ödeme ve yaklaşık maliyet çerçevesiyle ilgili sorularınızı ilgili ekibimizle netleştirebiliriz.`);
       blockIndex++;
     }
 
@@ -143,7 +143,7 @@ export class MultiIntentConsultantComposer {
     }
 
     if (detected.find(d => d.intent === 'logistics_question')) {
-      blocks.push(`${blockIndex}. Konaklama / Ulaşım\nKonaklama ve transfer süreçlerinde size yardımcı olabilirim.`);
+      blocks.push(`${blockIndex}. Konaklama / Ulaşım\nŞehir dışından veya yurt dışından gelen hastalar için ulaşım, transfer ve konaklama planlaması ayrıca değerlendirilebilir. Kalacak yer veya geliş güzergahı endişeniz varsa bunu da not alıp birlikte netleştirebiliriz.`);
       blockIndex++;
     }
 

@@ -31,6 +31,7 @@ export interface FinalOutboundAuditCtx {
   responseSource?: string;
   channel?: string;
   replyLanguage?: string;
+  inboundText?: string;
 }
 
 export interface FinalOutboundAuditResult {
@@ -61,6 +62,47 @@ const LEGACY_CLOSE_PATTERNS: RegExp[] = [
   /iyi\s+g[üu]nler\s+dileriz\.\s*$/i,
   /ba[şs]ka\s+sorunuz\s+olursa\s+(?:bize|burada)/i,
 ];
+
+function buildCallbackTimeConfirmation(inboundText?: string): string | null {
+  if (!inboundText) return null;
+  const lower = inboundText
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase();
+
+  const dayMatch = lower.match(/\b(pazartesi|sal[ıi]|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar)\b/i);
+  const timeMatch = lower.match(/\b(?:saat\s*)?(\d{1,2})(?::|\.|\s)?(\d{2})?\b/);
+  if (!dayMatch || !timeMatch) return null;
+
+  const rawHour = Number(timeMatch[1]);
+  if (!Number.isFinite(rawHour) || rawHour < 0 || rawHour > 23) return null;
+  const rawMinute = timeMatch[2] ? Number(timeMatch[2]) : 0;
+  if (!Number.isFinite(rawMinute) || rawMinute < 0 || rawMinute > 59) return null;
+
+  const dayLabelMap: Record<string, string> = {
+    pazartesi: 'Pazartesi',
+    salı: 'Salı',
+    sali: 'Salı',
+    'çarşamba': 'Çarşamba',
+    carsamba: 'Çarşamba',
+    'perşembe': 'Perşembe',
+    persembe: 'Perşembe',
+    cuma: 'Cuma',
+    cumartesi: 'Cumartesi',
+    pazar: 'Pazar',
+  };
+
+  const dayKey = dayMatch[1].replace('ı', 'i');
+  const dayLabel = dayLabelMap[dayMatch[1]] || dayLabelMap[dayKey] || dayMatch[1];
+  const hh = String(rawHour).padStart(2, '0');
+  const mm = String(rawMinute).padStart(2, '0');
+
+  if (dayLabel === 'Pazar') {
+    return `Pazar günü telefon görüşmesi planlanmıyor. Pazar hariç Türkiye saatiyle 09:00-21:00 arasında hangi gün ve saat sizin için uygun olur?`;
+  }
+
+  return `${dayLabel} günü Türkiye saatiyle ${hh}:${mm} sizin için uygun görünüyor. Bu şekilde teyit ediyor musunuz?`;
+}
 
 export class FinalOutboundBodyAuditor {
   /**
@@ -126,6 +168,16 @@ export class FinalOutboundBodyAuditor {
       if (legacyReplacement !== null) {
         result = legacyReplacement;
         rewrote = true;
+      }
+
+      // Step 4: If a continuing callback-time answer somehow becomes a repeated
+      // self-introduction, recover it to the slot confirmation the user expects.
+      if (/^\s*(?:ben\s+)?r[üu]ya\b|ba[şs]kent\s+[üu]niversitesi/i.test(result)) {
+        const callbackRecovery = buildCallbackTimeConfirmation(ctx.inboundText);
+        if (callbackRecovery) {
+          result = callbackRecovery;
+          rewrote = true;
+        }
       }
     } catch (err) {
       // Non-fatal — use original text

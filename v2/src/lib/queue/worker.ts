@@ -2629,6 +2629,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         responseSource: orchestratorResult.modelUsed || 'unknown',
         channel: 'whatsapp',
         replyLanguage: orchestratorResult.replyLanguage,
+        inboundText: content || '',
       });
       finalResponseText = auditResult.text;
     } else if (finalResponseText && channel !== 'whatsapp') {
@@ -4691,6 +4692,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           responseSource: orchestratorResult.modelUsed || 'unknown',
           channel: 'whatsapp',
           replyLanguage: orchestratorResult.replyLanguage,
+          inboundText: combinedInboundText,
         });
         finalResponseText = auditResult.text;
       } else if (finalResponseText && channel !== 'whatsapp') {

@@ -12135,6 +12135,51 @@ test("Başkent v75 Live T40: price/TA12/logistics objections are handled before 
   assert(prompt.includes("seçenek sun"), "Prompt should offer phone call as an option, not a hard CTA");
 });
 
+test("Başkent v75 Live T41: multi-intent price/logistics answer avoids broken Turkish", () => {
+  const { MultiIntentConsultantComposer } = require("../lib/services/ai/multi-intent-consultant-composer");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v75-t41",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const result = MultiIntentConsultantComposer.compose(
+    "haftaya gelmeyi düşünüyorum bilgi alabilir miyim erkek birde ücretler",
+    brain,
+    [],
+    "Check-up",
+    "test"
+  );
+
+  assert(result && result.text, "Multi-intent composer should produce a response");
+  assert(!result.text.includes("planınızı sonrasında"), "Broken 'planınızı sonrasında' must not appear");
+  assert(!result.text.includes("Tahminizi maliyet"), "Broken 'Tahminizi maliyet' must not appear");
+  assert(result.text.includes("yaklaşık maliyet"), "Price block should mention approximate cost naturally");
+  assert(result.text.includes("konaklama"), "Logistics block should handle accommodation naturally");
+});
+
+test("Başkent v75 Live T42: final auditor rewrites repeated identity after callback time answer", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "Ben Rüya, Başkent Üniversitesi Konya Uygulama ve Araştırma Merkezi’nden sizinle ilgileniyorum. Size sağlık talebinizle ilgili yardımcı olayım.",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "test-conv",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "perşembe 20"
+    }
+  );
+
+  assert(result.rewrote === true, "Auditor should rewrite repeated identity callback response");
+  assert(result.text.includes("Perşembe günü Türkiye saatiyle 20:00"), `Expected callback confirmation, got: ${result.text}`);
+  assert(!result.text.includes("Ben Rüya"), "Repeated identity must not remain");
+});
+
 
 async function runAllTests() {
   try {
