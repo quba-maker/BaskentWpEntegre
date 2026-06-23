@@ -676,6 +676,7 @@ export async function getMessages(
               FROM messages
               WHERE conversation_id = $1::uuid 
                 AND (tenant_id = $2)
+                AND COALESCE(media_metadata->>'deleted_at', '') = ''
                 AND (
                   $3::timestamptz IS NULL
                   OR COALESCE(provider_timestamp, created_at) < $3::timestamptz
@@ -739,6 +740,96 @@ export async function getMessages(
     }
   ).then(res => {
     return res.data || [];
+  });
+}
+
+export async function deleteMessageAction(messageId: string) {
+  if (!messageId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(messageId)) {
+    return { success: false, error: "Geçersiz mesaj ID." };
+  }
+
+  return withActionGuard(
+    {
+      actionName: 'deleteMessage',
+      roles: ['owner', 'admin', 'platform_admin', 'agent']
+    },
+    async (ctx) => {
+      const rows = await ctx.db.executeSafe({
+        text: `
+          SELECT id, conversation_id, direction, content, media_metadata
+          FROM messages
+          WHERE id = $1 AND tenant_id = $2
+          LIMIT 1
+        `,
+        values: [messageId, ctx.tenantId]
+      }) as any[];
+
+      if (rows.length === 0) {
+        return { success: false, error: "Mesaj bulunamadı." };
+      }
+
+      const msg = rows[0];
+      if (msg.direction !== 'out') {
+        return { success: false, error: "Şimdilik sadece gönderilen AI/temsilci mesajları silinebilir." };
+      }
+
+      const existingMeta = msg.media_metadata || {};
+      if (existingMeta.deleted_at) {
+        return { success: true, alreadyDeleted: true, conversationId: msg.conversation_id };
+      }
+
+      const deletedAt = new Date().toISOString();
+      const updatedMeta = {
+        ...existingMeta,
+        deleted_at: deletedAt,
+        deleted_by: ctx.userId,
+        delete_source: 'inbox_message_delete',
+        whatsapp_delete_supported: false
+      };
+
+      await ctx.db.executeSafe({
+        text: `
+          UPDATE messages
+          SET media_metadata = $1::jsonb
+          WHERE id = $2 AND tenant_id = $3
+        `,
+        values: [JSON.stringify(updatedMeta), messageId, ctx.tenantId]
+      });
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4::jsonb)`,
+        values: [
+          ctx.tenantId,
+          'message_soft_deleted',
+          `Gönderilen mesaj panelden ve AI hafızasından silindi. Mesaj ID: ${messageId}`,
+          JSON.stringify({
+            message_id: messageId,
+            conversation_id: msg.conversation_id,
+            direction: msg.direction,
+            deleted_by_user_id: ctx.userId,
+            deleted_by_role: ctx.role,
+            whatsapp_delete_supported: false,
+            timestamp: deletedAt
+          })
+        ]
+      });
+
+      try {
+        await RealtimePublisher.publishMetadataUpdated(ctx.tenantId, {
+          conversationId: msg.conversation_id,
+          userId: ctx.userId,
+          updatedBy: ctx.userId
+        }).catch(() => {});
+      } catch (_) {}
+
+      return { success: true, conversationId: msg.conversation_id };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    const inner = res.data as any;
+    if (inner && 'success' in inner && !inner.success) return { success: false, error: inner.error };
+    return { success: true, ...(inner || {}) };
   });
 }
 

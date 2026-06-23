@@ -34,6 +34,7 @@ export class ConversationTurnAggregator {
           SELECT direction, content, media_type, media_metadata, created_at
           FROM messages
           WHERE phone_number = $1 AND tenant_id = $2 AND direction IN ('in', 'out')
+            AND COALESCE(media_metadata->>'deleted_at', '') = ''
           ORDER BY created_at DESC
           LIMIT $3
         `,

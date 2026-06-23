@@ -691,6 +691,7 @@ export class IdentityEngine {
             SELECT direction, content 
             FROM messages 
             WHERE conversation_id = $1 AND tenant_id = $2 AND direction IN ('in', 'out')
+              AND COALESCE(media_metadata->>'deleted_at', '') = ''
             ORDER BY created_at DESC 
             LIMIT 10
           `,

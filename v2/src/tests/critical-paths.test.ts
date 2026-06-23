@@ -12236,6 +12236,22 @@ test("Başkent v77 T45: orchestrator has no-form final recovery before sending",
   assert(source.includes("contactMode"), "Orchestrator should inject contactMode into unifiedContext");
 });
 
+test("Başkent v77 T46: outbound message delete hides panel message and removes it from AI memory", () => {
+  const inboxActions = require("fs").readFileSync("src/app/actions/inbox.ts", "utf8");
+  const aggregator = require("fs").readFileSync("src/lib/services/ai/conversation-turn-aggregator.ts", "utf8");
+  const identity = require("fs").readFileSync("src/lib/services/ai/engines/identity.ts", "utf8");
+  const chatArea = require("fs").readFileSync("src/components/features/inbox/chat-area.tsx", "utf8");
+
+  assert(inboxActions.includes("export async function deleteMessageAction"), "Inbox should expose a tenant-guarded message delete action");
+  assert(inboxActions.includes("msg.direction !== 'out'"), "Delete action should only allow outbound AI/operator messages");
+  assert(inboxActions.includes("message_soft_deleted"), "Delete action should write an audit log");
+  assert(inboxActions.includes("COALESCE(media_metadata->>'deleted_at', '') = ''"), "getMessages should hide soft-deleted messages");
+  assert(aggregator.includes("COALESCE(media_metadata->>'deleted_at', '') = ''"), "ConversationTurnAggregator should remove deleted messages from AI memory");
+  assert(identity.includes("COALESCE(media_metadata->>'deleted_at', '') = ''"), "IdentityEngine history should remove deleted messages from context");
+  assert(chatArea.includes("Hastanın WhatsApp uygulamasından geri alınamaz"), "UI must clearly warn that WhatsApp-side recall is unavailable");
+  assert(chatArea.includes("deleteMessageAction(message.id)"), "Chat UI should call the delete action from the message bubble");
+});
+
 
 async function runAllTests() {
   try {

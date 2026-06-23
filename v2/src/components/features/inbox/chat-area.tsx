@@ -3,9 +3,9 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
-import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download, Smile, CornerUpLeft } from "lucide-react";
+import { Send, Paperclip, User, MessageCircle, ChevronLeft, ChevronRight, ChevronDown, ArrowDown, Info, ShieldAlert, Sparkles, Zap, Check, CheckCheck, Clock, FileText, Play, Mic, MapPin, X, Download, Smile, CornerUpLeft, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getMessages, sendMessage, sendMediaMessage, toggleBotStatus, sendReaction } from "@/app/actions/inbox";
+import { getMessages, sendMessage, sendMediaMessage, toggleBotStatus, sendReaction, deleteMessageAction } from "@/app/actions/inbox";
 import { useInboxStore } from "@/store/inbox-store";
 import { AiRuntimeTimeline } from "@/components/features/ai-observability/AiRuntimeTimeline";
 import { getAiStatusForConversation } from "@/app/actions/ai-observability";
@@ -17,6 +17,7 @@ import { AblyStreamTransport } from "@/lib/ai/streaming/stream-transport";
 import { StreamBubble } from "@/components/components/../features/realtime/stream-bubble";
 import { getCountryFromPhone, normalizeCountryName, getCountryFlag } from "@/lib/utils/country";
 import { appendToInfiniteData } from "@/lib/utils/infinite-query-cache";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 import { useRealtimeTenant } from "@/components/providers/realtime-provider";
 import { useDiagnosticsStore } from "@/lib/realtime/diagnostics-store";
@@ -575,6 +576,8 @@ interface MessageBubbleRowProps {
   activeReactionPickerMsgId: string | null;
   setActiveReactionPickerMsgId: (id: string | null) => void;
   handleSendReaction: (targetProviderMessageId: string, emoji: string) => void;
+  handleDeleteMessage: (message: any) => void;
+  deletingMessageId: string | null;
   allConversationImages: any[];
   setGallery: (gallery: any) => void;
 }
@@ -587,6 +590,8 @@ const MessageBubbleRow = React.memo(function MessageBubbleRow({
   activeReactionPickerMsgId,
   setActiveReactionPickerMsgId,
   handleSendReaction,
+  handleDeleteMessage,
+  deletingMessageId,
   allConversationImages,
   setGallery,
 }: MessageBubbleRowProps) {
@@ -716,7 +721,7 @@ const MessageBubbleRow = React.memo(function MessageBubbleRow({
         <div className={`flex w-full ${item.message.sender === "user" ? "justify-start" : "justify-end"} group relative ${item.message.reactions && item.message.reactions.length > 0 ? "mb-3" : ""}`}>
           <div className="relative max-w-[85%] md:max-w-[65%] w-fit">
             {/* ── QUICK ACTIONS TOOLBAR ── */}
-            {item.message.providerMessageId && (
+            {(item.message.providerMessageId || item.message.sender !== "user") && (
               <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 ${
                 item.message.sender === "user" 
                   ? "left-[calc(100%+8px)] flex-row" 
@@ -730,6 +735,17 @@ const MessageBubbleRow = React.memo(function MessageBubbleRow({
                 >
                   <CornerUpLeft className="w-3.5 h-3.5" />
                 </button>
+
+                {item.message.sender !== "user" && (
+                  <button
+                    onClick={() => handleDeleteMessage(item.message)}
+                    disabled={deletingMessageId === item.message.id}
+                    className="p-1.5 rounded-full hover:bg-red-50 text-red-500 transition-colors border border-red-100 bg-[var(--q-bg-primary)] shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Panelden ve bot hafızasından sil"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
 
                 {/* Reaction Picker Button */}
                 {item.message.sender === "user" && (
@@ -929,7 +945,9 @@ export function ConversationViewport() {
   const [isUploading, setIsUploading] = useState(false);
   const [replyingToMessage, setReplyingToMessage] = useState<any | null>(null);
   const [activeReactionPickerMsgId, setActiveReactionPickerMsgId] = useState<string | null>(null);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const messagesQueryKey = useMemo(() => {
     const activePhoneClean = activePhone || "";
     const phoneHash = activePhoneClean ? activePhoneClean.slice(0, 4) + "****" + activePhoneClean.slice(-4) : "none";
@@ -1427,6 +1445,43 @@ export function ConversationViewport() {
       queryClient.setQueryData(messagesQueryKey, previousMessages);
       setSendError("Tepki gönderilemedi: " + err.message);
       setTimeout(() => setSendError(""), 4000);
+    }
+  };
+
+  const handleDeleteMessage = async (message: any) => {
+    if (!message?.id || message.sender === "user") return;
+    const confirmed = await confirm({
+      title: "Mesajı Sil",
+      message: "Bu mesaj panelden ve bot hafızasından silinecek. Hastanın WhatsApp uygulamasından geri alınamaz.",
+      variant: "danger",
+      confirmLabel: "Mesajı Sil",
+      cancelLabel: "Vazgeç"
+    });
+    if (!confirmed) return;
+
+    const previousMessages = queryClient.getQueryData(messagesQueryKey);
+    setDeletingMessageId(message.id);
+
+    queryClient.setQueryData(messagesQueryKey, (oldData: any) => {
+      if (!oldData?.pages) return oldData;
+      return {
+        ...oldData,
+        pages: oldData.pages.map((page: any[]) => page.filter((msg: any) => msg.id !== message.id))
+      };
+    });
+
+    try {
+      const res = await deleteMessageAction(message.id);
+      if (!res.success) {
+        throw new Error(res.error || "Mesaj silinemedi");
+      }
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    } catch (err: any) {
+      queryClient.setQueryData(messagesQueryKey, previousMessages);
+      setSendError("Mesaj silinemedi: " + err.message);
+      setTimeout(() => setSendError(""), 5000);
+    } finally {
+      setDeletingMessageId(null);
     }
   };
 
@@ -2314,6 +2369,8 @@ export function ConversationViewport() {
                   activeReactionPickerMsgId={activeReactionPickerMsgId}
                   setActiveReactionPickerMsgId={setActiveReactionPickerMsgId}
                   handleSendReaction={handleSendReaction}
+                  handleDeleteMessage={handleDeleteMessage}
+                  deletingMessageId={deletingMessageId}
                   allConversationImages={allConversationImages}
                   setGallery={setGallery}
                 />
