@@ -4403,6 +4403,26 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
     if (deterministicReply) {
       this.log.info(`[DEBOUNCE_WORKER] Stop rule triggered. Sending deterministic response: "${deterministicReply}"`, { traceId });
+
+      const latestBeforeDeterministicSend = await db.executeSafe({
+        text: `SELECT provider_message_id, created_at FROM messages
+               WHERE tenant_id = $1 AND conversation_id = $2 AND direction = 'in'
+               ORDER BY created_at DESC LIMIT 1`,
+        values: [tenantId, conversationId]
+      }) as any[];
+      const latestBeforeDeterministicSendId = latestBeforeDeterministicSend[0]?.provider_message_id;
+      const latestBeforeDeterministicSendAt = latestBeforeDeterministicSend[0]?.created_at ? new Date(latestBeforeDeterministicSend[0].created_at) : null;
+      if (latestBeforeDeterministicSendId && latestBeforeDeterministicSendId !== targetMessageId) {
+        await rescheduleDelayedReply(latestBeforeDeterministicSendId, 'deterministic_newer_inbound_before_send');
+        return;
+      }
+      if (latestBeforeDeterministicSendAt) {
+        const latestAgeMs = Date.now() - latestBeforeDeterministicSendAt.getTime();
+        if (latestAgeMs >= 0 && latestAgeMs < burstQuietMs) {
+          await rescheduleDelayedReply(latestBeforeDeterministicSendId || targetMessageId, 'deterministic_burst_quiet_window_before_send', burstQuietMs - latestAgeMs);
+          return;
+        }
+      }
       
       const { CredentialsService } = await import('../services/credentials.service');
       const outboundCreds = await CredentialsService.resolveCredentials(tenantId, channel);

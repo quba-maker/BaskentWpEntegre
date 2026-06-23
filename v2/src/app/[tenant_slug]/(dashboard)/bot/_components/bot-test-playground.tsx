@@ -22,8 +22,10 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
   const [testMsg, setTestMsg] = useState("");
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [testing, setTesting] = useState(false);
+  const [waitingForDelay, setWaitingForDelay] = useState(false);
   const [debugMeta, setDebugMeta] = useState<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const delayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-scroll to bottom of chat
   useEffect(() => {
@@ -32,9 +34,57 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
 
   // Reset chat when botGroupId changes (changing selected bot)
   useEffect(() => {
+    if (delayTimerRef.current) {
+      clearTimeout(delayTimerRef.current);
+      delayTimerRef.current = null;
+    }
     setMessages([]);
     setDebugMeta(null);
+    setWaitingForDelay(false);
+    setTesting(false);
   }, [botGroupId]);
+
+  useEffect(() => {
+    return () => {
+      if (delayTimerRef.current) {
+        clearTimeout(delayTimerRef.current);
+      }
+    };
+  }, []);
+
+  const getResponseDelayMs = () => {
+    const rawSeconds = Number(debugMeta?.responseDelaySeconds ?? 5);
+    const safeSeconds = Number.isFinite(rawSeconds) ? Math.max(2, Math.min(30, rawSeconds)) : 5;
+    return safeSeconds * 1000;
+  };
+
+  const scheduleBotResponse = (nextMessages: { role: 'user' | 'assistant'; content: string }[]) => {
+    if (delayTimerRef.current) {
+      clearTimeout(delayTimerRef.current);
+    }
+
+    setWaitingForDelay(true);
+    delayTimerRef.current = setTimeout(async () => {
+      delayTimerRef.current = null;
+      setWaitingForDelay(false);
+      setTesting(true);
+
+      const historyPayload = nextMessages.slice(-20);
+      try {
+        const result = await onTestPrompt(botGroupId, historyPayload);
+        if (result) {
+          setMessages(prev => [...prev, { role: 'assistant' as const, content: result.reply }]);
+          if (result.metadata) {
+            setDebugMeta(result.metadata);
+          }
+        }
+      } catch {
+        setMessages(prev => [...prev, { role: 'assistant' as const, content: "❌ Hata: Test mesajı işlenirken bir sorun oluştu." }]);
+      } finally {
+        setTesting(false);
+      }
+    }, getResponseDelayMs());
+  };
 
   const runTest = async () => {
     const trimmed = testMsg.trim();
@@ -44,29 +94,18 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
     const updatedMessages = [...messages, { role: 'user' as const, content: trimmed }];
     setMessages(updatedMessages);
     setTestMsg("");
-    setTesting(true);
-    
-    // Limit test history to last 20 messages
-    const historyPayload = updatedMessages.slice(-20);
-    
-    try {
-      const result = await onTestPrompt(botGroupId, historyPayload);
-      if (result) {
-        setMessages(prev => [...prev, { role: 'assistant' as const, content: result.reply }]);
-        if (result.metadata) {
-          setDebugMeta(result.metadata);
-        }
-      }
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant' as const, content: "❌ Hata: Test mesajı işlenirken bir sorun oluştu." }]);
-    } finally {
-      setTesting(false);
-    }
+    scheduleBotResponse(updatedMessages);
   };
 
   const clearHistory = () => {
+    if (delayTimerRef.current) {
+      clearTimeout(delayTimerRef.current);
+      delayTimerRef.current = null;
+    }
     setMessages([]);
     setDebugMeta(null);
+    setWaitingForDelay(false);
+    setTesting(false);
   };
 
   return (
@@ -93,7 +132,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
       <div className="px-5 py-2.5 bg-blue-50/50 border-b flex items-start gap-2 text-[11px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
         <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
         <p className="leading-relaxed">
-          <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve asistan araçları dry-run çalıştırılır. <span className="opacity-75">Sandbox testte gerçek gecikme bekletilmez; canlı inbound akışında uygulanır.</span>
+          <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve asistan araçları dry-run çalıştırılır. <span className="opacity-75">Yanıt gecikmesi canlıya yakın simüle edilir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.</span>
         </p>
       </div>
 
@@ -134,11 +173,11 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
             </p>
           </div>
         )}
-        {testing && (
+        {(waitingForDelay || testing) && (
           <div className="flex justify-start">
             <div className="bg-white border rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex items-center gap-2" style={{ borderColor: 'var(--q-border-default)' }}>
               <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
-              <span className="text-xs text-gray-400 font-medium">Bot yanıt üretiyor...</span>
+              <span className="text-xs text-gray-400 font-medium">{waitingForDelay ? "Canlı gecikme bekleniyor..." : "Bot yanıt üretiyor..."}</span>
             </div>
           </div>
         )}

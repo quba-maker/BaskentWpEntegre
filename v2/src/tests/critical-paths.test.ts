@@ -12024,7 +12024,18 @@ test("Başkent v75 Live T30: Delayed worker enforces WhatsApp burst quiet-window
   assert(workerCode.includes("WHATSAPP_BURST_QUIET_MS"), "Worker should support burst quiet-window setting");
   assert(workerCode.includes("burst_quiet_window_before_send"), "Worker should re-check quiet window before sending");
   assert(workerCode.includes("newer_inbound_before_send"), "Worker should cancel/re-schedule if a newer inbound arrives before send");
+  assert(workerCode.includes("deterministic_burst_quiet_window_before_send"), "Deterministic delayed replies should also re-check quiet window before sending");
+  assert(workerCode.includes("deterministic_newer_inbound_before_send"), "Deterministic delayed replies should cancel/re-schedule if a newer inbound arrives before send");
   assert(workerCode.includes("unrepliedUserContents.join('\\n')"), "Delayed worker should combine consecutive unreplied user messages");
+});
+
+test("Başkent v75 Bot Test T30b: sandbox playground simulates live delay reset", () => {
+  const playgroundCode = require("fs").readFileSync("src/app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx", "utf8");
+
+  assert(playgroundCode.includes("delayTimerRef"), "Test playground should keep a delay timer");
+  assert(playgroundCode.includes("clearTimeout(delayTimerRef.current)"), "New test messages should reset the previous timer");
+  assert(playgroundCode.includes("Yanıt gecikmesi canlıya yakın simüle edilir"), "Sandbox copy should explain live-like delay simulation");
+  assert(playgroundCode.includes("mesajlar birlikte değerlendirilir"), "Sandbox copy should explain burst messages are evaluated together");
 });
 
 test("Başkent v75 Live T31: Callback reschedule cancels older open callback tasks", () => {
