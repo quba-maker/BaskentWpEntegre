@@ -215,6 +215,35 @@ function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { t
     }
   }
 
+  // Rewrite outbound-specific form initiation phrases to inbound-friendly form acknowledgement phrases
+  const formPhraseRewrites: Array<[RegExp, string]> = [
+    [/(?:doldurduğunuz\s+form\s+doğrultusunda|form\s+doğrultusunda)\s+(?:sizinle\s+)?(?:iletişime\s+geçi(?:yoruz|mekteyiz)|irtibata\s+geçi(?:yoruz|mekteyiz))/gi, 'form başvurunuz bize ulaştı'],
+  ];
+  for (const [pattern, replacement] of formPhraseRewrites) {
+    const next = result.replace(pattern, replacement);
+    if (next !== result) {
+      result = next;
+      rewrote = true;
+    }
+  }
+
+  // Rewrite/strip unnecessary apologies if the user admitted to making a mistake (e.g. "yanlış doldurmuşum")
+  const userAdmittedMistake = ctx.inboundText && /yanl[ıi][şs]\s+(?:doldur|se[çc]|yaz)|gelemem/i.test(ctx.inboundText);
+  if (userAdmittedMistake) {
+    const apologyPatterns = [
+      /^\s*(?:Kusura\s+bakmayınız[.,]?\s*|Kusura\s+bakmayın[.,]?\s*|Özür\s+dilerim[.,]?\s*)(?:formunuzdaki\s+geli[şs]im\s+bilgisiyle\s+ilgili\s+bir\s+karışıklık\s+olmuş[.,]?\s*|formunuzdaki\s+geli[şs]im\s+bilgisiyle\s+ilgili\s+bir\s+karisiklik\s+olmus[.,]?\s*)?(?:d[üu]zeltti[ğg]iniz\s+i[çc]in\s+te[şs]ekk[üu]r\s+eder(?:im|iz)[.,]?\s*)?/i,
+      /^\s*(?:Kusura\s+bakmayınız|Kusura\s+bakmayın|Özür\s+dilerim)[.,]?\s*(?:bir\s+karışıklık\s+olmuş|bir\s+karisiklik\s+olmus)?[.,]?\s*/i,
+    ];
+    for (const pattern of apologyPatterns) {
+      const next = result.replace(pattern, '').trimStart();
+      if (next !== result) {
+        result = "Anladım, kaydınızı güncelledim. " + next.charAt(0).toUpperCase() + next.slice(1);
+        rewrote = true;
+        break;
+      }
+    }
+  }
+
   result = result.replace(/\n{3,}/g, '\n\n').trim();
   return { text: result, rewrote };
 }

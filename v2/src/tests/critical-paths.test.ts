@@ -12705,6 +12705,37 @@ test("Başkent v79 T62: multi-intent multi-lingual and logistics regex check", (
   assert(resultEn.text.includes("Since pricing is determined"), "English output should use price template in English");
 });
 
+test("Başkent v79 T63: outbound greeting phrase rewrite in FinalOutboundBodyAuditor", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const rawText = "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden ben Rüya, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
+  const audited = FinalOutboundBodyAuditor.audit(rawText, {
+    tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    channel: "whatsapp",
+    replyLanguage: "tr",
+    inboundText: "merhaba"
+  });
+
+  assert(audited.rewrote === true, "Auditor should rewrite outbound form phrase");
+  assert(audited.text.includes("form başvurunuz bize ulaştı"), `Expected rewritten greeting, got: ${audited.text}`);
+  assert(!audited.text.includes("iletişime geçiyoruz"), "Outbound phrase should be removed");
+});
+
+test("Başkent v79 T64: user mistake correction apology strip in FinalOutboundBodyAuditor", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const rawText = "Kusura bakmayınız, formunuzdaki gelişim bilgisiyle ilgili bir karışıklık olmuş, düzelttiğiniz için teşekkür ederim. Süreç hakkında bilgi almak istediğinizi anlıyorum.";
+  const audited = FinalOutboundBodyAuditor.audit(rawText, {
+    tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    channel: "whatsapp",
+    replyLanguage: "tr",
+    inboundText: "türkiyeye gelemem yanlış doldurmuşum"
+  });
+
+  assert(audited.rewrote === true, "Auditor should strip unnecessary apologies when user admits mistake");
+  assert(audited.text.includes("Anladım, kaydınızı güncelledim."), "Should prepend natural acknowledgment");
+  assert(audited.text.includes("Süreç hakkında bilgi almak istediğinizi anlıyorum"), "Should retain rest of response");
+  assert(!audited.text.includes("Kusura bakmayınız"), "Apology phrase should be removed");
+});
+
 
 async function runAllTests() {
   try {
