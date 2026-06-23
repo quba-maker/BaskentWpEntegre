@@ -1476,6 +1476,7 @@ export function ConversationViewport() {
     try {
       const res = await deleteMessageAction(messageIdentifier, {
         conversationId: activeContactConversationId || activePhone,
+        phone: activePhone,
         text: message.text || null,
         timeMs: message.timeMs || null
       });

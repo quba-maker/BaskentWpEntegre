@@ -745,7 +745,7 @@ export async function getMessages(
 
 export async function deleteMessageAction(
   messageIdentifier: string,
-  fallback?: { conversationId?: string | null; text?: string | null; timeMs?: number | null }
+  fallback?: { conversationId?: string | null; phone?: string | null; text?: string | null; timeMs?: number | null }
 ) {
   const identifier = String(messageIdentifier || '').trim();
   if (!identifier || identifier.length > 255) {
@@ -774,8 +774,9 @@ export async function deleteMessageAction(
         values: [identifier, ctx.tenantId]
       }) as any[];
 
-      if (rows.length === 0 && fallback?.conversationId && fallback?.text) {
+      if (rows.length === 0 && (fallback?.conversationId || fallback?.phone) && fallback?.text) {
         const conversationRef = String(fallback.conversationId || '').trim();
+        const phoneRef = String(fallback.phone || '').trim();
         const isConversationUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationRef);
         const sentAround = typeof fallback.timeMs === 'number' && Number.isFinite(fallback.timeMs)
           ? new Date(fallback.timeMs)
@@ -788,11 +789,14 @@ export async function deleteMessageAction(
             WHERE tenant_id = $1
               AND conversation_id = $2::uuid
               AND direction = 'out'
-              AND content = $3
+              AND (
+                content = $3
+                OR LOWER(regexp_replace(content, '\\s+', ' ', 'g')) = LOWER(regexp_replace($3, '\\s+', ' ', 'g'))
+              )
               AND COALESCE(media_metadata->>'deleted_at', '') = ''
               AND (
                 $4::timestamptz IS NULL
-                OR ABS(EXTRACT(EPOCH FROM (COALESCE(provider_timestamp, created_at) - $4::timestamptz))) <= 1800
+                OR ABS(EXTRACT(EPOCH FROM (COALESCE(provider_timestamp, created_at) - $4::timestamptz))) <= 21600
               )
             ORDER BY
               CASE
@@ -807,11 +811,14 @@ export async function deleteMessageAction(
             WHERE tenant_id = $1
               AND phone_number = $2
               AND direction = 'out'
-              AND content = $3
+              AND (
+                content = $3
+                OR LOWER(regexp_replace(content, '\\s+', ' ', 'g')) = LOWER(regexp_replace($3, '\\s+', ' ', 'g'))
+              )
               AND COALESCE(media_metadata->>'deleted_at', '') = ''
               AND (
                 $4::timestamptz IS NULL
-                OR ABS(EXTRACT(EPOCH FROM (COALESCE(provider_timestamp, created_at) - $4::timestamptz))) <= 1800
+                OR ABS(EXTRACT(EPOCH FROM (COALESCE(provider_timestamp, created_at) - $4::timestamptz))) <= 21600
               )
             ORDER BY
               CASE
@@ -821,12 +828,16 @@ export async function deleteMessageAction(
               COALESCE(provider_timestamp, created_at) DESC
             LIMIT 1
           `,
-          values: [ctx.tenantId, conversationRef, fallback.text, sentAround]
+          values: [ctx.tenantId, isConversationUuid ? conversationRef : (phoneRef || conversationRef), fallback.text, sentAround]
         }) as any[];
       }
 
       if (rows.length === 0) {
-        return { success: false, error: "Mesaj bulunamadı." };
+        return {
+          success: true,
+          localOnly: true,
+          warning: "Mesaj veritabanında bulunamadı; yalnızca açık panel görünümünden kaldırıldı."
+        };
       }
 
       const msg = rows[0];
