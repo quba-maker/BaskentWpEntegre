@@ -120,6 +120,16 @@ export class LanguageResponsePolicy {
       tenantDefaultApplied = true;
     }
 
+    const cleanMsg = currentMessage.toLowerCase().trim().replace(/[?.!,;:]/g, '');
+    const isShortWord = cleanMsg.split(/\s+/).length <= 2 || cleanMsg.length <= 10;
+    const isExceptionalToken = ['what', 'ok', 'okay', 'yes', 'no', 'ne', 'tamam', 'olur', 'evet', 'hayir', 'hayır'].includes(cleanMsg);
+    
+    if ((isShortWord || isExceptionalToken) && !languageSwitchDetected) {
+      if (conversationPrimaryLang !== 'unknown') {
+        replyLanguage = conversationPrimaryLang;
+      }
+    }
+
     // Arabic Locale Continuity Guard
     const currentIsArabic = /[\u0600-\u06FF]/.test(currentMessage);
     const userMsgsFromHistory = history.filter(m => m.role === 'user' && m.content);

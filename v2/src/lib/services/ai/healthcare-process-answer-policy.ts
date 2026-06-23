@@ -43,11 +43,11 @@ export class HealthcareProcessAnswerPolicy {
 ${docSection}
 
 *Süreç nasıl ilerler*
-Varsa güncel MR, tahlil veya raporlarınızı bizimle buradan paylaşabilirsiniz. Belgeleriniz hekim kuruluna sunularak incelenir. Randevunuz doğrultusunda hastanemizde yapılacak fiziksel muayene ve tetkikler sonrasında kesin tedavi planı çıkarılır.
+Varsa güncel MR, tahlil veya raporlarınızı bizimle buradan paylaşabilirsiniz. Ancak kesin değerlendirme hastanede ilgili uzman hekim muayenesi sonrasında yapılır.
 
 *Fiyat neden netleşir / neye göre değişir*
 Tedavi ücretleri, yapılacak tetkikler ve hekimimizin belirleyeceği kişiye özel tedavi planına göre değişir. Bu nedenle buradan kesin bir fiyat belirtmemiz doğru olmaz.
 
-*Sonraki adım*${timePhrase} Bilgilendirme amaçlı telefon görüşmesi planlamak için uygun olduğunuz zamanı iletebilir misiniz? Ekibimiz randevu ve hekim seçeneklerini sizin için netleştirecektir.`;
+*Sonraki adım*${timePhrase} Detayları netleştirmek için hasta danışmanımız ile bilgilendirme amaçlı bir telefon görüşmesi yapmak ister misiniz? 🙏`;
   }
 }

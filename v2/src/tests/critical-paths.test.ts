@@ -12736,6 +12736,112 @@ test("Başkent v79 T64: user mistake correction apology strip in FinalOutboundBo
   assert(!audited.text.includes("Kusura bakmayınız"), "Apology phrase should be removed");
 });
 
+test("Başkent v79 T65: arrival_date_answer fallback returns correct travel date and phone proposal in Turkish", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "19 Ağustos",
+    brain: { context: { config: { industry: "healthcare" } }, prompts: { metadata: {} } } as any,
+    identityConfig: {},
+    unifiedContext: {
+      latestForm: { id: "form-1" },
+      patient_known_facts: ["Konu: Check-up"]
+    },
+    replyLanguage: "tr",
+    turkeyVisitIntent: "turkey_visit_intent_positive"
+  });
+
+  assert(result.finalPath === "arrival_date_answer_fallback_tr", `Expected arrival_date_answer_fallback_tr, got: ${result.finalPath}`);
+  assert(result.text.includes("19 Ağustos"), "Should contain the date");
+  assert(result.text.includes("gelme düşüncenizi not aldım"), "Should acknowledge the date");
+  assert(result.text.includes("telefon görüşmesi"), "Should propose phone call");
+});
+
+test("Başkent v79 T66: arrival_date_answer fallback returns correct travel date and phone proposal in Dutch", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "19 Augustus",
+    brain: { context: { config: { industry: "healthcare" } }, prompts: { metadata: {} } } as any,
+    identityConfig: {},
+    unifiedContext: {
+      latestForm: { id: "form-1" },
+      patient_known_facts: ["Konu: Check-up"]
+    },
+    replyLanguage: "nl",
+    turkeyVisitIntent: "turkey_visit_intent_positive"
+  });
+
+  assert(result.finalPath === "arrival_date_answer_fallback_nl", `Expected arrival_date_answer_fallback_nl, got: ${result.finalPath}`);
+  assert(result.text.includes("19 Augustus"), "Should contain the date");
+  assert(result.text.includes("telefoongesprek plannen"), "Should propose phone call in Dutch");
+});
+
+test("Başkent v79 T67: LanguageResponsePolicy resolve single-word exceptions (what/ok) does not switch from Turkish", () => {
+  const { LanguageResponsePolicy } = require("../lib/services/ai/language-response-policy");
+  const result = LanguageResponsePolicy.resolve(
+    "what",
+    [
+      { role: "user", content: "merhaba checkup yaptırmak istiyorum" },
+      { role: "assistant", content: "Merhaba, size yardımcı olalım." }
+    ],
+    "tr"
+  );
+
+  assert(result.replyLanguage === "tr", `Expected tr, got: ${result.replyLanguage}`);
+  assert(result.languageSwitchDetected === false, "Should not detect language switch");
+});
+
+test("Başkent v79 T68: ContextAwareSafeFallbackResolver resolve emergency chest pain returns emergency warn", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "göğsüm ağrıyor nefes alamıyorum",
+    brain: { context: { config: { industry: "healthcare" } }, prompts: { metadata: {} } } as any,
+    identityConfig: {},
+    unifiedContext: {
+      latestForm: { id: "form-1" }
+    },
+    replyLanguage: "tr"
+  });
+
+  assert(result.finalPath === "emergency_fallback", `Expected emergency_fallback, got: ${result.finalPath}`);
+  assert(result.text.includes("acil sağlık kuruluşu"), "Should contain emergency warning");
+});
+
+test("Başkent v79 T69: FinalOutboundBodyAuditor arrival date self-introduction recovery", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const rawText = "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden ben Rüya. Sürecimiz hakkında bilgi paylaşabilirim.";
+  const audited = FinalOutboundBodyAuditor.audit(rawText, {
+    tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    channel: "whatsapp",
+    replyLanguage: "tr",
+    inboundText: "19 Ağustos"
+  });
+
+  assert(audited.rewrote === true, "Auditor should rewrite self-introduction when inbound is a date");
+  assert(audited.text.includes("19 Ağustos gelme düşüncenizi not aldım"), "Should recover to arrival date confirmation");
+  assert(audited.text.includes("telefon görüşmesi"), "Should offer phone call");
+});
+
+test("Başkent v79 T70: MultiIntentConsultantComposer price check with TA12 returns insurance disclaimer", () => {
+  const { MultiIntentConsultantComposer } = require("../lib/services/ai/multi-intent-consultant-composer");
+  const result = MultiIntentConsultantComposer.compose(
+    "fiyatlar nedir? TA12 anlaşmanız var mı? kimler var?",
+    {
+      context: { config: { doctors: ["Dr. Ahmet - Kardiyoloji"] } },
+      prompts: { metadata: { identity: {} } }
+    } as any,
+    [
+      { role: "user", content: "fiyatlar nedir? TA12 anlaşmanız var mı? kimler var?" }
+    ],
+    "Kardiyoloji",
+    "tr"
+  );
+
+  assert(result !== null, "Should resolve multi-intent response");
+  assert(result.text.includes("yurt dışı SGK (TA12) anlaşması bulunmamakta"), "Should contain TA12 invalidity disclaimer");
+  assert(result.text.includes("özel hasta statüsünde"), "Should mention private patient status");
+});
+
+
 
 async function runAllTests() {
   try {

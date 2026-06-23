@@ -78,7 +78,7 @@ export class DoctorNamesPolicy {
         } else if (resolvedLang === 'en') {
           blocks.push(`Verified specialists in the ${dept} department:\n${nameList}`);
         } else {
-          blocks.push(`${dept} bölümünde sistemde doğrulanmış uzmanlar:\n${nameList}`);
+          blocks.push(`Bu bölüm için elimdeki doğrulanmış hekim bilgisi şu şekildedir:\n${nameList}`);
         }
       }
 

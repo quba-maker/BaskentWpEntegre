@@ -244,7 +244,7 @@ export class ContextAwareSafeFallbackResolver {
 
     // 1. Sector & Context Resolution
     const configIndustry = brain.context.config?.industry;
-    const metadataIndustry = (brain.prompts.metadata as any)?.industry;
+    const metadataIndustry = (brain.prompts?.metadata as any)?.industry;
     const resolvedIndustry = (configIndustry || metadataIndustry || '').toLowerCase();
     
     const isHealthcare = resolvedIndustry === 'healthcare' || resolvedIndustry === 'health';
@@ -272,6 +272,104 @@ export class ContextAwareSafeFallbackResolver {
 
     const detectedIntent = arbitration.effectiveIntent;
     const pendingSlot = arbitration.effectivePendingSlot;
+
+    const isHealthcareOrForm = isHealthcare || hasFormContext;
+    let complaint = '';
+    let hasComplaint = false;
+    if (isHealthcareOrForm) {
+      const facts = unifiedContext?.patient_known_facts || [];
+      const rawFactsComplaint = facts.find((f: string) => f.toLowerCase().includes('şikayet') || f.toLowerCase().includes('sikayet'));
+      if (rawFactsComplaint) {
+        const match = rawFactsComplaint.match(/(?:şikayeti|sikayeti|şikayet|sikayet):\s*(.+)/i);
+        if (match && match[1]) {
+          complaint = match[1].replace(/[.]+$/, '').replace(/_/g, ' ').trim();
+          hasComplaint = true;
+        }
+      }
+      if (complaint.length > 50) {
+        complaint = complaint.substring(0, 50) + '...';
+      }
+    }
+
+    const isEmergency = [
+      'göğüs ağrısı', 'gogus agrisi', 'nefes darlığı', 'nefes darligi', 'nefes alamıyorum', 'nefes alamiyorum',
+      'bayılma', 'bayilma', 'felç', 'felc', 'ani güç kaybı', 'ani guc kaybi', 'şiddetli kanama', 'siddetli kanama',
+      'bilinç kaybı', 'bilinc kaybi'
+    ].some(kw => lowerInbound.includes(kw));
+
+    if (isEmergency) {
+      return {
+        text: "Bu belirti acil değerlendirme gerektirebilir. Lütfen bulunduğunuz yerde en yakın acil sağlık kuruluşuna başvurun veya acil yardım hattını arayın.",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: true,
+        finalPath: 'emergency_fallback',
+        detectedIntent
+      };
+    }
+
+    const cleanInboundPunct = lowerInbound.replace(/[?.!,;:]/g, '').trim();
+    if (cleanInboundPunct === 'what' && lang === 'tr') {
+      return {
+        text: "Anlaşılmayan kısmı kısaca açıklayayım.",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: 'what_turkish_bypass',
+        detectedIntent
+      };
+    }
+
+    if (detectedIntent === 'arrival_date_answer') {
+      let dateStr = '';
+      const cleanInbound = inboundText.trim().replace(/[?.!,;:]+$/, '');
+      if (cleanInbound.split(/\s+/).length <= 5) {
+        dateStr = cleanInbound;
+      } else {
+        const words = cleanInbound.split(/\s+/);
+        const dateKws = [
+          'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
+          'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
+          'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+          'januari', 'februari', 'maart', 'juni', 'juli', 'augustus', 'oktober', 'november', 'december',
+          'januar', 'februar', 'märz', 'mai', 'juni', 'juli', 'oktober', 'dezember'
+        ];
+        const foundIdx = words.findIndex(w => dateKws.some(kw => w.toLowerCase().includes(kw)));
+        if (foundIdx !== -1) {
+          const start = Math.max(0, foundIdx - 1);
+          const end = Math.min(words.length, foundIdx + 2);
+          dateStr = words.slice(start, end).join(' ');
+        } else {
+          dateStr = unifiedContext?.opportunity?.metadata?.travel_date_raw || 
+                    unifiedContext?.opportunity?.travel_date || 
+                    unifiedContext?.conversation?.metadata?.arrival_date || 
+                    cleanInbound;
+        }
+      }
+      dateStr = dateStr.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+      let text = '';
+      if (lang === 'ar') {
+        text = `لقد سجلت تاريخ وصولك المخطط له في ${dateStr}. هل لديك أي أسئلة أخرى، أم ترغب في جدولة مكالمة هاتفية مع مستشار المرضى لدينا لتوضيح التفاصيل؟`;
+      } else if (lang === 'de') {
+        text = `Ich habe Ihre geplante Ankunft am ${dateStr} notiert. Haben Sie weitere Fragen oder möchten Sie ein Telefonat mit unserem Patientenberater vereinbaren, um die Details zu besprechen?`;
+      } else if (lang === 'nl') {
+        text = `Ik heb uw geplande aankomst op ${dateStr} genoteerd. Heeft u nog andere vragen, of wilt u een telefoongesprek plannen met onze patiëntenadviseur om de details te bespreken?`;
+      } else if (lang === 'en') {
+        text = `I have noted your planned arrival date as ${dateStr}. Do you have any other questions, or would you like to schedule a phone call with our patient advisor to finalize the details?`;
+      } else {
+        text = `Anladım, ${dateStr} gelme düşüncenizi not aldım. Başka bir sorunuz var mı, ya da detayları netleştirmek için hasta danışmanımızla bir telefon görüşmesi planlamak ister misiniz?`;
+      }
+
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: `arrival_date_answer_fallback_${lang}`,
+        detectedIntent
+      };
+    }
 
     // Form Re-introduction Greeting Bypass
     const isGreeting = detectedIntent === 'greeting';
@@ -361,29 +459,7 @@ export class ContextAwareSafeFallbackResolver {
       return ContextAwareSafeFallbackResolver.resolveArabic(params);
     }
 
-    const isHealthcareOrForm = isHealthcare || hasFormContext;
-
-    // CRITICAL: Prevent opportunity.summary leakage.
-    // Sourced strictly from patient_known_facts, NEVER from opportunity.summary directly.
-    let complaint = '';
-    let hasComplaint = false;
-    if (isHealthcareOrForm) {
-      const facts = unifiedContext?.patient_known_facts || [];
-      const rawFactsComplaint = facts.find((f: string) => f.toLowerCase().includes('şikayet') || f.toLowerCase().includes('sikayet'));
-      
-      if (rawFactsComplaint) {
-        const match = rawFactsComplaint.match(/(?:şikayeti|sikayeti|şikayet|sikayet):\s*(.+)/i);
-        if (match && match[1]) {
-          complaint = match[1].replace(/[.]+$/, '').replace(/_/g, ' ').trim();
-          hasComplaint = true;
-        }
-      }
-      
-      // Truncate complaint for clean message formatting
-      if (complaint.length > 50) {
-        complaint = complaint.substring(0, 50) + '...';
-      }
-    }
+    // isHealthcareOrForm, complaint, and hasComplaint are already calculated at the top.
 
     // Dynamic multi-intent international/remote patient check
     const locations = [

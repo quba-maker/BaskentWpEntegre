@@ -1689,8 +1689,11 @@ export class AIResponseOrchestrator {
       // LLM handles these naturally via hint injection at L2121.
 
       // Flags and bypass targets resolved early in step 5c
+      const cleanInboundPunct = cleanInbound.replace(/[?.!,;:]/g, '').trim();
+      const isWhatTurkishBypass = cleanInboundPunct === 'what' && (replyLanguage === 'tr');
+
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge
-        || shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery || isDoctorNamesRequest;
+        || shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery || isDoctorNamesRequest || isWhatTurkishBypass;
 
       let text = '';
       let bypassed = false;

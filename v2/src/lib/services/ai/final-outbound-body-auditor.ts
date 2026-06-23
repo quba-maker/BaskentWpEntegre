@@ -105,6 +105,53 @@ function buildCallbackTimeConfirmation(inboundText?: string): string | null {
   return `${dayLabel} günü Türkiye saatiyle ${hh}:${mm} için not alayım mı?`;
 }
 
+function buildArrivalDateConfirmation(inboundText?: string, replyLanguage = 'tr'): string | null {
+  if (!inboundText) return null;
+  const lower = inboundText.toLowerCase().trim();
+
+  // Try to determine if this is a date reply (containing month names or numeric date patterns)
+  const dateIndicators = [
+    'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
+    'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+    'januari', 'februari', 'maart', 'juni', 'juli', 'augustus', 'oktober', 'november', 'december',
+    'januar', 'februar', 'märz', 'mai', 'juni', 'juli', 'oktober', 'dezember'
+  ];
+  const isNumericDate = /^\d{1,2}[./\s]\d{1,2}$/.test(lower) || /^\d{1,2}\s+(?:ağustos|agustos|temmuz|haziran|eylül|eylul|ekim|kasım|kasim|aralık|aralik|ocak|şubat|subat|mart|nisan|mayıs|mayis)/i.test(lower);
+  const isDate = dateIndicators.some(kw => lower.includes(kw)) || isNumericDate;
+  if (!isDate) return null;
+
+  let dateStr = '';
+  const cleanInbound = inboundText.trim().replace(/[?.!,;:]+$/, '');
+  if (cleanInbound.split(/\s+/).length <= 5) {
+    dateStr = cleanInbound;
+  } else {
+    const words = cleanInbound.split(/\s+/);
+    const foundIdx = words.findIndex(w => dateIndicators.some(kw => w.toLowerCase().includes(kw)));
+    if (foundIdx !== -1) {
+      const start = Math.max(0, foundIdx - 1);
+      const end = Math.min(words.length, foundIdx + 2);
+      dateStr = words.slice(start, end).join(' ');
+    } else {
+      dateStr = cleanInbound;
+    }
+  }
+  dateStr = dateStr.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+  const lang = (replyLanguage || 'tr').toLowerCase();
+  if (lang === 'ar') {
+    return `لقد سجلت تاريخ وصولك المخطط له في ${dateStr}. هل لديك أي أسئلة أخرى، أم ترغب في جدولة مكالمة هاتفية مع مستشار المرضى لدينا لتوضيح التفاصيل؟`;
+  } else if (lang === 'de') {
+    return `Ich habe Ihre geplante Ankunft am ${dateStr} notiert. Haben Sie weitere Fragen oder möchten Sie ein Telefonat mit unserem Patientenberater vereinbaren, um die Details zu besprechen?`;
+  } else if (lang === 'nl') {
+    return `Ik heb uw geplande aankomst op ${dateStr} genoteerd. Heeft u nog andere vragen, of wilt u een telefoongesprek plannen met onze patiëntenadviseur om de details te bespreken?`;
+  } else if (lang === 'en') {
+    return `I have noted your planned arrival date as ${dateStr}. Do you have any other questions, or would you like to schedule a phone call with our patient advisor to finalize the details?`;
+  } else {
+    return `Anladım, ${dateStr} gelme düşüncenizi not aldım. Başka bir sorunuz var mı, ya da detayları netleştirmek için hasta danışmanımızla bir telefon görüşmesi planlamak ister misiniz?`;
+  }
+}
+
 function isShortGreetingInbound(inboundText?: string): boolean {
   const clean = (inboundText || '')
     .replace(/İ/g, 'i')
@@ -317,10 +364,16 @@ export class FinalOutboundBodyAuditor {
       // Step 4: If a continuing callback-time answer somehow becomes a repeated
       // self-introduction, recover it to the slot confirmation the user expects.
       if (/^\s*(?:ben\s+)?r[üu]ya\b|ba[şs]kent\s+[üu]niversitesi/i.test(result)) {
-        const callbackRecovery = buildCallbackTimeConfirmation(ctx.inboundText);
-        if (callbackRecovery) {
-          result = callbackRecovery;
+        const arrivalRecovery = buildArrivalDateConfirmation(ctx.inboundText, ctx.replyLanguage);
+        if (arrivalRecovery) {
+          result = arrivalRecovery;
           rewrote = true;
+        } else {
+          const callbackRecovery = buildCallbackTimeConfirmation(ctx.inboundText);
+          if (callbackRecovery) {
+            result = callbackRecovery;
+            rewrote = true;
+          }
         }
       }
 

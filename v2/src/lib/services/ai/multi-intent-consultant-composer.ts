@@ -117,14 +117,33 @@ export class MultiIntentConsultantComposer {
     }
 
     if (detected.find(d => d.intent === 'price_question')) {
+      const mentionsTA12 = /ta\s*12|ta12|t12|sgk|sigorta|yurt\s*dışı|yurtdisi|ausland|foreign|buitenland/i.test(lower)
+        || history.some(m => /ta\s*12|ta12|t12|sgk|sigorta|yurt\s*dışı|yurtdisi/i.test((m.content || '').toLowerCase()));
+
       if (lang === 'ar') {
-        blocks.push(`بما أن الأسعار يتم تحديدها بناءً على التقييم في المشفى والإجراء المخطط له، لا يمكنني مشاركة سعر صافٍ هنا. ومن المفهوم تماماً رغبتكم في توضيح تفاصيل الدفع أو الفواتير.`);
+        let arPriceText = `بما أن الأسعار يتم تحديدها بناءً على التقييم في المشفى والإجراء المخطط له، لا يمكنني مشاركة سعر صافٍ هنا. ومن المفهوم تماماً رغبتكم في توضيح تفاصيل الدفع أو الفواتير.`;
+        if (mentionsTA12) {
+          arPriceText += ` بالإضافة إلى ذلك، لا يوجد لدى مستشفانا اتفاقية مع الضمان الاجتماعي الأجنبي (TA12)، ويحصل الضيوف القادمون من الخارج على الخدمات بصفتهم مرضى خاصين.`;
+        }
+        blocks.push(arPriceText);
       } else if (lang === 'de') {
-        blocks.push(`Da die Preise auf der Grundlage der Untersuchung im Krankenhaus und des geplanten Ablaufs festgelegt werden, kann ich hier keinen konkreten Preis nennen. Es ist absolut verständlich, dass Sie Zahlungs- oder Abrechnungsdetails klären möchten.`);
+        let dePriceText = `Da die Preise auf der Grundlage der Untersuchung im Krankenhaus und des geplanten Ablaufs festgelegt werden, kann ich hier keinen konkreten Preis nennen. Es ist absolut verständlich, dass Sie Zahlungs- oder Abrechnungsdetails klären möchten.`;
+        if (mentionsTA12) {
+          dePriceText += ` Zudem hat unser Krankenhaus kein Abkommen mit der ausländischen Sozialversicherung (TA12), und aus dem Ausland kommende Gäste werden als Privatpatienten behandelt.`;
+        }
+        blocks.push(dePriceText);
       } else if (lang === 'nl') {
-        blocks.push(`Aangezien de prijzen worden bepaald op basis van de evaluatie in het ziekenhuis en de geplande procedure, kan ik hier geen netto prijs delen. Het is heel begrijpelijk dat u betalings- of factureringsgegevens wilt verduidelijken.`);
+        let nlPriceText = `Aangezien de prijzen worden bepaald op basis van de evaluatie in het ziekenhuis en de geplande procedure, kan ik hier geen netto prijs delen. Het is heel begrijpelijk dat u betalings- of factureringsgegevens wilt verduidelijken.`;
+        if (mentionsTA12) {
+          nlPriceText += ` Daarnaast heeft ons ziekenhuis geen overeenkomst met de buitenlandse sociale zekerheid (TA12), en gasten uit het buitenland ontvangen diensten onder de status van particuliere patiënt.`;
+        }
+        blocks.push(nlPriceText);
       } else if (lang === 'en') {
-        blocks.push(`Since pricing is determined based on the hospital evaluation and the planned procedure, I cannot share a net price here. It is very understandable that you want to clarify payment or billing details.`);
+        let enPriceText = `Since pricing is determined based on the hospital evaluation and the planned procedure, I cannot share a net price here. It is very understandable that you want to clarify payment or billing details.`;
+        if (mentionsTA12) {
+          enPriceText += ` Additionally, our hospital does not have an agreement with foreign social security (TA12), and guests coming from abroad receive services under private patient status.`;
+        }
+        blocks.push(enPriceText);
       } else {
         const hasForeignContext = history.some(m => /almanya|yurt\s*dışı|yurtdisi|sigorta|sgk|ta\s*12|ta12|t12/i.test(m.content))
           || /almanya|yurt\s*dışı|yurtdisi|sigorta|sgk|ta\s*12|ta12|t12/i.test(inboundText)
@@ -133,7 +152,11 @@ export class MultiIntentConsultantComposer {
         const extraInfo = hasForeignContext
           ? ' Ödeme veya TA12 gibi evrak konularını ayrıca netleştirmek istemeniz çok anlaşılır.'
           : ' Ödeme veya faturalandırma konularını netleştirmek istemeniz çok anlaşılır.';
-        blocks.push(`Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.${extraInfo}`);
+        let trPriceText = `Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.${extraInfo}`;
+        if (mentionsTA12) {
+          trPriceText += ` Ayrıca, hastanemizin yurt dışı SGK (TA12) anlaşması bulunmamakta olup, yurt dışından gelen misafirlerimiz özel hasta statüsünde hizmet almaktadır.`;
+        }
+        blocks.push(trPriceText);
       }
     }
 

@@ -175,6 +175,9 @@ export class ConversationStateArbitrator {
     const dateIndicators = [
       'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
       'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
+      'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+      'januari', 'februari', 'maart', 'juni', 'juli', 'augustus', 'oktober', 'november', 'december',
+      'januar', 'februar', 'märz', 'mai', 'juni', 'juli', 'oktober', 'dezember',
       'ay sonu', 'ay başı', 'ay basi', 'ayın sonu', 'ayın başı'
     ];
     const isUnambiguousNumericDateReply = (() => {
