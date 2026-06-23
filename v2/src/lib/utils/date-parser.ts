@@ -415,6 +415,20 @@ export function hasRealDatePattern(text: string): boolean {
   if (threePartRegex.test(lower)) {
     return true;
   }
+
+  // 1b. Check for space-separated unambiguous dates like "7 15" or "15 7" (with optional punctuation removed)
+  const cleanForDate = lower.replace(/[.!?]/g, '').trim();
+  const spaceDateMatch = cleanForDate.match(/^\s*(\d{1,2})\s+(\d{1,2})\s*$/);
+  if (spaceDateMatch) {
+    const first = parseInt(spaceDateMatch[1], 10);
+    const second = parseInt(spaceDateMatch[2], 10);
+    if (
+      (first >= 1 && first <= 12 && second >= 13 && second <= 31) ||
+      (first >= 13 && first <= 31 && second >= 1 && second <= 12)
+    ) {
+      return true;
+    }
+  }
   
   // 2. Check for 2-part patterns
   const regex = /\b(\d{1,2})([./])(\d{1,2})\b/g;

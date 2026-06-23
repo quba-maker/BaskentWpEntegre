@@ -23,6 +23,7 @@ import type { TenantBrain } from '../../brain/tenant-brain';
 import { ConsultantConversationStateResolver } from './consultant-conversation-state-resolver';
 import { DoctorNamesPolicy } from './doctor-names-policy';
 import { DoctorDirectoryResolver } from './doctor-directory-resolver';
+import { TenantConfigResolver } from './tenant-config-resolver';
 
 export interface MultiIntentComposerResult {
   text: string;
@@ -98,9 +99,7 @@ export class MultiIntentConsultantComposer {
       const orgName = (brain.prompts.metadata as any)?.identity?.organizationName
         || (brain.context.config as any)?.identity?.organizationName
         || 'Hastanemiz';
-      const addressHint = (brain.context.config as any)?.address
-        || (brain.prompts.metadata as any)?.address
-        || null;
+      const addressHint = TenantConfigResolver.getAddress(brain);
 
       if (addressHint) {
         blocks.push(`${blockIndex}. Hastane konumu\n${addressHint}`);
@@ -111,7 +110,16 @@ export class MultiIntentConsultantComposer {
     }
 
     if (detected.find(d => d.intent === 'price_question')) {
-      blocks.push(`${blockIndex}. Fiyat bilgisi\nFiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum. Ödeme veya TA12 gibi evrak konularını ayrıca netleştirmek istemeniz çok anlaşılır.`);
+      const hasForeignContext = history.some(m => /almanya|yurt\s*dışı|yurtdisi|sigorta|sgk|ta\s*12|ta12|t12/i.test(m.content))
+        || /almanya|yurt\s*dışı|yurtdisi|sigorta|sgk|ta\s*12|ta12|t12/i.test(inboundText)
+        || brain.context.location?.toLowerCase().includes('almanya')
+        || (brain.prompts.metadata as any)?.isForeigner;
+
+      const extraInfo = hasForeignContext
+        ? ' Ödeme veya TA12 gibi evrak konularını ayrıca netleştirmek istemeniz çok anlaşılır.'
+        : ' Ödeme veya faturalandırma konularını netleştirmek istemeniz çok anlaşılır.';
+
+      blocks.push(`${blockIndex}. Fiyat bilgisi\nFiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.${extraInfo}`);
       blockIndex++;
     }
 

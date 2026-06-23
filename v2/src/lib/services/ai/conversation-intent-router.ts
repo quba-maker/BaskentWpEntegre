@@ -225,11 +225,14 @@ export class ConversationIntentRouter {
     }
 
     // P0.28.2: callback_time_answer
-    const hasCallbackTimeKw = [
+    const timeKeywords = [
       'saat', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
-      'yarın', 'yarin', 'bugün', 'bugun', 'sabah', 'öğlen', 'oglen', 'öğleden sonra', 'ogleden sonra', 'akşam', 'aksam', 'gece',
+      'yarın', 'yarin', 'bugün', 'bugun', 'sabah', 'öğlen', 'oglen', 'öğleden sonra', 'ogleden sonra', 'akşam', 'aksam',
       'hafta içi', 'haftaici', 'hafta sonu', 'haftasonu'
-    ].some(kw => clean.includes(kw)) || /(?:\b\d{1,2}[:. ]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(clean);
+    ];
+    const hasCallbackTimeKw = timeKeywords.some(kw => clean.includes(kw)) ||
+      /(?<![a-zçğışöü])gece(?![a-zçğışöü])/.test(clean) ||
+      /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(clean);
 
     const hasMonthKw = [
       'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
@@ -255,7 +258,12 @@ export class ConversationIntentRouter {
       'yarin sabah', 'yarin aksam', 'ogleden sonra'
     ].some(kw => clean.includes(kw));
 
-    if (isExplicitTimePhrase || (hasTimeWords && (hasNumericTime || clean.includes('olur') || clean.includes('uygun') || clean.includes('musait') || clean.includes('saat')))) {
+    const hasRealTimeContext = [
+      'saat', 'yarin', 'bugun', 'pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'cumartesi', 'pazar',
+      'bize gore', 'turkiye saat', 'amerika saat', 'sizin saat', 'ogleden sonra', 'haftaici', 'haftasonu', 'gibi', 'civari'
+    ].some(kw => clean.includes(kw)) || hasNumericTime;
+
+    if (isExplicitTimePhrase || (hasTimeWords && (hasNumericTime || clean.includes('saat')) || (hasRealTimeContext && (clean.includes('olur') || clean.includes('uygun') || clean.includes('musait') || clean.includes('olabilir'))))) {
       return 'time_availability';
     }
 
@@ -590,17 +598,24 @@ export class ConversationIntentRouter {
 
     // Time / callback
     const timeIndicators = ['saat', 'uygun', 'musait', 'pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'pazar', 'yarin', 'bugun'];
-    const numericTimePattern = / \d{1,2}[:. ]\d{2} | \d{1,2}\s*(?:de|da|te|ta|gibi|sular)/;
-    if (timeIndicators.some(kw => clean.includes(kw)) && (numericTimePattern.test(clean) || clean.includes('uygun'))) {
+    const numericTimePattern = / \d{1,2}[:.]\d{2} | \d{1,2}\s*(?:de|da|te|ta|gibi|sular)/;
+    const hasRealTimeContextAll = [
+      'saat', 'yarin', 'bugun', 'pazartesi', 'sali', 'carsamba', 'persembe', 'cuma', 'pazar'
+    ].some(kw => clean.includes(kw)) || numericTimePattern.test(clean);
+
+    if (timeIndicators.some(kw => clean.includes(kw)) && (numericTimePattern.test(clean) || (hasRealTimeContextAll && clean.includes('uygun')))) {
       intents.push('time_availability');
     }
 
     // P0.28.2: callback_time_answer
-    const hasCallbackTimeKwAll = [
+    const timeKeywordsAll = [
       'saat', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
-      'yarın', 'yarin', 'bugün', 'bugun', 'sabah', 'öğlen', 'oglen', 'öğleden sonra', 'ogleden sonra', 'akşam', 'aksam', 'gece',
+      'yarın', 'yarin', 'bugün', 'bugun', 'sabah', 'öğlen', 'oglen', 'öğleden sonra', 'ogleden sonra', 'akşam', 'aksam',
       'hafta içi', 'haftaici', 'hafta sonu', 'haftasonu'
-    ].some(kw => clean.includes(kw)) || /(?:\b\d{1,2}[:. ]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(clean);
+    ];
+    const hasCallbackTimeKwAll = timeKeywordsAll.some(kw => clean.includes(kw)) ||
+      /(?<![a-zçğışöü])gece(?![a-zçğışöü])/.test(clean) ||
+      /(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\s*(?:de|da|te|ta|e|a|ye|ya|gibi|civari|civarinda|sularinda|sularında|olur|uygun|musait|müsait)\b)/.test(clean);
 
     const hasMonthKwAll = [
       'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',

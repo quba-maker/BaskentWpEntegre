@@ -12605,6 +12605,54 @@ test("Başkent v79 T61: final auditor rewrites stale year in relative date repli
 });
 
 
+// ==========================================
+// Başkent Hotfix/Live Turn-based Tests
+// ==========================================
+
+test("Başkent Hotfix T79_1: '7 15' is classified as date when greeting plan mentioned", () => {
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+
+  const result = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "7 15",
+    rawPendingSlot: "generic_none",
+    rawInterpretedIntent: "none",
+    routerIntent: "generic_other",
+    history: [
+      { role: "assistant", content: "Formunuzda önümüzdeki 1 ay içinde Konya’ya gelmeyi planladığınızı belirtmişsiniz. Size uygun paketi netleştirdikten sonra o dönem için planlama sürecinizi birlikte ilerletebiliriz. Sağlıklı günler dileriz." },
+      { role: "user", content: "7 15" }
+    ],
+    convMeta: {},
+    unifiedContext: {
+      hasVerifiedFormContext: true,
+      latestForm: { created_at: "2026-06-23T12:00:00Z" }
+    }
+  });
+
+  assert(result.effectiveIntent === "arrival_date_answer", `Expected arrival_date_answer, got: ${result.effectiveIntent}`);
+  assert(result.effectivePendingSlot === "arrival_date", `Expected arrival_date pending slot, got: ${result.effectivePendingSlot}`);
+});
+
+test("Başkent Hotfix T79_2: 'gece' does not match 'geçerli' in ConversationIntentRouter", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const route = ConversationIntentRouter.route("sizin orada geçerli mi");
+  assert(route !== "callback_time_answer", `Should not match callback_time_answer due to gecerli, got: ${route}`);
+});
+
+test("Başkent Hotfix T79_3: 'uygun' in 'fiyat uygun olursa' does not trigger time_availability without time context", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const route = ConversationIntentRouter.route("fiyat uygun olursa gelebilirim");
+  assert(route !== "time_availability", `Should not match time_availability without real temporal context, got: ${route}`);
+});
+
+test("Başkent Hotfix T79_4: TenantConfigResolver.getAddress Konya Başkent default address fallback", () => {
+  const { TenantConfigResolver } = require("../lib/services/ai/tenant-config-resolver");
+  const address = TenantConfigResolver.getAddress({
+    prompts: { metadata: { identity: { organizationName: "Konya Başkent Hastanesi" } } }
+  });
+  assert(address === "Hocacihan Mahallesi, Saray Caddesi No:1, Selçuklu / Konya", `Expected Konya Başkent address, got: ${address}`);
+});
+
+
 async function runAllTests() {
   try {
     for (const t of queue) {

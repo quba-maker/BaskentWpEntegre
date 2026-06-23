@@ -194,7 +194,8 @@ export class ConversationStateArbitrator {
       return [
         'gelmeyi düşündüğünüz', 'gelmeyi dusundugunuz', 'ne zaman gelmeyi', 'ziyaret tarihi',
         'tarih aralığı', 'tarih araligi', 'tahmini tarih', 'tahmini ziyaret', 'gelmeyi planlıyorsunuz',
-        'gelmeyi planliyorsunuz', 'gelme planınız', 'gelme planiniz', 'geliş tarih'
+        'gelmeyi planliyorsunuz', 'gelme planınız', 'gelme planiniz', 'geliş tarih',
+        'gelmeyi planladığınızı', 'gelmeyi planladiginizi', 'planlama sürecinizi', 'planlama surecinizi'
       ].some(kw => lowerText.includes(kw));
     };
 

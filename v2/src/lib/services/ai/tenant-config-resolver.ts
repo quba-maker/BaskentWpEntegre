@@ -196,4 +196,21 @@ export class TenantConfigResolver {
     }
     return null; // ConversationIntentRouter will use DEFAULT_DEPARTMENTS
   }
+
+  /**
+   * Resolves the organization's address.
+   * Priority: config.address > metadata.address > default Konya Başkent address fallback
+   */
+  static getAddress(brain: any): string | null {
+    if (!brain) return null;
+    const configAddress = brain?.context?.config?.address || brain?.prompts?.metadata?.address;
+    if (configAddress && typeof configAddress === 'string' && configAddress.trim()) {
+      return configAddress.trim();
+    }
+    const orgName = TenantConfigResolver.getOrgNameFallback(brain).toLowerCase();
+    if (orgName.includes('konya') || orgName.includes('başkent') || orgName.includes('baskent')) {
+      return 'Hocacihan Mahallesi, Saray Caddesi No:1, Selçuklu / Konya';
+    }
+    return null;
+  }
 }

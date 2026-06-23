@@ -1,4 +1,5 @@
 import { TenantBrain } from '../../brain/tenant-brain';
+import { TenantConfigResolver } from './tenant-config-resolver';
 import { defaultPrompts } from '../../domain/conversation/prompts';
 import { SecurityIsolationError } from '../../security/tenant-firewall';
 import { telemetry } from '../../observability/telemetry';
@@ -482,6 +483,7 @@ export class PromptBuilder {
 - Fiyat Verme Yasağı: Ameliyat veya tedavi ücretlerine dair kesinlikle rakamsal bir fiyat (örn. 1000 Euro, 50000 TL) VERME. Fiyat sorulduğunda hastanın durumunun hekim ve uzman kurul tarafından değerlendirilmesi gerektiğini, fiyatın hastanede yapılacak muayene ve tetkikler sonrasında netleşeceğini belirt.
 - Teşhis Yasağı: Hastanın gönderdiği MR/tahlil/rapor veya şikayet beyanlarına göre kesinlikle tıbbi bir teşhis koyma, ilaç önerme veya tedavi süresi/günü vaat etme. Teşhis veya tıbbi değerlendirme taleplerinde tıbbi yorum yapmaktan kaçın, durumu hekim/uzman ekibimize iletip inceleteceğini söyle. Raporların hekim kuruluna iletildiğini söyleyerek güven ver.
 - Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, hekim ismini teyit etme, talebini planlama için not aldığını söyle.
+- SGK VE TA12 ANLAŞMASI POLİTİKASI: Yurt dışından gelen hastalar için Almanya/yurt dışı SGK (TA12, T12 vb.) veya yurt dışı sigorta anlaşmaları hastanemizde GEÇERLİ DEĞİLDİR. SGK anlaşmamız yalnızca Türkiye'de ikamet eden/yaşayan vatandaşlarımız için geçerlidir. Yurt dışı hastaları özel hasta statüsünde hizmet almaktadır. Bu yöndeki sorulara net ve dürüst bir şekilde "yurt dışı/Almanya SGK/TA12 anlaşmamızın geçerli olmadığını, yurt dışından gelen misafirlerimizin özel hasta statüsünde olduğunu" söyle.
 =========================================================\n`;
     }
 
@@ -934,11 +936,12 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     policyContext += `- Sadece gerçekten eksik bilgileri sor.\n\n`;
     
     // 2. Knowledge Capability Directive
+    const resolvedAddress = TenantConfigResolver.getAddress(brain);
     policyContext += `=== BİLGİ YETKİNLİK SINIRI ===\n`;
     policyContext += `- Doktor directory/listesi mevcut değilse hekim ismi uydurma.\n`;
     policyContext += `- Bölüm varsa yönlendir, yoksa "bu bilgiye şu an buradan erişemiyorum" de.\n`;
     policyContext += `- Fiyat bilinmiyorsa "kişiye özel değerlendirme sonrası netleşir" de.\n`;
-    policyContext += `- Adres tenant config'de varsa ver, yoksa "adres bilgisi tarafınıza iletilecek" de.\n`;
+    policyContext += `- Adres: ${resolvedAddress ? resolvedAddress : 'Temsilcimiz veya hasta danışmanımız tarafınıza iletecektir'}.\n`;
     policyContext += `- Asla bilgi uydurma, bilmediğin durumlarda dürüstçe "bu bilgiye şu an buradan erişemiyorum" de.\n\n`;
     
     // 3. Persona Hallucination Guard
