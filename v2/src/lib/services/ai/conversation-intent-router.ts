@@ -437,9 +437,10 @@ export class ConversationIntentRouter {
     // Polite close only if NO continuation signal follows
     const hasContinuationAfterThanks = [
       'ama', 'fakat', 'lakin', 'bir soru', 'bir sey', 'bir şey', 'peki',
-      'ya fiyat', 'doktor', 'surec', 'süreç', 'bilgi', 'haftaya', 'gelmeyi',
+      'ya fiyat', 'doktor', 'hekim', 'surec', 'süreç', 'bilgi', 'haftaya', 'gelmeyi',
       'gelmeyi dusun', 'gelmeyi düşünü', 'odeme', 'ödeme', 'ta 12', 'ta12',
-      'konaklama', 'kalacak yer'
+      'konaklama', 'kalacak yer', 'adres', 'konum', 'harita', 'randevu',
+      'rapor', 'görsel', 'gorsel', 'belge', 'dosya', 'ücret', 'ucret', 'tutar'
     ].some(kw => clean.includes(kw) || originalLower.includes(kw));
     if (!hasContinuationAfterThanks && politeCloseKeywords.some(kw => clean.includes(kw) || originalLower.includes(kw))) {
       intents.push('polite_close');
@@ -452,9 +453,9 @@ export class ConversationIntentRouter {
       // "sağ olun bir şey daha"
       /sa[gğgG]\s+olun.{0,20}bir/i,
       // "teşekkürler bir soru daha"
-      /te[sşsS]ekk[uüuU]r(?:ler|ederim)?.{0,60}(?:bir\s+soru|bir\s+[sşsS]ey|sorum|sormak|bilgi|haftaya|gelmeyi|[oö]deme|ta\s*12|konaklama)/i,
+      /te[sşsS]ekk[uüuU]r(?:ler|ederim)?.{0,80}(?:bir\s+soru|bir\s+[sşsS]ey|sorum|sormak|bilgi|haftaya|gelmeyi|[oö]deme|ta\s*12|konaklama|adres|konum|harita|randevu|rapor|g[öo]rsel|belge|dosya|doktor|hekim|s[üu]re[çc]|fiyat|[üu]cret|tutar)/i,
       // ASCII variants: "tesekkur bir soru daha"
-      /tesekkur(?:ler|ederim)?.{0,30}(?:bir\s+soru|sorum|sormak|bilgi)/i,
+      /tesekkur(?:ler|ederim)?.{0,80}(?:bir\s+soru|sorum|sormak|bilgi|adres|konum|harita|randevu|rapor|gorsel|belge|dosya|doktor|hekim|surec|fiyat|ucret|tutar)/i,
       // "bir sorum daha var" after teşekkür
       /te[sşsS]ekk[uüuU]r.{0,40}bir\s+sorum/i,
     ];
@@ -472,6 +473,7 @@ export class ConversationIntentRouter {
       'daha fazla bilgi', 'daha detay',
       'peki ya', 'peki fiyat', 'peki surec', 'peki süreç',
       'peki doktor', 'peki adres', 'peki nerede',
+      'adres gönder', 'adres gonder', 'konum gönder', 'konum gonder',
     ];
     const openContPatterns = [
       /ba[sş]ka\s+(?:bir\s+)?(?:bilgi|soru|[sş]ey)/i,

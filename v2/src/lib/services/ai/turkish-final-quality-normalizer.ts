@@ -42,6 +42,17 @@ interface RewriteRule {
 }
 
 const REWRITE_RULES: RewriteRule[] = [
+  // "mümkün değildir olmuyor" → "mümkün değildir"
+  {
+    id: 'mumkun_degil_olmuyor_fix',
+    pattern: /\bm[üu]mk[üu]n\s+de[ğg]ildir\s+olmuyor\b/gi,
+    replacement: 'mümkün değildir',
+  },
+  {
+    id: 'mumkun_degil_olmuyor_short_fix',
+    pattern: /\bm[üu]mk[üu]n\s+de[ğg]il\s+olmuyor\b/gi,
+    replacement: 'mümkün değildir',
+  },
   // "mümkünüz olmamaktadır" → "mümkün değildir"
   {
     id: 'mumkunuz_olmamak_fix',

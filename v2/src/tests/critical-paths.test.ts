@@ -12192,7 +12192,8 @@ test("Başkent v75 Live T41: multi-intent price/logistics answer avoids broken T
   assert(result && result.text, "Multi-intent composer should produce a response");
   assert(!result.text.includes("planınızı sonrasında"), "Broken 'planınızı sonrasında' must not appear");
   assert(!result.text.includes("Tahminizi maliyet"), "Broken 'Tahminizi maliyet' must not appear");
-  assert(result.text.includes("yaklaşık maliyet"), "Price block should mention approximate cost naturally");
+  assert(!result.text.includes("yaklaşık maliyet"), "Price block must not mention approximate cost");
+  assert(result.text.includes("buradan net fiyat paylaşamıyorum"), "Price block should use exact safe price wording");
   assert(result.text.includes("konaklama"), "Logistics block should handle accommodation naturally");
 });
 
@@ -12412,6 +12413,158 @@ test("Başkent v78 T52: smart draft without explicit form signal must not mentio
   } finally {
     if (previousApiKey) process.env.GEMINI_API_KEY = previousApiKey;
   }
+});
+
+test("Başkent v79 T53: Prompt injects current date and natural tone guard", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v79-t53",
+    "Sen Rüya'sın.",
+    { industry: "healthcare", timezone: "Europe/Istanbul" }
+  );
+
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    effectiveIntent: "callback_time_answer",
+    currentMessageText: "yarın saat 10",
+    currentDateOverride: "2026-06-23T12:00:00+03:00",
+    opportunity: { country: "Kanada", resolvedFrom: "active_conv_opp" },
+    history: [
+      { role: "user", content: "mustafa kanada" },
+      { role: "assistant", content: "Konya'ya gelmeyi düşündüğünüz dönem var mı?" }
+    ]
+  });
+
+  assert(prompt.includes("GÜNCEL TARİH VE SAAT BAĞLAMI"), "Prompt should include current date context");
+  assert(prompt.includes("Bugünün tarihi: 23 Haziran 2026"), "Prompt should resolve current date from override");
+  assert(prompt.includes("Haftanın günü: Salı"), "Prompt should include current weekday");
+  assert(prompt.includes("2024, 2025 veya geçmiş yıl uydurma"), "Prompt should ban stale year hallucination");
+  assert(prompt.includes("olarak mı anlamalıyım"), "Prompt should explicitly discourage robotic ambiguity wording");
+  assert(prompt.includes("çoklu saat dilimli ülkelerde"), "Prompt should ask timezone clarification for multi-zone countries");
+});
+
+test("Başkent v79 T54: ambiguous numeric arrival date is clarified, not treated as certain", () => {
+  const { DateAnswerResolver } = require("../lib/services/ai/date-answer-resolver");
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+
+  const ambiguity = DateAnswerResolver.isAmbiguousNumericDateReply("7 14");
+  assert(ambiguity.ambiguous === true, "7 14 should be marked ambiguous");
+  assert(ambiguity.monthDayLabel === "14 Temmuz", `Expected 14 Temmuz label, got ${ambiguity.monthDayLabel}`);
+  assert(ambiguity.rangeLabel === "7-14 Temmuz arası", `Expected range label, got ${ambiguity.rangeLabel}`);
+
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v79-t54",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    effectiveIntent: "arrival_date_answer",
+    currentMessageText: "7 14",
+    dateAmbiguityClarification: ambiguity,
+    history: [
+      { role: "assistant", content: "Türkiye'ye gelme planınız ne zaman?" },
+      { role: "user", content: "7 14" }
+    ]
+  });
+
+  assert(prompt.includes("TARİH BELİRSİZLİĞİ"), "Prompt should include ambiguity clarification block");
+  assert(prompt.includes("7 14 derken, 14 Temmuz mu yoksa 7-14 Temmuz arası mı?"), "Prompt should use natural ambiguity question");
+  assert(!prompt.includes("olarak mı anlamalıyım?"), "Prompt should not use robotic ambiguity wording");
+});
+
+test("Başkent v79 T55: thanks plus address request is not treated as a close", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+  const intents = ConversationIntentRouter.routeAll("Adres gönderi bir zahmet.. Teşekkürler..");
+
+  assert(intents.includes("address_full_request"), `Expected address_full_request, got: ${JSON.stringify(intents)}`);
+  assert(!intents.includes("polite_close"), `Address request must not be polite close, got: ${JSON.stringify(intents)}`);
+
+  const workerCode = require("fs").readFileSync("src/lib/queue/worker.ts", "utf8");
+  assert(workerCode.includes("adres|konum|harita"), "Worker thank-you stop rule should treat address/konum/harita as continuation");
+});
+
+test("Başkent v79 T56: media batch reply is safe and does not promise medical review", () => {
+  const workerCode = require("fs").readFileSync("src/lib/queue/worker.ts", "utf8");
+
+  assert(workerCode.includes("Buradan tıbbi yorum yapamam"), "Media batch reply should include safe medical boundary");
+  assert(workerCode.includes("özellikle ne sormak istiyorsunuz"), "Media batch reply should ask one natural follow-up question");
+  assert(!workerCode.includes("doktor/ekibimiz değerlendirecek"), "Media batch must not promise doctor/team review");
+  assert(workerCode.includes("media_batch_skipped_human_or_abusive"), "Human/manual media skip should be auditable");
+});
+
+test("Başkent v79 T57: final auditor removes repeated identity and gendered honorifics", async () => {
+  const { FinalOutboundBodyAuditor } = await import("../lib/services/ai/final-outbound-body-auditor");
+
+  const result = FinalOutboundBodyAuditor.audit(
+    "Başkent Üniversitesi Konya Hastanesi'nden Rüya ben.\n\nMustafa Bey, fiyat bilgisi buradan netleşmez.",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "peki fiyatlar nasıl"
+    }
+  );
+
+  assert(!result.text.includes("Rüya ben"), `Repeated identity must be removed: ${result.text}`);
+  assert(!result.text.includes("Bey"), `Gendered honorific must be removed: ${result.text}`);
+  assert(result.rewrote === true, "Auditor should report rewrite");
+});
+
+test("Başkent v79 T58: Turkish normalizer fixes 'mümkün değildir olmuyor'", async () => {
+  const { TurkishFinalQualityNormalizer } = await import("../lib/services/ai/turkish-final-quality-normalizer");
+  const result = TurkishFinalQualityNormalizer.normalize("Uzaktan net değerlendirme yapmak mümkün değildir olmuyor.");
+
+  assert(!result.text.includes("mümkün değildir olmuyor"), "Broken phrase must be removed");
+  assert(result.text.includes("mümkün değildir"), "Phrase should normalize to mümkün değildir");
+  assert(result.wasModified === true, "Normalizer should report modification");
+});
+
+test("Başkent v79 T59: no-form form_followup tells the truth and avoids form welcome reset", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v79-t59",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    effectiveIntent: "form_followup",
+    currentMessageText: "form doldurmuştum",
+    history: [
+      { role: "user", content: "kardiyoloji randevusu" },
+      { role: "assistant", content: "Türkiye'ye gelme ihtimaliniz olur mu?" },
+      { role: "user", content: "form doldurmuştum" }
+    ],
+    opportunity: { department: "Kardiyoloji", resolvedFrom: "active_conv_opp" }
+  });
+
+  assert(prompt.includes("form_followup_no_verified_form"), "No-form form mention should use no-verified-form guide");
+  assert(prompt.includes("Bu konuşmada form kaydı görünmüyor"), "Prompt should tell the truth when no verified form exists");
+  assert(prompt.includes("ilk form karşılama şablonuna dönme"), "Prompt should not reset to first form welcome");
+});
+
+test("Başkent v79 T60: callback recovery uses natural confirmation wording", async () => {
+  const { FinalOutboundBodyAuditor } = await import("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "Ben Rüya, Başkent Üniversitesi Konya Uygulama ve Araştırma Merkezi’nden sizinle ilgileniyorum. Size sağlık talebinizle ilgili yardımcı olayım.",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "perşembe 20"
+    }
+  );
+
+  assert(result.text.includes("Perşembe günü Türkiye saatiyle 20:00 için not alayım mı?"), `Expected natural callback confirmation, got: ${result.text}`);
+  assert(!result.text.includes("sizin için uygun görünüyor"), "Robotic callback wording must not remain");
 });
 
 

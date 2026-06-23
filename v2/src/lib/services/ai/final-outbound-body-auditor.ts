@@ -54,6 +54,7 @@ const KNOWN_BAD_MORPHOLOGY_PATTERNS: RegExp[] = [
   /Konya(?:'n[ıi]n[ıi]z|n[ıi]n[ıi]z)/i,  // Konya'nınız
   /s[üu]re[çc]ininiz/i,          // sürecininiz
   /olabilece[ğg]inizie?\s+anl/i, // olabileceğinizi anlıyorum (garbled)
+  /m[üu]mk[üu]n\s+de[ğg]ildir\s+olmuyor/i,
 ];
 
 // Legacy close phrases that signal the conversation was terminated incorrectly
@@ -101,7 +102,61 @@ function buildCallbackTimeConfirmation(inboundText?: string): string | null {
     return `Pazar günü telefon görüşmesi planlanmıyor. Pazar hariç Türkiye saatiyle 09:00-21:00 arasında hangi gün ve saat sizin için uygun olur?`;
   }
 
-  return `${dayLabel} günü Türkiye saatiyle ${hh}:${mm} sizin için uygun görünüyor. Bu şekilde teyit ediyor musunuz?`;
+  return `${dayLabel} günü Türkiye saatiyle ${hh}:${mm} için not alayım mı?`;
+}
+
+function isShortGreetingInbound(inboundText?: string): boolean {
+  const clean = (inboundText || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase()
+    .trim();
+  return clean.length <= 30 && /\b(merhaba|selam|iyi günler|iyi aksamlar|iyi akşamlar|günaydın|gunaydin)\b/i.test(clean);
+}
+
+function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
+  let result = text;
+  let rewrote = false;
+
+  const honorificCleaned = result.replace(/\b([A-ZÇĞİÖŞÜ][a-zçğıöşü]+)\s+(?:Bey|Hanım|Hanim|Sayın|Sayin|Bay|Bayan)\b/g, '$1');
+  if (honorificCleaned !== result) {
+    result = honorificCleaned;
+    rewrote = true;
+  }
+
+  if (!isShortGreetingInbound(ctx.inboundText)) {
+    const identityPatterns = [
+      /^\s*Başkent\s+Üniversitesi\s+Konya\s+Hastanesi['’`]nden\s+R[üu]ya\s+ben[.,]?\s*/i,
+      /^\s*Başkent\s+Üniversitesi\s+Konya\s+Hastanesi['’`]nden\s+ben\s+R[üu]ya[.,]?\s*/i,
+      /^\s*(?:Merhaba,\s*)?R[üu]ya\s+ben[.,]?\s*(?:Başkent\s+Üniversitesi\s+Konya\s+(?:Hastanesi|Uygulama\s+ve\s+Araştırma\s+Merkezi)['’`]nden\s+(?:yazıyorum|sizinle\s+ilgileniyorum)[.,]?)?\s*/i,
+      /^\s*(?:Merhaba,\s*)?Ben\s+R[üu]ya[.,]?\s*(?:Başkent\s+Üniversitesi\s+Konya\s+(?:Hastanesi|Uygulama\s+ve\s+Araştırma\s+Merkezi)['’`]nden\s+(?:yazıyorum|sizinle\s+ilgileniyorum)[.,]?)?\s*/i,
+    ];
+    for (const pattern of identityPatterns) {
+      const next = result.replace(pattern, '').trimStart();
+      if (next !== result && next.length >= 20) {
+        result = next;
+        rewrote = true;
+        break;
+      }
+    }
+  }
+
+  const robotPhraseRewrites: Array<[RegExp, string]> = [
+    [/Bug[üu]n\s+([^.\n]+?)\s+oldu[ğg]una\s+g[öo]re\s+/gi, ''],
+    [/Konuşma geçmişimizdeki bilgileri dikkatle takip ediyorum\.?/gi, ''],
+    [/sizin için uygun görünüyor/gi, 'uygun mu'],
+    [/Bu doğrultuda\s+/gi, ''],
+  ];
+  for (const [pattern, replacement] of robotPhraseRewrites) {
+    const next = result.replace(pattern, replacement);
+    if (next !== result) {
+      result = next;
+      rewrote = true;
+    }
+  }
+
+  result = result.replace(/\n{3,}/g, '\n\n').trim();
+  return { text: result, rewrote };
 }
 
 export class FinalOutboundBodyAuditor {
@@ -178,6 +233,12 @@ export class FinalOutboundBodyAuditor {
           result = callbackRecovery;
           rewrote = true;
         }
+      }
+
+      const naturalTone = applyNaturalToneRewrites(result, ctx);
+      if (naturalTone.rewrote) {
+        result = naturalTone.text;
+        rewrote = true;
       }
     } catch (err) {
       // Non-fatal — use original text

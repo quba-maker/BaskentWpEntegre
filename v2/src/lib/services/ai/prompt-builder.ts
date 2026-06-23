@@ -16,6 +16,36 @@ import { buildProgressFunnelPolicy } from './policies/progress-funnel-policy';
 
 
 export class PromptBuilder {
+  private static buildRuntimeDateContext(timezone: string = 'Europe/Istanbul', overrideNow?: string | Date): string {
+    const now = overrideNow ? new Date(overrideNow) : new Date();
+    const safeNow = isNaN(now.getTime()) ? new Date() : now;
+    const parts = new Intl.DateTimeFormat('tr-TR', {
+      timeZone: timezone,
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(safeNow);
+    const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+    const currentDate = `${get('day')} ${get('month')} ${get('year')}`.trim();
+    const weekday = get('weekday');
+    const currentTime = `${get('hour')}:${get('minute')}`;
+
+    return `\n\n=== 📅 GÜNCEL TARİH VE SAAT BAĞLAMI — KESİN KURAL ===
+- Bugünün tarihi: ${currentDate}
+- Haftanın günü: ${weekday}
+- Saat dilimi: ${timezone}
+- Yerel saat: ${currentTime}
+- "Bugün", "yarın", "perşembe", "haftaya" gibi ifadeleri MUTLAKA bu tarihe göre çöz.
+- 2024, 2025 veya geçmiş yıl uydurma. Kullanıcı yıl vermediyse güncel yılı esas al, geçmişe düşerse bir sonraki uygun geleceği sor.
+- Kullanıcı tarih hatası söylerse kısa düzelt: "Haklısınız, tarih bilgisini düzeltiyorum." Gereksiz "olduğuna göre" açıklaması yapma.
+- Kanada, ABD, Avustralya gibi çoklu saat dilimli ülkelerde hasta "yarın saat 10" gibi saat verirse saat dilimi netleşmeden kesin teyit yazma; "Bu saat Türkiye saatiyle mi, bulunduğunuz yerin saatiyle mi?" diye sor.
+=========================================================\n`;
+  }
+
   /**
    * Validates that the requested prompt belongs strictly to the active TenantBrain.
    */
@@ -989,7 +1019,10 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     });
     let openingGuidelines = '';
     if (languagePolicy.replyLanguage === 'tr') {
-      openingGuidelines = `\n>> UYARI (DOĞAL BAŞLANGIÇLAR): Cümlelerine sürekli robotik ve mekanik şekilde "Anladım.", "Anlıyorum." veya "... yazdığınızı anladım." gibi başlangıç kalıplarıyla başlama. Bunun yerine doğrudan, samimi ve doğal şekilde konuya gir. "Anladım" kelimesini global olarak yasaklamıyoruz fakat tekrarlı ve mekanik kullanımından kaçınmalısın.`;
+      openingGuidelines = `\n>> UYARI (DOĞAL BAŞLANGIÇLAR): Cümlelerine sürekli robotik ve mekanik şekilde "Anladım.", "Anlıyorum." veya "... yazdığınızı anladım." gibi başlangıç kalıplarıyla başlama. Bunun yerine doğrudan, samimi ve doğal şekilde konuya gir. "Anladım" kelimesini global olarak yasaklamıyoruz fakat tekrarlı ve mekanik kullanımından kaçınmalısın.
+>> UYARI (İNSAN DİLİ): "olarak mı anlamalıyım", "bugün X olduğuna göre", "sizin için uygun görünüyor", "bu doğrultuda", "konuşma geçmişimizdeki bilgileri dikkatle takip ediyorum" gibi robotik kalıpları kullanma. Belirsizlikte doğal sor: "7 14 derken, 14 Temmuz mu yoksa 7-14 Temmuz arası mı?"
+>> UYARI (HİTAP): Bey, Hanım, Sayın, Bay, Bayan gibi cinsiyetli/resmi hitaplar kullanma. İsimle hitap etmek yerine "siz" diliyle devam et.
+>> UYARI (TEKRAR KİMLİK): Devam eden konuşmada "Rüya ben", "Başkent Üniversitesi Konya Hastanesi'nden..." gibi tanıtım cümlelerini tekrar etme.`;
     } else {
       openingGuidelines = `\n>> UYARI (NATURAL OPENINGS): Avoid beginning sentences with repetitive, robotic, or mechanical opening prefixes (e.g., "Understood.", "I understand." or "I understand that..."). Jump directly and naturally into addressing the user's message.`;
     }
@@ -1054,15 +1087,15 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
         const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} ile ilgili)` : '';
         let welcomeInstruction = '';
         if (!hasVerifiedFormContext) {
-          welcomeInstruction = `FORM BAĞLAMI YOK: Kullanıcı yalnızca selam verdiyse veya form kaydı sistemde yoksa "doldurduğunuz form", "formunuzda", "başvurunuz" gibi ifadeler kullanma. Doğrudan WhatsApp hastası gibi kısa ve doğal yanıt ver.`;
+          welcomeInstruction = `FORM BAĞLAMI YOK: Kullanıcı yalnızca selam verdiyse veya form kaydı sistemde yoksa "doldurduğunuz form", "formunuzda", "başvurunuz" gibi ifadeler kullanma. Kullanıcı "form doldurmuştum" derse ilk form karşılama şablonuna dönme; doğal cevap ver: "Bu konuşmada form kaydı görünmüyor. Şikayetinizi ve geliş planınızı buradan yazarsanız yardımcı olayım."`;
         } else if (isFirstAssistantTurn && unifiedContext?.formAlreadyAddressed !== true) {
           welcomeInstruction = `İlk mesaj karşılama kuralları: Hasta ilk selamı verdi. YAP: Hastanın selamına sıcak bir şekilde karşılık ver, başvurunun/formun ulaştığını belirt${compPhrase} ve geçmiş olsun dile. UYARI: "doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz" gibi robotik/outbound bir cümle kurma, kullanıcı zaten yazmış durumdadır. Doğal bir karşılama yap.`;
         } else {
-          welcomeInstruction = `Devam eden konuşma kuralları: KESİNLİKLE kendini tanıtma, kurum adını söyleme veya karşılama/selamlama şablonlarını KESİNLİKLE kullanma. Doğrudan hastanın form doldurdum beyanını/sorusunu onaylayarak konuya gir (Örn: "Evet, form kaydınızı görüyorum. ...").`;
+          welcomeInstruction = `Devam eden konuşma kuralları: KESİNLİKLE kendini tanıtma, kurum adını söyleme veya karşılama/selamlama şablonlarını KESİNLİKLE kullanma. Doğrudan hastanın form doldurdum beyanını/sorusunu onaylayarak konuya gir (Örn: "Evet, form kaydınızı görüyorum. ..."). Mevcut konuşmadaki bölüm, ülke, geliş dönemi ve telefon bilgilerini koru; ilk form karşılama metnine dönme ve devam eden konuşmada "Sağlıklı günler dileriz" kapanışı kullanma.`;
         }
         intentGuide = hasVerifiedFormContext
           ? `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu belirtiyor. YAPMA: "Hangi konuda yardımcı olabilirim?" veya "Kaydınızı göremiyorum" gibi generic/olumsuz ifadeler kullanma. ${welcomeInstruction} Sistemde form kaydı görünüyorsa şikayeti/konuyu referans al. Hastanın son mesajına göre tek doğal soru sor; geliş niyeti, geliş dönemi veya eksik sağlık bağlamı net değilse önce onu netleştir. Telefon görüşmesi için gün/saat istemeyi yalnızca hasta arama istediğinde veya görüşmeye açık olduğunu açıkça söylediğinde yap.`
-          : `Intent: direct_whatsapp_greeting\n${welcomeInstruction} Bu yanıtta form karşılama şablonu kullanma; hastanın son mesajına kısa ve doğal cevap ver.`;
+          : `Intent: form_followup_no_verified_form\n${welcomeInstruction} Bu yanıtta form karşılama şablonu kullanma; hastanın son mesajına kısa ve doğal cevap ver.`;
       } else if (effectiveIntent === 'process_question') {
         const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} süreci)` : '';
         intentGuide = `Intent: process_question\nHasta tedavi/check-up veya randevu sürecinin${compPhrase} nasıl işleyeceğini, sonraki aşamaları soruyor. YAP: Sürecin${compPhrase} uzman ekip tarafından değerlendirmeyle başladığını ve tetkiklerin yapılarak kişiye özel tedavi planı çıkarıldığını belirt. Detayların hastanın yaşına ve sağlık durumuna göre netleşeceğini vurgula. Sıcak ve güven verici bir ton kullan.`;
@@ -1123,6 +1156,18 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
 
     finalPrompt += `\n\n=== 🎯 SON MESAJ DAVRANIŞ KILAVUZU ===\n${intentGuide}\n${behavioralSummary}\n====================================\n`;
 
+    if (unifiedContext?.dateAmbiguityClarification) {
+      const rawAmbiguousDate = unifiedContext.dateAmbiguityClarification.raw || lastUserMessage;
+      const monthDayLabel = unifiedContext.dateAmbiguityClarification.monthDayLabel || '14 Temmuz';
+      const rangeLabel = unifiedContext.dateAmbiguityClarification.rangeLabel || '7-14 Temmuz arası';
+      finalPrompt += `\n\n=== 📅 TARİH BELİRSİZLİĞİ — NETLEŞTİR ===
+Son kullanıcı mesajındaki tarih ifadesi belirsiz: "${rawAmbiguousDate}".
+Bu tarihi kaydetme veya kesin tarih gibi tekrarlama.
+Doğal ve kısa sor: "${rawAmbiguousDate} derken, ${monthDayLabel} mu yoksa ${rangeLabel} mı?"
+"olarak mı anlamalıyım" veya uzun açıklama kullanma.
+==========================================\n`;
+    }
+
     const { resolveActivePromptIdentityContext } = require('./active-prompt-context');
     const identityCtx = resolveActivePromptIdentityContext({ brain });
 
@@ -1175,13 +1220,17 @@ KULLANICI VERMEDEN TARİH/SAAT/GÜN YAZMA YASAĞI:
   ASLA UYDURMA. Sadece kullanıcının söylediği zamanı tekrarlayabilirsin.
 - Kullanıcı "olur", "tamam", "evet", "tabi", "harika" gibi kısa onay verirse:
   Bu bir zaman/tarih teyidi DEĞİLDİR, sadece genel bir onay veya devam isteğidir.
-  Doğru yanıt: "Talebinizi not aldım. ${personaLabel} uygun bir zaman için sizinle iletişime geçecektir."
+	  Doğru yanıt: "Devam edebilmem için hangi konuda yardımcı olayım?"
 - ⏰ RANDEVU/ARAMA ONAY VE ZAMAN BAĞLAMI bölümünde scheduled_for_utc veya
   callback_time_tr varsa o tarihi tekrarlayabilirsin.
   O bölüm boşsa veya "Bilinmiyor" ise, tarih/saat ÜRETME.
 - MEVCUT DURUM: ${hasActiveTaskTime ? 'Aktif task time context VAR — tarih/saati o bağlamdan al.' : 'Aktif task time context YOK — tarih/saat YAZMA, uydurma.'}
 Bu kural tenant prompt'u ne derse desin üzerindedir.
 =========================================================\n`;
+    finalPrompt += this.buildRuntimeDateContext(
+      brain.context.config?.timezone || 'Europe/Istanbul',
+      unifiedContext?.runtimeNow || unifiedContext?.currentDateOverride
+    );
     finalPrompt += hallucinationGuard;
 
     const saasConstitution = `\n\n=== 📜 MERKEZİ SAAS BOT ANAYASASI (CENTRALIZED PROMPT POLICY) ===

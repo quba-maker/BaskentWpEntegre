@@ -53,13 +53,14 @@ export class MultiIntentConsultantComposer {
     // P0.16-M: Expanded candidates — must match isMultiIntent() below exactly
     const candidates: IntentCandidate[] = [
       { intent: 'address_question',    detected: /nerede|adres|konum|konumu/.test(lower) },
-      { intent: 'price_question',      detected: /fiyat|[üu]cret|ne kadar/.test(lower) },
+      { intent: 'price_question',      detected: /fiyat|[üu]cret|tutar|[öo]deme|maliyet|ta\s*12|ta12|ne kadar/.test(lower) },
       // P0.16-M: "doktor kim" / "doktorlar kim" / "hekimler kim" / "hangi doktorlar" etc.
       { intent: 'doctor_names',        detected: /(?:doktor|hekim)(?:lar|ler)?\s+(?:isim|list|kim|hang)|(?:doktor|hekim)(?:lar|ler)?\s+kim(?:ler)?|kimler\s+var|hangi\s+(?:doktor|hekim)(?:lar|ler)?/.test(lower) },
       // P0.16-M: "süreç" / "nasıl işliyor" / "süreç nasıl" etc.
       { intent: 'process_question',    detected: /s[üu]re[çc]|nas[ıi]l\s+i[şs]liyor|nas[ıi]l\s+[çc]al[ıi][şs][ıi]yor|a[şs]ama|ad[ıi]m|tedavi\s+s[üu]re|nas[ıi]l\s+olacak|gelme\s+nas[ıi]l|geli[şs]\s+s[üu]re|tedavi\s+s[üu]re/.test(lower) },
       { intent: 'logistics_question',  detected: /konaklama|ula[şs][ıi]m|otel|transfer|yol|gelme/.test(lower) },
       { intent: 'next_step_request',   detected: /belirleyelim|ne\s+zaman|nas[ıi]l\s+olacak|ee\s+yani|ne\s+yapmam\s+gerekiyor|ilerleyelim/.test(lower) },
+      { intent: 'concern_objection',   detected: /[şs][üu]phe|end[iı]şe|emin\s+de[ğg]il|karars[ıi]z|pahal[ıi]|uzak|kalacak|konaklama|nas[ıi]l\s+gelece[ğg]im|ta\s*12|ta12|[öo]deme/.test(lower) },
     ];
 
     const detected = candidates.filter(c => c.detected);
@@ -110,7 +111,7 @@ export class MultiIntentConsultantComposer {
     }
 
     if (detected.find(d => d.intent === 'price_question')) {
-      blocks.push(`${blockIndex}. Fiyat bilgisi\nNet fiyat; muayene, tetkik ve kişiye özel planlama sonrasında netleştiği için buradan kesin rakam paylaşmam doğru olmaz. Ancak ödeme ve yaklaşık maliyet çerçevesiyle ilgili sorularınızı ilgili ekibimizle netleştirebiliriz.`);
+      blocks.push(`${blockIndex}. Fiyat bilgisi\nFiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum. Ödeme veya TA12 gibi evrak konularını ayrıca netleştirmek istemeniz çok anlaşılır.`);
       blockIndex++;
     }
 
@@ -127,18 +128,23 @@ export class MultiIntentConsultantComposer {
 
       const processBlocks: string[] = [];
       if (hasNeurosurgery && selfParticipant?.complaint) {
-        processBlocks.push(`${selfParticipant.complaint} için önce kısa bir telefon görüşmesiyle bilgi alınır, ardından uygun tarih planlanır. Hastaneye geldiğinizde uzman hekim muayenesi ve gerekirse tetkikler sonrası tedavi planı netleşir.`);
+        processBlocks.push(`${selfParticipant.complaint} için süreç hastanede ilgili uzman hekim değerlendirmesiyle başlar. Muayene ve gerekirse tetkikler sonrası tedavi planı netleşir.`);
       }
       if (hasCardiology) {
         const secondaryLabel = state.participants.find(p => p.department?.toLowerCase().includes('kardiy') && p.relation !== 'self');
         const label = secondaryLabel ? `${secondaryLabel.relation === 'mother' ? 'Anneniz' : secondaryLabel.relation === 'father' ? 'Babanız' : 'Yakınınız'} için Kardiyoloji` : 'Kardiyoloji';
-        processBlocks.push(`${label}: bilgi alınır, ardından muayene ve tetkikler planlanır.`);
+        processBlocks.push(`${label}: muayene ve gerekli görülürse tetkikler planlanır; net değerlendirme hastanede yapılır.`);
       }
       if (processBlocks.length === 0) {
-        processBlocks.push('Önce kısa bir telefon görüşmesiyle bilgi alınır, ardından uygun tarih ve hekim planlanır. Muayene ve gerekli tetkikler sonrası tedavi planı netleşir.');
+        processBlocks.push('Süreç hastanede ilgili uzman hekim değerlendirmesiyle başlar. Muayene ve gerekli tetkikler sonrası kişiye özel plan netleşir.');
       }
 
       blocks.push(`${blockIndex}. Süreç\n${processBlocks.join('\n')}`);
+      blockIndex++;
+    }
+
+    if (detected.find(d => d.intent === 'concern_objection')) {
+      blocks.push(`${blockIndex}. Aklınızdaki soru işaretleri\nKarar vermeden önce ödeme, ulaşım ve konaklama tarafını netleştirmek istemeniz çok anlaşılır. En çok hangi başlık sizi düşündürüyor?`);
       blockIndex++;
     }
 
@@ -189,12 +195,13 @@ export class MultiIntentConsultantComposer {
     const lower = inboundText.toLowerCase();
     let count = 0;
     if (/nerede|adres|konum|konumu/.test(lower)) count++;
-    if (/fiyat|[üu]cret|ne kadar/.test(lower)) count++;
+    if (/fiyat|[üu]cret|tutar|[öo]deme|maliyet|ta\s*12|ta12|ne kadar/.test(lower)) count++;
     // P0.16-M: expanded — "doktorlar kim", "hekimler kim" etc.
     if (/(?:doktor|hekim)(?:lar|ler)?\s+(?:isim|list|kim|hang)|(?:doktor|hekim)(?:lar|ler)?\s+kim(?:ler)?|kimler\s+var|hangi\s+(?:doktor|hekim)(?:lar|ler)?/.test(lower)) count++;
     // P0.16-M: expanded — "süreç" alone, "nasıl olacak", "gelme nasıl" etc.
     if (/s[üu]re[çc]|nas[ıi]l\s+i[şs]liyor|nas[ıi]l\s+[çc]al[ıi][şs][ıi]yor|a[şs]ama|ad[ıi]m|tedavi\s+s[üu]re|nas[ıi]l\s+olacak|gelme\s+nas[ıi]l|geli[şs]\s+s[üu]re|tedavi\s+s[üu]re/.test(lower)) count++;
     if (/konaklama|ula[şs][ıi]m|otel|transfer|yol|gelme/.test(lower)) count++;
+    if (/[şs][üu]phe|end[iı]şe|emin\s+de[ğg]il|karars[ıi]z|pahal[ıi]|uzak|kalacak|nas[ıi]l\s+gelece[ğg]im|ta\s*12|ta12|[öo]deme/.test(lower)) count++;
     return count >= 2;
   }
 }

@@ -676,18 +676,16 @@ export class QueueWorkerEngine {
       }
 
       let responseText: string;
+      const hasVisualOrDocument = imageCount > 0 || docCount > 0 || videoCount > 0;
       if (parts.length === 0) {
-        responseText = 'Gönderdiğiniz dosya bize ulaştı. Notlarımıza ekledik.';
-      } else {
-        const joined = parts.length > 1 
+        responseText = 'Gönderdiğiniz dosya ulaştı. Buradan tıbbi yorum yapamam; bununla ilgili özellikle ne sormak istiyorsunuz?';
+      } else if (hasVisualOrDocument) {
+        const joined = parts.length > 1
           ? parts.slice(0, -1).join(', ') + ' ve ' + parts[parts.length - 1]
           : parts[0];
-        responseText = `Gönderdiğiniz ${joined} bize ulaştı. Hepsini notlarımıza ekledik; doktor/ekibimiz değerlendirecek.`;
-      }
-
-      // Add audio disclaimer if applicable
-      if (audioCount > 0) {
-        responseText += ' Ses mesajı içeriği ayrıca değerlendirmeye alınacaktır.';
+        responseText = `Gönderdiğiniz ${joined} ulaştı. Buradan tıbbi yorum yapamam; bununla ilgili özellikle ne sormak istiyorsunuz?`;
+      } else {
+        responseText = 'Ses mesajınız ulaştı. Sağlık talebinizi kısaca yazarsanız buradan yardımcı olayım.';
       }
 
       // Check conversation status — don't reply if human-handled or abusive
@@ -701,6 +699,14 @@ export class QueueWorkerEngine {
 
       if (isHuman || isAbusive) {
         this.log.info(`[MEDIA_BATCH_SKIPPED] Conversation is human-handled or marked as abusive, skipping batch response`, { traceId, phoneNumber });
+        try {
+          AIEventEmitter.emit({
+            tenantId,
+            type: 'media_batch_skipped_human_or_abusive',
+            category: 'pipeline',
+            payload: { phoneNumber, status: convStatus[0]?.status || 'unknown' }
+          });
+        } catch { /* non-fatal */ }
         return;
       }
 
@@ -4383,9 +4389,12 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       /haftaya/i,
       /gelmeyi\s+d[üu]ş[üu]n/i,
       /gelmeyi\s+dusun/i,
-      /fiyat|[üu]cret|[öo]deme|maliyet|ta\s*12|ta12/i,
-      /konya|eskişehir|eskisehir|ulaş[ıi]m|ulas[ıi]m|konaklama|kalacak\s+yer/i,
-      /soru|sormak|sorabilir/i,
+	      /fiyat|[üu]cret|[öo]deme|maliyet|ta\s*12|ta12/i,
+	      /tutar|ka[çc]\s*para|masraf|sigorta|evrak|belge/i,
+	      /konya|eskişehir|eskisehir|ulaş[ıi]m|ulas[ıi]m|konaklama|kalacak\s+yer/i,
+	      /adres|konum|harita|google\s*maps?|yol\s+tarifi|g[öo]nder/i,
+	      /randevu|doktor|hekim|s[üu]re[çc]|rapor|g[öo]rsel|foto|belge|dosya/i,
+	      /soru|sormak|sorabilir|bilgi/i,
       /\?/,
       /m[ıi]y[ıi]m|misiniz|musunuz|m[ıi]\s/i
     ].some(pat => pat.test(normalizedContent));

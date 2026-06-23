@@ -378,12 +378,12 @@ export class AIResponseOrchestrator {
               const { TaskService } = require('../task.service');
               const taskService = new TaskService(db);
               const opportunityId = unifiedContext?.opportunity?.id || null;
-              
+
               const crypto = require('crypto');
               const idempotencyKey = crypto.createHash('sha256')
                 .update(`${tenantId}:${channelId || 'whatsapp'}:${conversationId}:callback_scheduled:${proposedUtc}`)
                 .digest('hex');
-              
+
               await taskService.create({
                 tenantId,
                 opportunityId: opportunityId || undefined,
@@ -1542,64 +1542,69 @@ export class AIResponseOrchestrator {
           shouldBypassCallbackConfirmation = callbackResult.isSuccess;
         }
       } else if (isArrivalDateAnswer) {
-        const parsed = DateAnswerResolver.parse(inboundText, brain.context.config?.timezone || 'Europe/Istanbul');
-        const normalizedDate = parsed.raw || inboundText.trim();
+        const ambiguity = DateAnswerResolver.isAmbiguousNumericDateReply(inboundText);
+        if (ambiguity.ambiguous) {
+          unifiedContext.dateAmbiguityClarification = ambiguity;
+        } else {
+          const parsed = DateAnswerResolver.parse(inboundText, brain.context.config?.timezone || 'Europe/Istanbul');
+          const normalizedDate = parsed.raw || inboundText.trim();
 
-        if (conversationId) {
-          try {
-            const convCheck = await db.executeSafe({
-              text: `SELECT metadata FROM conversations WHERE id = $1 LIMIT 1`,
-              values: [conversationId]
-            }) as any[];
-            const existingMeta = convCheck[0]?.metadata || {};
-            const updatedMeta = {
-              ...existingMeta,
-              arrival_date: normalizedDate
-            };
-            delete updatedMeta.phone_number;
-            delete updatedMeta.patient_name;
-            delete updatedMeta.raw_message;
+          if (conversationId) {
+            try {
+              const convCheck = await db.executeSafe({
+                text: `SELECT metadata FROM conversations WHERE id = $1 LIMIT 1`,
+                values: [conversationId]
+              }) as any[];
+              const existingMeta = convCheck[0]?.metadata || {};
+              const updatedMeta = {
+                ...existingMeta,
+                arrival_date: normalizedDate
+              };
+              delete updatedMeta.phone_number;
+              delete updatedMeta.patient_name;
+              delete updatedMeta.raw_message;
 
-            if (updatedMeta.last_callback_offer) {
-              let shouldDeleteOffer = false;
-              const proposedDueAt = updatedMeta.last_callback_offer.proposed_due_at;
-              if (proposedDueAt) {
-                const proposedDateOnly = proposedDueAt.split('T')[0];
-                if (parsed.date) {
-                  const parsedDateOnly = parsed.date.toISOString().split('T')[0];
-                  if (proposedDateOnly === parsedDateOnly) {
-                    shouldDeleteOffer = true;
+              if (updatedMeta.last_callback_offer) {
+                let shouldDeleteOffer = false;
+                const proposedDueAt = updatedMeta.last_callback_offer.proposed_due_at;
+                if (proposedDueAt) {
+                  const proposedDateOnly = proposedDueAt.split('T')[0];
+                  if (parsed.date) {
+                    const parsedDateOnly = parsed.date.toISOString().split('T')[0];
+                    if (proposedDateOnly === parsedDateOnly) {
+                      shouldDeleteOffer = true;
+                    }
                   }
                 }
+                if (updatedMeta.last_callback_offer.source === 'bot_callback_offer') {
+                  shouldDeleteOffer = true;
+                }
+                if (shouldDeleteOffer) {
+                  delete updatedMeta.last_callback_offer;
+                }
               }
-              if (updatedMeta.last_callback_offer.source === 'bot_callback_offer') {
-                shouldDeleteOffer = true;
-              }
-              if (shouldDeleteOffer) {
-                delete updatedMeta.last_callback_offer;
-              }
-            }
 
-            await db.executeSafe({
-              text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2`,
-              values: [JSON.stringify(updatedMeta), conversationId]
-            });
-
-            if (unifiedContext?.opportunity?.id) {
               await db.executeSafe({
-                text: `UPDATE opportunities SET travel_date = $1, updated_at = NOW() WHERE id = $2`,
-                values: [normalizedDate, unifiedContext.opportunity.id]
+                text: `UPDATE conversations SET metadata = $1, updated_at = NOW() WHERE id = $2`,
+                values: [JSON.stringify(updatedMeta), conversationId]
               });
-            }
-            
-            if (convMeta) {
-              convMeta.arrival_date = normalizedDate;
-              if (updatedMeta.last_callback_offer === undefined) {
-                delete convMeta.last_callback_offer;
+
+              if (unifiedContext?.opportunity?.id) {
+                await db.executeSafe({
+                  text: `UPDATE opportunities SET travel_date = $1, updated_at = NOW() WHERE id = $2`,
+                  values: [normalizedDate, unifiedContext.opportunity.id]
+                });
               }
+
+              if (convMeta) {
+                convMeta.arrival_date = normalizedDate;
+                if (updatedMeta.last_callback_offer === undefined) {
+                  delete convMeta.last_callback_offer;
+                }
+              }
+            } catch (dbErr) {
+              console.error('[AIResponseOrchestrator] Failed to update arrival date in DB before prompt builder:', dbErr);
             }
-          } catch (dbErr) {
-            console.error('[AIResponseOrchestrator] Failed to update arrival date in DB before prompt builder:', dbErr);
           }
         }
       }

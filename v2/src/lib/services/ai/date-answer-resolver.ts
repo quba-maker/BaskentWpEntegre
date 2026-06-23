@@ -19,6 +19,26 @@ export class DateAnswerResolver {
     'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
   ];
 
+  public static isAmbiguousNumericDateReply(text: string): { ambiguous: boolean; raw: string; monthDayLabel?: string; rangeLabel?: string } {
+    if (!text) return { ambiguous: false, raw: '' };
+    const clean = text.toLowerCase().trim();
+    const match = clean.match(/^\s*(\d{1,2})\s*([./\s])\s*(\d{1,2})\s*$/);
+    if (!match) return { ambiguous: false, raw: text.trim() };
+
+    const first = parseInt(match[1], 10);
+    const second = parseInt(match[3], 10);
+    const raw = text.trim();
+    if (first >= 1 && first <= 12 && second >= 13 && second <= 31) {
+      return {
+        ambiguous: true,
+        raw,
+        monthDayLabel: `${second} ${this.MONTH_NAMES_CAPITALIZED[first - 1]}`,
+        rangeLabel: `${first}-${second} ${this.MONTH_NAMES_CAPITALIZED[first - 1]} arası`
+      };
+    }
+    return { ambiguous: false, raw };
+  }
+
   /**
    * Parses Turkish date expressions, normalizes month names, resolves year based on timezone,
    * and prevents resolving to past dates.
