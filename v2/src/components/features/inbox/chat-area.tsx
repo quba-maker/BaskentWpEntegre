@@ -1450,6 +1450,9 @@ export function ConversationViewport() {
 
   const handleDeleteMessage = async (message: any) => {
     if (!message?.id || message.sender === "user") return;
+    const isDbMessageId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(message.id));
+    const messageIdentifier = isDbMessageId ? message.id : (message.providerMessageId || message.id);
+
     const confirmed = await confirm({
       title: "Mesajı Sil",
       message: "Bu mesaj panelden ve bot hafızasından silinecek. Hastanın WhatsApp uygulamasından geri alınamaz.",
@@ -1471,7 +1474,7 @@ export function ConversationViewport() {
     });
 
     try {
-      const res = await deleteMessageAction(message.id);
+      const res = await deleteMessageAction(messageIdentifier);
       if (!res.success) {
         throw new Error(res.error || "Mesaj silinemedi");
       }

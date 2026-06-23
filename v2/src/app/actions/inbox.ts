@@ -743,8 +743,9 @@ export async function getMessages(
   });
 }
 
-export async function deleteMessageAction(messageId: string) {
-  if (!messageId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(messageId)) {
+export async function deleteMessageAction(messageIdentifier: string) {
+  const identifier = String(messageIdentifier || '').trim();
+  if (!identifier || identifier.length > 255) {
     return { success: false, error: "Geçersiz mesaj ID." };
   }
 
@@ -754,14 +755,20 @@ export async function deleteMessageAction(messageId: string) {
       roles: ['owner', 'admin', 'platform_admin', 'agent']
     },
     async (ctx) => {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
       const rows = await ctx.db.executeSafe({
-        text: `
+        text: isUuid ? `
           SELECT id, conversation_id, direction, content, media_metadata
           FROM messages
-          WHERE id = $1 AND tenant_id = $2
+          WHERE id = $1::uuid AND tenant_id = $2
+          LIMIT 1
+        ` : `
+          SELECT id, conversation_id, direction, content, media_metadata
+          FROM messages
+          WHERE provider_message_id = $1 AND tenant_id = $2
           LIMIT 1
         `,
-        values: [messageId, ctx.tenantId]
+        values: [identifier, ctx.tenantId]
       }) as any[];
 
       if (rows.length === 0) {
@@ -793,7 +800,7 @@ export async function deleteMessageAction(messageId: string) {
           SET media_metadata = $1::jsonb
           WHERE id = $2 AND tenant_id = $3
         `,
-        values: [JSON.stringify(updatedMeta), messageId, ctx.tenantId]
+        values: [JSON.stringify(updatedMeta), msg.id, ctx.tenantId]
       });
 
       await ctx.db.executeSafe({
@@ -802,9 +809,10 @@ export async function deleteMessageAction(messageId: string) {
         values: [
           ctx.tenantId,
           'message_soft_deleted',
-          `Gönderilen mesaj panelden ve AI hafızasından silindi. Mesaj ID: ${messageId}`,
+          `Gönderilen mesaj panelden ve AI hafızasından silindi. Mesaj ID: ${msg.id}`,
           JSON.stringify({
-            message_id: messageId,
+            message_id: msg.id,
+            message_identifier: identifier,
             conversation_id: msg.conversation_id,
             direction: msg.direction,
             deleted_by_user_id: ctx.userId,

@@ -12243,13 +12243,15 @@ test("Başkent v77 T46: outbound message delete hides panel message and removes 
   const chatArea = require("fs").readFileSync("src/components/features/inbox/chat-area.tsx", "utf8");
 
   assert(inboxActions.includes("export async function deleteMessageAction"), "Inbox should expose a tenant-guarded message delete action");
+  assert(inboxActions.includes("provider_message_id = $1"), "Delete action should also resolve realtime/provider message IDs");
   assert(inboxActions.includes("msg.direction !== 'out'"), "Delete action should only allow outbound AI/operator messages");
   assert(inboxActions.includes("message_soft_deleted"), "Delete action should write an audit log");
   assert(inboxActions.includes("COALESCE(media_metadata->>'deleted_at', '') = ''"), "getMessages should hide soft-deleted messages");
   assert(aggregator.includes("COALESCE(media_metadata->>'deleted_at', '') = ''"), "ConversationTurnAggregator should remove deleted messages from AI memory");
   assert(identity.includes("COALESCE(media_metadata->>'deleted_at', '') = ''"), "IdentityEngine history should remove deleted messages from context");
   assert(chatArea.includes("Hastanın WhatsApp uygulamasından geri alınamaz"), "UI must clearly warn that WhatsApp-side recall is unavailable");
-  assert(chatArea.includes("deleteMessageAction(message.id)"), "Chat UI should call the delete action from the message bubble");
+  assert(chatArea.includes("message.providerMessageId || message.id"), "Chat UI should fall back to provider ID for realtime-created messages");
+  assert(chatArea.includes("deleteMessageAction(messageIdentifier)"), "Chat UI should call the delete action with the resolved identifier");
 });
 
 
