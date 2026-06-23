@@ -1975,6 +1975,21 @@ export class AIResponseOrchestrator {
           qualityGateValid = false;
           qualityGateReason = qualityGate.reason || 'quality_gate_failed';
 
+          const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
+            inboundText,
+            brain,
+            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+            unifiedContext,
+            channelId,
+            systemPromptText,
+            resolvedActiveDepartment: resolvedActiveDepartment || null,
+            replyLanguage,
+            turkeyVisitIntent: currentVisitIntent,
+            formAlreadyAddressed
+          });
+          text = fallbackResult.text;
+          modelUsed = 'fallback';
+
           console.log(JSON.stringify({
             tag: "AI_RESPONSE_ORCHESTRATOR_FALLBACK_APPLIED",
             tenantId,

@@ -61,11 +61,12 @@ export class DateAnswerResolver {
     // "7 15" / "7/15" => 15 Temmuz (month-day, common for patients abroad)
     // "15 7" / "15/7" => 15 Temmuz (day-month, Turkish style)
     // Only accept unambiguous pairs so "13 30" is not treated as a date.
-    const numericDateRegex = /^\s*(\d{1,2})\s*[./\s]\s*(\d{1,2})\s*$/;
-    const numericDateMatch = clean.match(numericDateRegex);
-    if (numericDateMatch) {
-      const first = parseInt(numericDateMatch[1], 10);
-      const second = parseInt(numericDateMatch[2], 10);
+    // Check both standalone and within-text unambiguous numeric dates.
+    const numericDateRegex = /\b(\d{1,2})\s*[./\s]\s*(\d{1,2})\b/g;
+    let numericMatch;
+    while ((numericMatch = numericDateRegex.exec(clean)) !== null) {
+      const first = parseInt(numericMatch[1], 10);
+      const second = parseInt(numericMatch[2], 10);
       let day: number | null = null;
       let monthIdx: number | null = null;
 

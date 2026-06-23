@@ -121,6 +121,7 @@ export class PromptBuilder {
     };
     const pName = identityConfig.personaName || '';
     const orgShort = identityConfig.organizationShortName || '';
+    const orgFullName = identityConfig.organizationName || orgShort || (isHealthcare ? 'Hastanemiz' : 'Firmamız');
     const oppResolvedFrom = unifiedContext?.opportunity?.resolvedFrom || '';
     const oppSource = unifiedContext?.opportunity?.source || unifiedContext?.opportunity?.opp_source || '';
     const hasVerifiedFormContext = !!(
@@ -1022,10 +1023,14 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     });
     let openingGuidelines = '';
     if (languagePolicy.replyLanguage === 'tr') {
-      openingGuidelines = `\n>> UYARI (DOĞAL BAŞLANGIÇLAR): Cümlelerine sürekli robotik ve mekanik şekilde "Anladım.", "Anlıyorum." veya "... yazdığınızı anladım." gibi başlangıç kalıplarıyla başlama. Bunun yerine doğrudan, samimi ve doğal şekilde konuya gir. "Anladım" kelimesini global olarak yasaklamıyoruz fakat tekrarlı ve mekanik kullanımından kaçınmalısın.
->> UYARI (İNSAN DİLİ): "olarak mı anlamalıyım", "bugün X olduğuna göre", "sizin için uygun görünüyor", "bu doğrultuda", "konuşma geçmişimizdeki bilgileri dikkatle takip ediyorum" gibi robotik kalıpları kullanma. Belirsizlikte doğal sor: "7 14 derken, 14 Temmuz mu yoksa 7-14 Temmuz arası mı?"
->> UYARI (HİTAP): Bey, Hanım, Sayın, Bay, Bayan gibi cinsiyetli/resmi hitaplar kullanma. İsimle hitap etmek yerine "siz" diliyle devam et.
->> UYARI (TEKRAR KİMLİK): Devam eden konuşmada "Rüya ben", "Başkent Üniversitesi Konya Hastanesi'nden..." gibi tanıtım cümlelerini tekrar etme.`;
+      openingGuidelines = `\n>> UYARI (DOĞAL BAŞLANGIÇLAR): Cümlelerine sürekli robotik ve mekanik şekilde "Anladım.", "Anlıyorum." veya "... yazdığınızı anladım." gibi başlangıç kalıplarıyla başlama. Bunun yerine doğrudan, samimi ve doğal şekilde konuya gir. "Anladım" kelimesini veya türevlerini (örneğin "Erkek check-up hakkında bilgi verdiğiniz için teşekkür ederim" veya "Anlıyorum, bu durumu not aldım") onaylama ve teşekkür döngüleri kurarak kullanma.
+>> UYARI (İNSAN DİLİ): "olarak mı anlamalıyım", "bugün X olduğuna göre", "sizin için uygun görünüyor", "bu doğrultuda", "konuşma geçmişimizdeki bilgileri dikkatle takip ediyorum" gibi robotik kalıpları kullanma. Belirsizlikte doğal sor: "7 14 derken, 14 Temmuz mu yoksa 7-14 Temmuz arası mı?" (Tarih içeren cümlelerde "Türkiye saati mi, yoksa bulunduğunuz yerel saat mi?" gibi saat dilimi sorularını ASLA sorma. Saat dilimi sadece saat randevuları için sorulur, saf tarihler için değil.)
+>> UYARI (HİTAP): Bey, Hanım, Sayın, Bay, Bayan gibi resmi hitaplar kullanma. İsimle hitap etmek yerine "siz" diliyle devam et.
+>> UYARI (TEKRAR KİMLİK): Devam eden konuşmada "${pName ? pName + ' ben' : 'kendini tanıtma'} veya ${orgFullName}..." gibi tanıtım cümlelerini tekrar etme.
+>> UYARI (BİÇİMLENDİRME VE EMPATİ):
+- Kesinlikle 1., 2. veya maddeler halinde listeleme yapma. Yanıtları paragraflar halinde, doğal ve akıcı bir insan konuşması gibi yaz.
+- Hasta yakını için (örneğin "annem için burun estetiği düşünüyoruz") bir talep geldiğinde empati kur: "Annenizin durumu için..." veya "Anneniz için en doğru süreci planlamak adına..." şeklinde üçüncü şahıs duyarlılığı göster.
+- Mesajların sonuna "Sağlıklı günler dileriz" veya "İyi günler dileriz" gibi kapanış imzaları ekleme. Konuşmayı açık tutmak için her zaman samimi bir soruyla bitir.`;
     } else {
       openingGuidelines = `\n>> UYARI (NATURAL OPENINGS): Avoid beginning sentences with repetitive, robotic, or mechanical opening prefixes (e.g., "Understood.", "I understand." or "I understand that..."). Jump directly and naturally into addressing the user's message.`;
     }
@@ -1255,7 +1260,7 @@ Bu kural tenant prompt'u ne derse desin üzerindedir.
 
     const noFormContextGuard = hasVerifiedFormContext
       ? `\n\n=== ✅ FORM BAĞLAMI DURUMU ===\nBu konuşmada doğrulanmış form bağlamı VAR. Form bilgilerini yalnızca mevcut form verisine dayanarak kullan.\n================================\n`
-      : `\n\n=== 🚫 FORM BAĞLAMI YOK — KESİN KURAL ===\nBu konuşmada doğrulanmış form kaydı YOK.\n- "doldurduğunuz form", "formunuzda", "başvurunuz", "form doğrultusunda" ifadelerini kullanma.\n- Kullanıcı sadece "merhaba" yazdıysa normal WhatsApp hastası gibi kısa karşılık ver: "Merhaba, Başkent Üniversitesi Konya Hastanesi'nden Rüya ben. Size nasıl yardımcı olabilirim?"\n- Check-up, şikayet, geliş dönemi veya paket bilgisi kullanıcı söylemeden varsayma.\n- CRM kaydı, departman etiketi veya opportunity tek başına form sayılmaz.\n=========================================\n`;
+      : `\n\n=== 🚫 FORM BAĞLAMI YOK — KESİN KURAL ===\nBu konuşmada doğrulanmış form kaydı YOK.\n- "doldurduğunuz form", "formunuzda", "başvurunuz", "form doğrultusunda" ifadelerini kullanma.\n- Kullanıcı sadece "merhaba" yazdıysa normal WhatsApp hastası gibi kısa karşılık ver: "Merhaba, ${orgFullName}'nden ${pName || 'danışmanınız'} ben. Size nasıl yardımcı olabilirim?"\n- Check-up, şikayet, geliş dönemi veya paket bilgisi kullanıcı söylemeden varsayma.\n- CRM kaydı, departman etiketi veya opportunity tek başına form sayılmaz.\n=========================================\n`;
     finalPrompt += noFormContextGuard;
 
     return finalPrompt;

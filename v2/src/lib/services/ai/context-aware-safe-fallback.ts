@@ -1464,6 +1464,12 @@ export function buildHistoryAwareRecoveryFallback(
     || (isHealthcare ? 'Sağlık Merkezi' : 'Hizmet Merkezi');
   const hasPersona = !!pName && pName !== 'Asistan';
 
+  // Check if identity was already introduced in history
+  const identityAlreadyIntroduced = hasPersona && hasHistory && history.some(m => {
+    const isAssistant = m.role === 'assistant' || m.direction === 'out';
+    return isAssistant && typeof m.content === 'string' && m.content.toLowerCase().includes(pName.toLowerCase());
+  });
+
   if (!hasHistory) {
     if (hasPersona) {
       return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Size nasıl yardımcı olabilirim? 🌿`;
@@ -1483,11 +1489,15 @@ export function buildHistoryAwareRecoveryFallback(
     if (msg.role !== 'user' || !msg.content) continue;
     const text = msg.content.toLowerCase();
 
-    // 1. Complaint detection
+    // 1. Complaint/Topic detection
     if (text.includes('bel fıt') || text.includes('bel fit')) {
       complaint = 'bel fıtığı';
     } else if (text.includes('boyun fıt') || text.includes('boyun fit')) {
       complaint = 'boyun fıtığı';
+    } else if (text.includes('check-up') || text.includes('checkup')) {
+      complaint = 'check-up';
+    } else if (text.includes('burun esteti') || text.includes('estetik')) {
+      complaint = 'estetik ve burun cerrahisi';
     }
 
     // 2. Duration detection
@@ -1531,16 +1541,17 @@ export function buildHistoryAwareRecoveryFallback(
   // General healthcare fallback but with summary of complaint
   if (isHealthcare) {
     if (complaint) {
-      return `Haklısınız, ${complaint} şikayetinizle ilgili paylaştığınız detayları not ettim. Bu süreçte değlendirme ve planlama için sizi ilgili birime/${agentName}a yönlendirebiliriz.`;
+      const topicWord = (complaint === 'check-up' || complaint.includes('estetik')) ? 'talebinizle' : 'şikayetinizle';
+      return `Haklısınız, ${complaint} ${topicWord} ilgili paylaştığınız detayları not ettim. Bu süreçte değerlendirme ve planlama için sizi ilgili birime/${agentName}a yönlendirebiliriz.`;
     }
-    if (hasPersona) {
+    if (hasPersona && !identityAlreadyIntroduced) {
       return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Size sağlık talebinizle ilgili yardımcı olayım.`;
     }
-    return 'Merhaba, size sağlık talebinizle ilgili yardımcı olayım. Hangi konuda bilgi almak istiyorsunuz?';
+    return 'Size sağlık talebinizle ilgili yardımcı olayım. Hangi konuda bilgi almak istiyorsunuz?';
   }
 
-  if (hasPersona) {
+  if (hasPersona && !identityAlreadyIntroduced) {
     return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Hangi konuda bilgi almak istediğinizi yazabilirsiniz.`;
   }
-  return 'Merhaba, size yardımcı olmak üzere buradayım. Hangi konuda bilgi almak istersiniz?';
+  return 'Size yardımcı olmak üzere buradayım. Hangi konuda bilgi almak istersiniz?';
 }

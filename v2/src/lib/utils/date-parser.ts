@@ -175,6 +175,33 @@ export function parseDeterministicSuggestion(
     }
   }
 
+  // B2. Check space-separated unambiguous dates (e.g. "7 17" or "17 7")
+  if (foundMonth === null) {
+    const cleanForSpaceMatch = normalized.replace(/[.!?]/g, '').trim();
+    const spaceDateMatch = cleanForSpaceMatch.match(/\b(\d{1,2})\s+(\d{1,2})\b/);
+    if (spaceDateMatch) {
+      const first = parseInt(spaceDateMatch[1], 10);
+      const second = parseInt(spaceDateMatch[2], 10);
+      let dd: number | null = null;
+      let mmIdx: number | null = null;
+
+      if (first >= 1 && first <= 12 && second >= 13 && second <= 31) {
+        mmIdx = first - 1;
+        dd = second;
+      } else if (first >= 13 && first <= 31 && second >= 1 && second <= 12) {
+        dd = first;
+        mmIdx = second - 1;
+      }
+
+      if (dd !== null && mmIdx !== null) {
+        foundDay = dd;
+        foundMonth = mmIdx;
+        const rawMatch = spaceDateMatch[0];
+        normalizedForTime = normalizedForTime.replace(rawMatch, ' '.repeat(rawMatch.length));
+      }
+    }
+  }
+
   // C. Check relative today/tomorrow keywords
   if (/(?<![a-zçğışöü])(bugün|bu gün)(?![a-zçğışöü])/i.test(normalized)) {
     hasBugun = true;
@@ -215,10 +242,11 @@ export function parseDeterministicSuggestion(
       }
     } else {
       // Formats like: "saat 17", "17 olur", "akşam 5", "sabah 10", "öğlen 2", "gece 11"
-      const hourRegex = /\b(?:saat\s*)?(\d{1,2})(?:\s*olur|\s*uygun|\s*gibi|\s*civari|\s*sularında|\b)/;
+      // Or a completely standalone number "17"
+      const hourRegex = /\b(?:saat\s+(\d{1,2})|(\d{1,2})\s*(?:olur|uygun|gibi|civari|civarinda|sularında|sularinda|de|da|te|ta|civarı|civarında))\b|^\s*(\d{1,2})\s*$/i;
       const hourMatch = normalizedForTime.match(hourRegex);
       if (hourMatch) {
-        let hh = parseInt(hourMatch[1], 10);
+        let hh = parseInt(hourMatch[1] || hourMatch[2] || hourMatch[3], 10);
         
         const isPm = /(?<![a-zçğışöü])(akşam|öğleden sonra|gece|öğlen|öğle|akşamüstü)(?![a-zçğışöü])/i.test(normalized);
         const isAm = /(?<![a-zçğışöü])(sabah|öğleden önce)(?![a-zçğışöü])/i.test(normalized);

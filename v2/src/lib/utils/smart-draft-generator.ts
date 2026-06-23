@@ -312,15 +312,15 @@ export function generateDeterministikDraft(
   let introPara = 'Merhaba,\n\n';
   if (!hasExplicitFormContext) {
     introPara += !tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz'
-      ? `Size yardımcı olabiliriz. ${summarySentence}`
-      : `${tenantDisplayName} adına size yardımcı olabiliriz. ${summarySentence}`;
+      ? `Size yardımcı olmak için buradayız. ${summarySentence}`
+      : `${tenantDisplayName} ekibi olarak size yardımcı olmak için buradayız. ${summarySentence}`;
   } else if (!tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz') {
-    introPara += `Doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz. ${summarySentence}`;
+    introPara += `Form başvurunuz bize ulaştı. ${summarySentence}`;
   } else {
-    introPara += `${tenantDisplayName} olarak doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz. ${summarySentence}`;
+    introPara += `${tenantDisplayName} için yaptığınız form başvurusu bize ulaştı. ${summarySentence}`;
   }
 
-  const blocks = [introPara, bookingQuestion, "İyi günler dileriz."];
+  const blocks = [introPara, bookingQuestion];
   return blocks.filter(Boolean).join('\n\n');
 }
 
@@ -457,16 +457,16 @@ export async function generateSmartDraft(
     let introGreetingRule = '';
     if (!hasFormContext) {
       introGreetingRule = !tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz'
-        ? `Size yardımcı olabiliriz.`
-        : `${tenantDisplayName} adına size yardımcı olabiliriz.`;
+        ? `Size yardımcı olmak için buradayız.`
+        : `${tenantDisplayName} ekibi olarak size yardımcı olmak için buradayız.`;
     } else if (!tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz') {
-      introGreetingRule = `Doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
+      introGreetingRule = `Form başvurunuz bize ulaştı.`;
     } else {
-      introGreetingRule = `${tenantDisplayName} olarak doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
+      introGreetingRule = `${tenantDisplayName} için yaptığınız form başvurusu bize ulaştı.`;
     }
 
     const formSourceRule = hasFormContext
-      ? `Form verisi mevcut. Bu nedenle sadece bu durumda "doldurduğunuz form doğrultusunda" anlamındaki giriş cümlesini kullanabilirsin.`
+      ? `Form verisi mevcut. Bu nedenle sadece bu durumda "form başvurunuz bize ulaştı" anlamındaki giriş cümlesini kullanabilirsin.`
       : `Form verisi yok veya belirsiz. Bu durumda "doldurduğunuz form", "başvurunuz" veya form doldurduğunu ima eden hiçbir ifade kullanma.`;
 
     const systemInstruction = `Sen bir Hastane Karşılama Asistanı AI modelisin. Görevin, verilen hasta bağlamını inceleyerek, ona son derece profesyonel, sıcak, kurallara uygun ve güvenli bir WhatsApp karşılama mesaj taslağı hazırlamaktır.
@@ -498,16 +498,16 @@ AŞAĞIDAKİ SORULAR VE KONULAR KESİNLİKLE YASAKTIR:
 - "İlaç kullanıyor musunuz?"
 - "Ameliyat önerildi mi?", "PRP", "Kök hücre", "İğne denendi mi?", "Anjiyo yapıldı mı?", "Fizik tedavi gördünüz mü?"
 
-=== TASLAK METNİ BÖLÜM VE SIRALAMA KURALLARI (TASLAK MAKSİMUM 3 KISA PARAGRAF OLMALIDIR) ===
+=== TASLAK METNİ BÖLÜM VE SIRALAMA KURALLARI (TASLAK MAKSİMUM 2 KISA PARAGRAF OLMALIDIR) ===
 1. Paragraf 1 (Selamlama + Giriş + Şikayet Teyidi): "Merhaba," kelimesinden sonra çift satır boşluk bırak ve ardından "${introGreetingRule}" cümlesini ekle. Hemen ardına hastanın şikayetini ve varsa süresini doğal bir Türkçe ile belirterek geçmiş olsun de.
    - Örn: "Merhaba,\n\n${introGreetingRule} Diz kapağı ağrısı şikayetiniz olduğunu belirtmişsiniz. Öncelikle geçmiş olsun."
    - Hastanın şikayet verisindeki "merhaba", "selam", "benim", "adım" gibi gereksiz giriş kelimelerini tamamen ayıkla.
 2. Paragraf 2 (Geliş Niyeti/Tarih Sorusu): Yaşadığı yer belirtilmişse "Yaşadığınız yer olarak Stuttgart bilgisini paylaşmışsınız." ifadesini ekleyerek, "Randevu planlaması ve uygun yönlendirme için ${travelDestination} ne zaman gelmeyi düşündüğünüzü bizimle paylaşabilir misiniz?" veya "Randevu planlaması için ${travelDestination} ne zaman gelmeyi düşündüğünüzü bizimle paylaşabilir misiniz?" sorusunu sor.
-3. Paragraf 3 (Kapanış): "İyi günler dileriz." cümlesi ile kapat.
+3. KESİNLİKLE "İyi günler dileriz." veya "Sağlıklı günler dileriz" gibi erken kapanış/imza cümleleri ekleme. Taslağı her zaman paragraf 2'deki niyet/tarih sorusu ile açık uçlu olarak sonlandır.
 
 === RETURN JSON FORMAT ===
 {
-  "draftText": "Oluşturduğun WhatsApp mesaj taslağı (satır boşlukları için \\n\\n kullan. Maksimum 3 kısa paragraf olmalıdır.)",
+  "draftText": "Oluşturduğun WhatsApp mesaj taslağı (satır boşlukları için \\n\\n kullan. Maksimum 2 kısa paragraf olmalıdır. KESİNLİKLE imza veya kapanış cümlesi ekleme.)",
   "detectedDepartment": "Ortopedi" | "Kardiyoloji" | "Beyin Cerrahi" | "Check-up" | "Genel",
   "complaintSummary": "Hastanın şikayetinin çok kısa özeti",
   "confidence": "high" | "medium" | "low",
@@ -576,7 +576,7 @@ export function enforceGreetingDraftSafety(
 ): string {
   const safetyErrors = validateDraft(draftText, slots, slots.departmentHint || 'Genel', 'first_contact_intent_check');
   const paras = draftText.split("\n").filter(p => p.trim().length > 0);
-  const contentParas = paras.filter(p => !p.startsWith("Merhaba") && !p.includes("İyi günler"));
+  const contentParas = paras.filter(p => !p.startsWith("Merhaba") && !p.includes("İyi günler") && !p.includes("Sağlıklı günler"));
   const hasFormContext = tenantContext.hasFormContext ?? true;
   const invalidFormReference = !hasFormContext && /doldurduğunuz form|başvurunuz|form doğrultusunda/i.test(draftText);
 
