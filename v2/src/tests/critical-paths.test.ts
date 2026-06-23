@@ -12180,6 +12180,62 @@ test("Başkent v75 Live T42: final auditor rewrites repeated identity after call
   assert(!result.text.includes("Ben Rüya"), "Repeated identity must not remain");
 });
 
+test("Başkent v77 T43: no-form first greeting must not receive form welcome instructions", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v77-t43",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    effectiveIntent: "greeting",
+    currentMessageText: "merhaba",
+    history: [],
+    opportunity: { department: "Kardiyoloji", resolvedFrom: "active_conv_opp" }
+  });
+
+  assert(prompt.includes("FORM BAĞLAMI YOK"), "Prompt should inject a high-priority no-form guard");
+  assert(prompt.includes("contact_mode: direct_whatsapp"), "No-form prompt should mark direct WhatsApp mode");
+  assert(prompt.includes("CRM kaydı, departman etiketi veya opportunity tek başına form sayılmaz"), "Opportunity alone must not be treated as form context");
+});
+
+test("Başkent v77 T44: form lead context is neutral and contact_mode based", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v77-t44",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    effectiveIntent: "form_followup",
+    currentMessageText: "merhaba",
+    history: [],
+    outreachContext: { greetingSent: false },
+    latestForm: { created_at: "2026-06-23T10:00:00Z", name: "Check-up", data: { sikayet: "check-up" } },
+    contactMode: "patient_inbound_after_form"
+  });
+
+  assert(prompt.includes("contact_mode: patient_inbound_after_form"), "Form prompt should expose contact_mode");
+  assert(prompt.includes("İletişim yönünü varsayma"), "Form lead context should be neutral about who initiated contact");
+  assert(!prompt.includes("doğrudan WhatsApp'tan yazmadı, form doldurdu ve hasta danışmanı tarafından ulaşıldı"), "Old outbound assumption must not remain");
+});
+
+test("Başkent v77 T45: orchestrator has no-form final recovery before sending", () => {
+  const source = require("fs").readFileSync("src/lib/services/ai/ai-response-orchestrator.ts", "utf8");
+
+  assert(source.includes("NO_FORM_GREETING_FORM_PHRASE_RECOVERY"), "Orchestrator should recover accidental form greetings when no form exists");
+  assert(source.includes("hasVerifiedFormContext"), "Orchestrator should distinguish verified form context from plain CRM/opportunity");
+  assert(source.includes("contactMode"), "Orchestrator should inject contactMode into unifiedContext");
+});
+
 
 async function runAllTests() {
   try {

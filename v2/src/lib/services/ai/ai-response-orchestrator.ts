@@ -1251,8 +1251,18 @@ export class AIResponseOrchestrator {
       const assistantHistory = history.filter(m => m.role === 'assistant');
       const isFirstAssistantTurn = assistantHistory.length === 0;
 
-      // Has active/latest form or open opportunity?
-      const hasForm = !!(unifiedContext?.latestForm || (Array.isArray(unifiedContext?.patient_known_facts) && unifiedContext.patient_known_facts.length > 0) || unifiedContext?.opportunity);
+      // Has a verified form lead context? A CRM/opportunity record alone is not a form.
+      const oppResolvedFrom = unifiedContext?.opportunity?.resolvedFrom || '';
+      const oppSource = unifiedContext?.opportunity?.source || unifiedContext?.opportunity?.opp_source || '';
+      const hasVerifiedFormContext = !!(
+        unifiedContext?.latestForm ||
+        unifiedContext?.outreachContext ||
+        ['lead_linked_active_opp', 'lead_id_active_opp'].includes(oppResolvedFrom) ||
+        (unifiedContext?.opportunity?.lead_id && String(oppSource).toLowerCase() === 'form')
+      );
+      const hasForm = hasVerifiedFormContext;
+      unifiedContext.hasVerifiedFormContext = hasVerifiedFormContext;
+      unifiedContext.hasFormContext = hasVerifiedFormContext;
 
       // Check if the form/opportunity has already been addressed by the bot
       let formAlreadyAddressed = false;
@@ -1317,6 +1327,15 @@ export class AIResponseOrchestrator {
           }
         }
       }
+
+      const contactMode = !hasVerifiedFormContext
+        ? 'direct_whatsapp'
+        : formAlreadyAddressed || assistantHistory.length > 0
+          ? 'continuing_conversation'
+          : unifiedContext?.outreachContext?.greetingSent
+            ? 'system_outbound_greeting'
+            : 'patient_inbound_after_form';
+      unifiedContext.contactMode = contactMode;
 
       // Elevate greeting if unaddressed form exists
       if (effectiveIntent === 'greeting' && isFirstAssistantTurn && hasForm && !formAlreadyAddressed) {
@@ -2028,6 +2047,18 @@ export class AIResponseOrchestrator {
         doctorDirectoryHit: hasDoctorDirectory,
         topicSwitchApplied: topicSwitch.hasSwitched
       });
+
+      const noFormFirstGreeting = !hasVerifiedFormContext && isFirstAssistantTurn && unifiedContext?.isGreetingOnly === true;
+      const containsFormLeadPhrase = /doldurduğunuz form|formunuzda|form doğrultusunda|form dogrultusunda|başvurunuz|basvurunuz|form doldur/i.test(text || '');
+      if (noFormFirstGreeting && containsFormLeadPhrase) {
+        text = "Merhaba, Başkent Üniversitesi Konya Hastanesi'nden Rüya ben. Size nasıl yardımcı olabilirim?";
+        console.log(JSON.stringify({
+          tag: 'NO_FORM_GREETING_FORM_PHRASE_RECOVERY',
+          tenantId,
+          conversationId: conversationId || 'unknown',
+          workerPath
+        }));
+      }
 
       // 11. WhatsApp formatting policy applied
       text = ResponseFormattingPolicy.format(text);

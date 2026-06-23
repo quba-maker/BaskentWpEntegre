@@ -90,6 +90,22 @@ export class PromptBuilder {
     };
     const pName = identityConfig.personaName || '';
     const orgShort = identityConfig.organizationShortName || '';
+    const oppResolvedFrom = unifiedContext?.opportunity?.resolvedFrom || '';
+    const oppSource = unifiedContext?.opportunity?.source || unifiedContext?.opportunity?.opp_source || '';
+    const hasVerifiedFormContext = !!(
+      unifiedContext?.hasVerifiedFormContext ||
+      unifiedContext?.latestForm ||
+      unifiedContext?.outreachContext ||
+      ['lead_linked_active_opp', 'lead_id_active_opp'].includes(oppResolvedFrom) ||
+      (unifiedContext?.opportunity?.lead_id && String(oppSource).toLowerCase() === 'form')
+    );
+    const contactMode = unifiedContext?.contactMode || (
+      !hasVerifiedFormContext
+        ? 'direct_whatsapp'
+        : !(Array.isArray(unifiedContext?.history) && unifiedContext.history.some((m: any) => m.role === 'assistant'))
+          ? 'patient_inbound_after_form'
+          : 'continuing_conversation'
+    );
 
     // IDENTITY & BEHAVIORAL CONTEXT (Dynamic CRM Injection)
     let crmContext = '';
@@ -289,7 +305,11 @@ export class PromptBuilder {
       if (unifiedContext.outreachContext) {
         const oc = unifiedContext.outreachContext;
         crmContext += `\n--- FORM LEAD OUTREACH DURUMU ---\n`;
-        crmContext += `Bu kişi bir form lead'idir (doğrudan WhatsApp'tan yazmadı, form doldurdu ve hasta danışmanı tarafından ulaşıldı).\n`;
+        crmContext += `Bu kişide doğrulanmış form/lead bağlamı var. İletişim yönünü varsayma; aşağıdaki contact_mode'a göre davran.\n`;
+        crmContext += `- contact_mode: ${contactMode}\n`;
+        crmContext += `- patient_inbound_after_form: Hasta form sonrası kendisi yazmış olabilir; formu referans al ama "biz ulaştık" varsayımını abartma.\n`;
+        crmContext += `- system_outbound_greeting: İlk karşılama üretilecekse form bilgisini kısa ve doğal kullan.\n`;
+        crmContext += `- continuing_conversation: İlk karşılama/tanıtım metni tekrar edilmez, doğrudan son mesaja cevap verilir.\n`;
         if (oc.greetingSent) {
           crmContext += `- Hasta danışmanı karşılama mesajı GÖNDERİLDİ.\n`;
         }
@@ -301,7 +321,7 @@ export class PromptBuilder {
         }
         if (isHealthcare) {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Hastanın sorularına cevap ver, bilgi iste, ama agresif upsell yapma. Hasta zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
-          crmContext += `>> KURAL (FORM LEAD ÖZEL): Form lead'ler kuruma gelme konusunda zaten ilgi göstermiş kişilerdir. Randevu yönlendirmesi yapılabilir ama baskı yapılmaz. Kararsızlık durumunda hasta danışmanı veya hasta danışma ekibiyle bilgilendirme amaçlı telefon görüşmesi öner.\n`;
+          crmContext += `>> KURAL (FORM LEAD ÖZEL): Form lead'ler ilgi göstermiş olabilir; yine de randevu/arama baskısı yapma. Önce hastanın son mesajındaki ihtiyacı yanıtla, sonra gerekiyorsa tek doğal soru sor.\n`;
           crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya hasta danışmanı zaten bu hastaya karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini (${orgShort ? `'${orgShort}\'dan yazıyoruz...', ` : ''}'Merhaba ben asistanınız...' vb.) TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
         } else {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Müşterinin sorularına cevap ver, bilgi iste, ama agresif satış yapma. Müşteri zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
@@ -311,19 +331,14 @@ export class PromptBuilder {
       }
 
       // WhatsApp-only hasta belirleme (robust form lead detection — patient_known_facts hariç)
-      const hasExplicitFormSignal = !!(
-        unifiedContext.outreachContext ||
-        unifiedContext.latestForm ||
-        unifiedContext.opportunity?.resolvedFrom === 'lead_linked_active_opp' ||
-        unifiedContext.opportunity?.resolvedFrom === 'lead_id_active_opp'
-      );
-      const isFormLead = hasExplicitFormSignal;
+      const isFormLead = hasVerifiedFormContext;
 
       if (!isFormLead && isHealthcare) {
         crmContext += `\n--- WHATSAPP DOĞRUDAN HASTA KURALI ---\n`;
         crmContext += `Bu kişi form doldurmamış, doğrudan WhatsApp'tan yazmıştır. Hakkında ön bilgi sınırlı olabilir.\n`;
+        crmContext += `- contact_mode: direct_whatsapp\n`;
         crmContext += `>> KURAL: Daha pasif ve dinleyici ol. Önce şikayetini ve durumunu anla. Rapor/belge isteme.\n`;
-        crmContext += `>> KURAL: Kararsızlık durumunda doğrudan danışman/koordinasyon ekibiyle bilgilendirme amaçlı telefon görüşmesi öner. Fiziksel randevu baskısı minimum olmalı.\n`;
+        crmContext += `>> KURAL: Kararsızlık durumunda telefon/randevu baskısı yapma; hastanın sorusuna yazılı yardımcı ol ve tek doğal soru sor.\n`;
         crmContext += `-----------------------------------\n`;
       }
 
@@ -1038,12 +1053,16 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       if (effectiveIntent === 'form_followup') {
         const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} ile ilgili)` : '';
         let welcomeInstruction = '';
-        if (isFirstAssistantTurn && unifiedContext?.formAlreadyAddressed !== true) {
+        if (!hasVerifiedFormContext) {
+          welcomeInstruction = `FORM BAĞLAMI YOK: Kullanıcı yalnızca selam verdiyse veya form kaydı sistemde yoksa "doldurduğunuz form", "formunuzda", "başvurunuz" gibi ifadeler kullanma. Doğrudan WhatsApp hastası gibi kısa ve doğal yanıt ver.`;
+        } else if (isFirstAssistantTurn && unifiedContext?.formAlreadyAddressed !== true) {
           welcomeInstruction = `İlk mesaj karşılama kuralları: Hasta ilk selamı verdi. YAP: Hastanın selamına sıcak bir şekilde karşılık ver, başvurunun/formun ulaştığını belirt${compPhrase} ve geçmiş olsun dile. UYARI: "doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz" gibi robotik/outbound bir cümle kurma, kullanıcı zaten yazmış durumdadır. Doğal bir karşılama yap.`;
         } else {
           welcomeInstruction = `Devam eden konuşma kuralları: KESİNLİKLE kendini tanıtma, kurum adını söyleme veya karşılama/selamlama şablonlarını KESİNLİKLE kullanma. Doğrudan hastanın form doldurdum beyanını/sorusunu onaylayarak konuya gir (Örn: "Evet, form kaydınızı görüyorum. ...").`;
         }
-        intentGuide = `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu belirtiyor. YAPMA: "Hangi konuda yardımcı olabilirim?" veya "Kaydınızı göremiyorum" gibi generic/olumsuz ifadeler kullanma. ${welcomeInstruction} Sistemde form kaydı görünüyorsa şikayeti/konuyu referans al. Görünmüyorsa yine olumlu bir karşılık ver: "Başvurunuzu aldık, teşekkür ederiz." Hastanın son mesajına göre tek doğal soru sor; geliş niyeti, geliş dönemi veya eksik sağlık bağlamı net değilse önce onu netleştir. Telefon görüşmesi için gün/saat istemeyi yalnızca hasta arama istediğinde veya görüşmeye açık olduğunu açıkça söylediğinde yap.`;
+        intentGuide = hasVerifiedFormContext
+          ? `Intent: form_followup\nHasta form doldurduğunu veya başvurusunu belirtiyor. YAPMA: "Hangi konuda yardımcı olabilirim?" veya "Kaydınızı göremiyorum" gibi generic/olumsuz ifadeler kullanma. ${welcomeInstruction} Sistemde form kaydı görünüyorsa şikayeti/konuyu referans al. Hastanın son mesajına göre tek doğal soru sor; geliş niyeti, geliş dönemi veya eksik sağlık bağlamı net değilse önce onu netleştir. Telefon görüşmesi için gün/saat istemeyi yalnızca hasta arama istediğinde veya görüşmeye açık olduğunu açıkça söylediğinde yap.`
+          : `Intent: direct_whatsapp_greeting\n${welcomeInstruction} Bu yanıtta form karşılama şablonu kullanma; hastanın son mesajına kısa ve doğal cevap ver.`;
       } else if (effectiveIntent === 'process_question') {
         const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} süreci)` : '';
         intentGuide = `Intent: process_question\nHasta tedavi/check-up veya randevu sürecinin${compPhrase} nasıl işleyeceğini, sonraki aşamaları soruyor. YAP: Sürecin${compPhrase} uzman ekip tarafından değerlendirmeyle başladığını ve tetkiklerin yapılarak kişiye özel tedavi planı çıkarıldığını belirt. Detayların hastanın yaşına ve sağlık durumuna göre netleşeceğini vurgula. Sıcak ve güven verici bir ton kullan.`;
@@ -1181,6 +1200,11 @@ Bu kural tenant prompt'u ne derse desin üzerindedir.
 - Hardcoded tenant/müşteri/hastane bilgisi kullanma; tenant/persona/context’ten gelen bilgiyi kullan.
 =================================================================\n`;
     finalPrompt += saasConstitution;
+
+    const noFormContextGuard = hasVerifiedFormContext
+      ? `\n\n=== ✅ FORM BAĞLAMI DURUMU ===\nBu konuşmada doğrulanmış form bağlamı VAR. Form bilgilerini yalnızca mevcut form verisine dayanarak kullan.\n================================\n`
+      : `\n\n=== 🚫 FORM BAĞLAMI YOK — KESİN KURAL ===\nBu konuşmada doğrulanmış form kaydı YOK.\n- "doldurduğunuz form", "formunuzda", "başvurunuz", "form doğrultusunda" ifadelerini kullanma.\n- Kullanıcı sadece "merhaba" yazdıysa normal WhatsApp hastası gibi kısa karşılık ver: "Merhaba, Başkent Üniversitesi Konya Hastanesi'nden Rüya ben. Size nasıl yardımcı olabilirim?"\n- Check-up, şikayet, geliş dönemi veya paket bilgisi kullanıcı söylemeden varsayma.\n- CRM kaydı, departman etiketi veya opportunity tek başına form sayılmaz.\n=========================================\n`;
+    finalPrompt += noFormContextGuard;
 
     return finalPrompt;
   }

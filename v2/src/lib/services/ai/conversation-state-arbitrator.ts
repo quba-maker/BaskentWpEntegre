@@ -190,7 +190,15 @@ export class ConversationStateArbitrator {
 
     const formAwaitsArrivalDate = () => {
       const uCtx = input.unifiedContext;
-      const hasForm = !!(uCtx?.latestForm || (Array.isArray(uCtx?.patient_known_facts) && uCtx.patient_known_facts.length > 0) || uCtx?.opportunity);
+      const oppResolvedFrom = uCtx?.opportunity?.resolvedFrom || '';
+      const oppSource = uCtx?.opportunity?.source || uCtx?.opportunity?.opp_source || '';
+      const hasForm = !!(
+        uCtx?.hasVerifiedFormContext ||
+        uCtx?.latestForm ||
+        uCtx?.outreachContext ||
+        ['lead_linked_active_opp', 'lead_id_active_opp'].includes(oppResolvedFrom) ||
+        (uCtx?.opportunity?.lead_id && String(oppSource).toLowerCase() === 'form')
+      );
       if (!hasForm) return false;
 
       const hasFactsTravelDate = Array.isArray(uCtx?.patient_known_facts) && 
