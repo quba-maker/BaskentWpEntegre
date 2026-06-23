@@ -177,14 +177,24 @@ export class ConversationStateArbitrator {
       'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik',
       'ay sonu', 'ay başı', 'ay basi', 'ayın sonu', 'ayın başı'
     ];
-    const isDateMessage = dateIndicators.some(kw => lowerUser.includes(kw)) || hasRealDatePattern(lowerUser);
+    const isUnambiguousNumericDateReply = (() => {
+      const match = lowerUser.match(/^\s*(\d{1,2})\s*[./\s]\s*(\d{1,2})\s*$/);
+      if (!match) return false;
+      const first = parseInt(match[1], 10);
+      const second = parseInt(match[2], 10);
+      return (
+        (first >= 1 && first <= 12 && second >= 13 && second <= 31) ||
+        (first >= 13 && first <= 31 && second >= 1 && second <= 12)
+      );
+    })();
+    const isDateMessage = dateIndicators.some(kw => lowerUser.includes(kw)) || hasRealDatePattern(lowerUser) || isUnambiguousNumericDateReply;
 
     const isArrivalDateQuestion = (text: string) => {
       const lowerText = text.toLowerCase();
       return [
         'gelmeyi düşündüğünüz', 'gelmeyi dusundugunuz', 'ne zaman gelmeyi', 'ziyaret tarihi',
         'tarih aralığı', 'tarih araligi', 'tahmini tarih', 'tahmini ziyaret', 'gelmeyi planlıyorsunuz',
-        'gelmeyi planliyorsunuz', 'geliş tarih'
+        'gelmeyi planliyorsunuz', 'gelme planınız', 'gelme planiniz', 'geliş tarih'
       ].some(kw => lowerText.includes(kw));
     };
 

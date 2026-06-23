@@ -8040,6 +8040,30 @@ test("P0.28 T1: DateAnswerResolver parse TR date expressions", () => {
 
   const r4 = DateAnswerResolver.parse("ay sonu");
   assert(r4.raw === "Ay sonu", `Expected Ay sonu, got: ${r4.raw}`);
+
+  const r5 = DateAnswerResolver.parse("7 15");
+  assert(r5.raw === "15 Temmuz", `Expected 15 Temmuz from numeric abroad shorthand, got: ${r5.raw}`);
+});
+
+test("P0.28 T1b: Numeric arrival-date reply '7 15' should not become callback time when last question asks visit date", () => {
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+
+  const result = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "7 15",
+    rawPendingSlot: "generic_none",
+    rawInterpretedIntent: "callback_time_answer",
+    routerIntent: "callback_time_answer",
+    history: [
+      { role: "user", content: "Merhaba şu an yurt dışındayım" },
+      { role: "assistant", content: "Türkiye'ye gelme planınız ne zaman?" },
+      { role: "user", content: "7 15" }
+    ],
+    convMeta: {},
+    unifiedContext: {}
+  });
+
+  assert(result.effectiveIntent === "arrival_date_answer", `Expected arrival_date_answer, got: ${result.effectiveIntent}`);
+  assert(result.effectivePendingSlot === "arrival_date", `Expected arrival_date pending slot, got: ${result.effectivePendingSlot}`);
 });
 
 test("P0.28 T2: arrival_date_answer saves PII-free date and falls through to LLM", async () => {

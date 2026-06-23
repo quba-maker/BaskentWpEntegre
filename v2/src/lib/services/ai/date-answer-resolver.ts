@@ -36,6 +36,41 @@ export class DateAnswerResolver {
     
     const currentYear = now.getFullYear();
     const currentMonthIdx = now.getMonth(); // 0-11
+
+    // Numeric shorthand in arrival-date context:
+    // "7 15" / "7/15" => 15 Temmuz (month-day, common for patients abroad)
+    // "15 7" / "15/7" => 15 Temmuz (day-month, Turkish style)
+    // Only accept unambiguous pairs so "13 30" is not treated as a date.
+    const numericDateRegex = /^\s*(\d{1,2})\s*[./\s]\s*(\d{1,2})\s*$/;
+    const numericDateMatch = clean.match(numericDateRegex);
+    if (numericDateMatch) {
+      const first = parseInt(numericDateMatch[1], 10);
+      const second = parseInt(numericDateMatch[2], 10);
+      let day: number | null = null;
+      let monthIdx: number | null = null;
+
+      if (first >= 1 && first <= 12 && second >= 13 && second <= 31) {
+        monthIdx = first - 1;
+        day = second;
+      } else if (first >= 13 && first <= 31 && second >= 1 && second <= 12) {
+        day = first;
+        monthIdx = second - 1;
+      }
+
+      if (day !== null && monthIdx !== null) {
+        let targetYear = currentYear;
+        let parsedDate = new Date(targetYear, monthIdx, day);
+        parsedDate.setHours(0, 0, 0, 0);
+
+        const compareDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        if (parsedDate.getTime() < compareDate.getTime()) {
+          targetYear += 1;
+          parsedDate = new Date(targetYear, monthIdx, day);
+        }
+
+        return { raw: `${day} ${this.MONTH_NAMES_CAPITALIZED[monthIdx]}`, date: parsedDate };
+      }
+    }
     
     // 1. Check for intervals: "15-20 temmuz arası" -> "15-20 Temmuz"
     const intervalRegex = /(\d{1,2})\s*[-–—\/]\s*(\d{1,2})\s*([a-zçıüşöğ]+)/i;
