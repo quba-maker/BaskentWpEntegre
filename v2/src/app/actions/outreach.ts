@@ -1738,8 +1738,9 @@ export async function prepareSmartGreetingDraftCore(
       
       const paras = existingDraft.split("\n").filter(p => p.trim().length > 0);
       const contentParas = paras.filter(p => !p.startsWith("Merhaba") && !p.includes("İyi günler"));
+      const invalidFormReference = leads.length === 0 && /doldurduğunuz form|başvurunuz|form doğrultusunda/i.test(existingDraft);
 
-      if (safetyErrors.length > 0 || contentParas.length > 3) {
+      if (safetyErrors.length > 0 || contentParas.length > 3 || invalidFormReference) {
         existingDraft = '';
       }
     } catch (_) {
@@ -1761,9 +1762,9 @@ export async function prepareSmartGreetingDraftCore(
       const { resolveTenantDisplayName } = await import('@/lib/services/meta/tenant-display-name-resolver');
       const tenantDisplayName = await resolveTenantDisplayName(db, tenantId);
       if (tenantDisplayName) {
-        draftText = `Merhaba, ${tenantDisplayName} adına, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
+        draftText = `Merhaba, ${tenantDisplayName} adına size yardımcı olabiliriz. Hangi konuda bilgi almak istersiniz?`;
       } else {
-        draftText = "Merhaba, doldurduğunuz form doğrultusunda başvurunuzla ilgili sizinle iletişime geçiyoruz.";
+        draftText = "Merhaba, size yardımcı olabiliriz. Hangi konuda bilgi almak istersiniz?";
       }
     }
     
@@ -1803,10 +1804,10 @@ export async function prepareSmartGreetingDraftCore(
     const tenantDisplayName = (await resolveTenantDisplayName(db, tenantId)) || 'Kurumumuz';
     const locationName = (await resolveTenantLocationName(db, tenantId)) || '';
 
-    draftText = enforceGreetingDraftSafety(draftText, slots, { tenantDisplayName, locationName });
+    draftText = enforceGreetingDraftSafety(draftText, slots, { tenantDisplayName, locationName, hasFormContext: leads.length > 0 });
   } catch (_) {
     // If anything fails in validation, fallback to a safe message to avoid crash
-    draftText = "Merhaba, doldurduğunuz form doğrultusunda başvurunuzla ilgili sizinle iletişime geçiyoruz. Randevu planlaması için Türkiye’ye gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?\n\nİyi günler dileriz.";
+    draftText = "Merhaba, size yardımcı olabiliriz. Hangi konuda bilgi almak istersiniz?";
   }
 
   return {

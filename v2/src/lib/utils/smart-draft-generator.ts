@@ -116,6 +116,21 @@ function getMonthNameFromNumber(numStr: string): string {
   return "ilgili";
 }
 
+function hasExplicitFormSignal(rawData: any, defaultFormName?: string, slots?: FormSlots): boolean {
+  if (defaultFormName && defaultFormName.trim().length > 0) return true;
+  if (rawData && typeof rawData === 'object' && Object.keys(rawData).length > 0) return true;
+  if (typeof rawData === 'string' && rawData.trim().length > 0) return true;
+  if (!slots) return false;
+  return Boolean(
+    slots.formName ||
+    slots.campaignName ||
+    slots.complaintText ||
+    slots.requestedAppointmentText ||
+    slots.livingCity ||
+    slots.age
+  );
+}
+
 // 1. Slot Extractor Layer
 export function extractFormSlots(rawData: any, defaultFormName?: string): FormSlots {
   const data = typeof rawData === 'string' ? JSON.parse(rawData || '{}') : (rawData || {});
@@ -212,7 +227,8 @@ export function generateDeterministikDraft(
   slots: FormSlots, 
   draftPurpose: DraftPurpose = 'first_contact_intent_check',
   tenantDisplayName: string = 'Kurumumuz',
-  locationName: string = ''
+  locationName: string = '',
+  hasExplicitFormContext: boolean = true
 ): string {
   let summarySentence = "";
   const durationText = slots.durationText ? ` ve bu durumun yaklaşık ${slots.durationText.toLowerCase()} devam ettiğini` : '';
@@ -280,7 +296,9 @@ export function generateDeterministikDraft(
   let bookingQuestion = '';
   const cityInfo = slots.livingCity ? `Yaşadığınız yer olarak ${slots.livingCity} bilgisini paylaşmışsınız. ` : '';
 
-  if (slots.requestedAppointmentText) {
+  if (!hasExplicitFormContext) {
+    bookingQuestion = `Size doğru yardımcı olabilmemiz için hangi konuda bilgi almak istediğinizi kısaca yazar mısınız?`;
+  } else if (slots.requestedAppointmentText) {
     const isOnlyNumber = /^\d+$/.test(slots.requestedAppointmentText);
     if (isOnlyNumber && slots.requestedAppointmentText.length <= 2) {
       bookingQuestion = `${cityInfo}Randevu tarihi alanına “${slots.requestedAppointmentText}” yazmışsınız; bunu ayın ${slots.requestedAppointmentText}’i mi yoksa ${getMonthNameFromNumber(slots.requestedAppointmentText)} ayı olarak mı düşündüğünüzü netleştirebilir misiniz? Randevu planlaması ve uygun yönlendirme için ${travelDestination} gelmeyi düşündüğünüz yaklaşık tarihi bizimle paylaşabilir misiniz?`;
@@ -292,7 +310,11 @@ export function generateDeterministikDraft(
   }
 
   let introPara = 'Merhaba,\n\n';
-  if (!tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz') {
+  if (!hasExplicitFormContext) {
+    introPara += !tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz'
+      ? `Size yardımcı olabiliriz. ${summarySentence}`
+      : `${tenantDisplayName} adına size yardımcı olabiliriz. ${summarySentence}`;
+  } else if (!tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz') {
     introPara += `Doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz. ${summarySentence}`;
   } else {
     introPara += `${tenantDisplayName} olarak doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz. ${summarySentence}`;
@@ -406,6 +428,7 @@ export async function generateSmartDraft(
   db?: any
 ): Promise<string> {
   const slots = extractFormSlots(rawData, defaultFormName);
+  const hasFormContext = hasExplicitFormSignal(rawData, defaultFormName, slots);
   const apiKey = process.env.GEMINI_API_KEY;
 
   // Resolve dynamic values
@@ -425,20 +448,28 @@ export async function generateSmartDraft(
 
   if (!apiKey) {
     // No API key, directly use deterministik fallback
-    return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName);
+    return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName, hasFormContext);
   }
 
   try {
     const travelDestination = locationName ? `Türkiye’ye, ${locationName} lokasyonumuza` : 'Türkiye’ye';
     
     let introGreetingRule = '';
-    if (!tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz') {
+    if (!hasFormContext) {
+      introGreetingRule = !tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz'
+        ? `Size yardımcı olabiliriz.`
+        : `${tenantDisplayName} adına size yardımcı olabiliriz.`;
+    } else if (!tenantDisplayName || tenantDisplayName === 'Kurumumuz' || tenantDisplayName === 'Ekibimiz') {
       introGreetingRule = `Doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
     } else {
       introGreetingRule = `${tenantDisplayName} olarak doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.`;
     }
 
-    const systemInstruction = `Sen bir Hastane Karşılama Asistanı AI modelisin. Görevin, hastanın doldurduğu form verilerini (slotları) inceleyerek, ona son derece profesyonel, sıcak, kurallara uygun ve güvenli bir WhatsApp karşılama mesaj taslağı hazırlamaktır.
+    const formSourceRule = hasFormContext
+      ? `Form verisi mevcut. Bu nedenle sadece bu durumda "doldurduğunuz form doğrultusunda" anlamındaki giriş cümlesini kullanabilirsin.`
+      : `Form verisi yok veya belirsiz. Bu durumda "doldurduğunuz form", "başvurunuz" veya form doldurduğunu ima eden hiçbir ifade kullanma.`;
+
+    const systemInstruction = `Sen bir Hastane Karşılama Asistanı AI modelisin. Görevin, verilen hasta bağlamını inceleyerek, ona son derece profesyonel, sıcak, kurallara uygun ve güvenli bir WhatsApp karşılama mesaj taslağı hazırlamaktır.
 Yanıtını sadece belirtilen JSON formatında üretmelisin. JSON haricinde hiçbir metin, tırnak veya markdown bloğu (örn. \`\`\`json) KESİNLİKLE ekleme.
 
 === YASAKLI İFADELER VE KURAL LİSTESİ ===
@@ -456,6 +487,7 @@ Yanıtını sadece belirtilen JSON formatında üretmelisin. JSON haricinde hiç
 12. Hastaya ${travelDestination} ne zaman gelmeyi düşündüğünü sor.
 13. KESİNLİKLE Başkent, Konya, Rüya veya başka bir kurum adını kendin uydurma veya ekleme. Sadece sana verilen ${tenantDisplayName} değerini kullan.
 14. Mesajı son derece kısa, doğal, sıcak, hasta-facing tut. KESİNLİKLE tıbbi jargona veya hastane broşür stiline girme.
+15. ${formSourceRule}
 
 === FIRST CONTACT INTENT CHECK RULES (KRİTİK) ===
 Bu taslak hastaya atılacak ilk mesajdır ve asıl amaç hastanın randevu veya gelme NİYETİNİ öğrenmektir, TIBBİ DANIŞMANLIK veya yönlendirme vermek değildir.
@@ -468,7 +500,7 @@ AŞAĞIDAKİ SORULAR VE KONULAR KESİNLİKLE YASAKTIR:
 
 === TASLAK METNİ BÖLÜM VE SIRALAMA KURALLARI (TASLAK MAKSİMUM 3 KISA PARAGRAF OLMALIDIR) ===
 1. Paragraf 1 (Selamlama + Giriş + Şikayet Teyidi): "Merhaba," kelimesinden sonra çift satır boşluk bırak ve ardından "${introGreetingRule}" cümlesini ekle. Hemen ardına hastanın şikayetini ve varsa süresini doğal bir Türkçe ile belirterek geçmiş olsun de.
-   - Örn: "Merhaba,\n\n${tenantDisplayName} olarak doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz. Diz kapağı ağrısı şikayetiniz olduğunu belirtmişsiniz. Öncelikle geçmiş olsun."
+   - Örn: "Merhaba,\n\n${introGreetingRule} Diz kapağı ağrısı şikayetiniz olduğunu belirtmişsiniz. Öncelikle geçmiş olsun."
    - Hastanın şikayet verisindeki "merhaba", "selam", "benim", "adım" gibi gereksiz giriş kelimelerini tamamen ayıkla.
 2. Paragraf 2 (Geliş Niyeti/Tarih Sorusu): Yaşadığı yer belirtilmişse "Yaşadığınız yer olarak Stuttgart bilgisini paylaşmışsınız." ifadesini ekleyerek, "Randevu planlaması ve uygun yönlendirme için ${travelDestination} ne zaman gelmeyi düşündüğünüzü bizimle paylaşabilir misiniz?" veya "Randevu planlaması için ${travelDestination} ne zaman gelmeyi düşündüğünüzü bizimle paylaşabilir misiniz?" sorusunu sor.
 3. Paragraf 3 (Kapanış): "İyi günler dileriz." cümlesi ile kapat.
@@ -526,7 +558,7 @@ Form Slotları:
           return parsed.draftText;
         } else {
           // Fallback due to safety gate rejection
-          return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName);
+          return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName, hasFormContext);
         }
       }
     }
@@ -534,20 +566,22 @@ Form Slotları:
     // Fetch or parse error -> fallback
   }
 
-  return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName);
+  return generateDeterministikDraft(slots, draftPurpose, tenantDisplayName, locationName, hasFormContext);
 }
 
 export function enforceGreetingDraftSafety(
   draftText: string,
   slots: FormSlots,
-  tenantContext: { tenantDisplayName: string; locationName: string }
+  tenantContext: { tenantDisplayName: string; locationName: string; hasFormContext?: boolean }
 ): string {
   const safetyErrors = validateDraft(draftText, slots, slots.departmentHint || 'Genel', 'first_contact_intent_check');
   const paras = draftText.split("\n").filter(p => p.trim().length > 0);
   const contentParas = paras.filter(p => !p.startsWith("Merhaba") && !p.includes("İyi günler"));
+  const hasFormContext = tenantContext.hasFormContext ?? true;
+  const invalidFormReference = !hasFormContext && /doldurduğunuz form|başvurunuz|form doğrultusunda/i.test(draftText);
 
-  if (safetyErrors.length > 0 || contentParas.length > 3) {
-    return generateDeterministikDraft(slots, 'first_contact_intent_check', tenantContext.tenantDisplayName, tenantContext.locationName);
+  if (safetyErrors.length > 0 || contentParas.length > 3 || invalidFormReference) {
+    return generateDeterministikDraft(slots, 'first_contact_intent_check', tenantContext.tenantDisplayName, tenantContext.locationName, hasFormContext);
   }
   return draftText;
 }

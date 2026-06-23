@@ -363,22 +363,22 @@ Lütfen hastamız ${patientDisplayName} için şu talimat doğrultusunda bir yan
 
     switch (interventionType) {
       case 'confirm_callback_time':
-        fallbackMsg = `Merhaba, telefon görüşmesi için belirttiğiniz zamanı teyit etmek isteriz. Uygun olduğunu onaylayabilir misiniz?`;
+        fallbackMsg = `Belirttiğiniz telefon görüşmesi zamanı sizin için uygun mu? Onaylayabilir misiniz?`;
         break;
       case 'ask_new_callback_time':
-        fallbackMsg = `Merhaba, telefon görüşmesi için size uygun gün ve saat aralığını bizimle paylaşabilir misiniz?`;
+        fallbackMsg = `Telefon görüşmesi için size uygun gün ve saat aralığını paylaşabilir misiniz?`;
         break;
       case 'remind_callback':
-        fallbackMsg = `Merhaba, telefon görüşmesi planlamanızla ilgili sizi bilgilendirmek istedik. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir.`;
+        fallbackMsg = `Telefon görüşmesi planlamanızla ilgili sizi bilgilendirmek istedik. Görüşme saatinde telefonunuzun ulaşılabilir olması yeterlidir.`;
         break;
       case 'request_documents':
-        fallbackMsg = `Merhaba, elinizde paylaşmak istediğiniz belgeler varsa buradan iletebilirsiniz. Kesin değerlendirme ise hastanede ilgili uzman ekibimizin fiziksel değerlendirmesi sonrasında yapılacaktır.`;
+        fallbackMsg = `Elinizde paylaşmak istediğiniz belgeler varsa buradan iletebilirsiniz. Belgeler süreci anlamaya yardımcı olabilir; kesin değerlendirme için ilgili uzman hekim muayenesi gerekir.`;
         break;
       case 'confirm_clinic_appointment':
-        fallbackMsg = `Merhaba, planlanan yüz yüze klinik randevunuzu teyit etmek isteriz. Katılım durumunuzu bildirebilir misiniz?`;
+        fallbackMsg = `Planlanan yüz yüze klinik randevunuzu teyit etmek isteriz. Katılım durumunuzu bildirebilir misiniz?`;
         break;
       case 'ask_new_clinic_appointment_time':
-        fallbackMsg = `Merhaba, yüz yüze klinik randevunuz için size uygun yeni bir tarih ve saat aralığı paylaşabilir misiniz?`;
+        fallbackMsg = `Yüz yüze klinik randevunuz için size uygun yeni bir tarih ve saat aralığı paylaşabilir misiniz?`;
         break;
     }
 

@@ -854,15 +854,14 @@ test("P0.12 MICRO: Call Request / Confirmation Loop Fix", () => {
     }
   });
 
-  // P0.17 UPDATE: "evet" with no active_task time context now hits short_confirmation_no_slot_safe
-  // (P0.17 Madde 2 — prevents LLM from fabricating dates/times for short confirmations)
-  // Old: expected "Size hangi saat aralığında ulaşılması uygun olur?" (ask for time)
-  // New: expected safe acknowledgment (no time fabrication risk)
+  // P0.17/P0.31 UPDATE: "evet" with no active_task time context now hits a neutral
+  // continuation question. It must not fabricate dates/times or imply a call will happen.
   assert(
-    fallbackRes1.finalPath === "short_confirmation_no_slot_safe" ||
-    fallbackRes1.text.includes("not aldım") ||
-    fallbackRes1.text.includes("iletişime geçecektir"),
-    `P0.17: "evet" with no slot should produce safe acknowledgment, got finalPath="${fallbackRes1.finalPath}", text="${fallbackRes1.text}"`
+    fallbackRes1.finalPath === "short_confirmation_no_slot_safe" &&
+    fallbackRes1.text.includes("hangi konuda yardımcı olayım") &&
+    !fallbackRes1.text.includes("not aldım") &&
+    !fallbackRes1.text.includes("iletişime geçecektir"),
+    `P0.31: "evet" with no slot should produce neutral continuation, got finalPath="${fallbackRes1.finalPath}", text="${fallbackRes1.text}"`
   );
 
   // 4. Fallback resolver returns confirmed callback if time/date is already known
@@ -880,15 +879,14 @@ test("P0.12 MICRO: Call Request / Confirmation Loop Fix", () => {
     }
   });
 
-  // P0.17 UPDATE: "evet" with time mentioned in history (but no active_task) also hits
-  // short_confirmation_no_slot_safe — because hasActiveTaskTimeContext reads from active_task.metadata,
-  // not from conversation history. This is correct: confirmed times should be in active_task.
+  // P0.17/P0.31 UPDATE: time in history alone is still not an active task.
+  // The fallback remains neutral and must not imply that a callback was scheduled.
   assert(
-    fallbackRes2.finalPath === "short_confirmation_no_slot_safe" ||
-    fallbackRes2.text.includes("not aldım") ||
-    fallbackRes2.text.includes("iletişime geçecektir") ||
-    fallbackRes2.text.includes("Not aldım"),
-    `P0.17: "evet" with time in history should produce safe fallback, got finalPath="${fallbackRes2.finalPath}", text="${fallbackRes2.text}"`
+    fallbackRes2.finalPath === "short_confirmation_no_slot_safe" &&
+    fallbackRes2.text.includes("hangi konuda yardımcı olayım") &&
+    !fallbackRes2.text.includes("not aldım") &&
+    !fallbackRes2.text.includes("iletişime geçecektir"),
+    `P0.31: "evet" with time in history should produce neutral fallback, got finalPath="${fallbackRes2.finalPath}", text="${fallbackRes2.text}"`
   );
 
   // 5. evet with no call offer should preserve general confirmation logic
@@ -5813,7 +5811,7 @@ test("P0.16-J: 2. 'ee yani' routes to next_step_request intent", async () => {
   assert(intent === 'next_step_request', `Expected next_step_request, got: '${intent}'`);
 });
 
-test("P0.16-J: 3. next_step_request response asks for date/time, does NOT say only 'danışmanımız iletişime geçecek'", async () => {
+test("P0.16-J: 3. next_step_request response asks neutral continuation, does NOT force callback slot", async () => {
   const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
 
   const result = ContextAwareSafeFallbackResolver.resolve({
@@ -5835,15 +5833,17 @@ test("P0.16-J: 3. next_step_request response asks for date/time, does NOT say on
   });
 
   assert(result.finalPath === 'next_step_consultant_ownership', `Expected next_step_consultant_ownership path, got: '${result.finalPath}'`);
-  // Must ask for date/time
+  // Must ask a neutral continuation question, not force a callback slot
   assert(
-    result.text.includes('hangi gün') || result.text.includes('saat aralığı') || result.text.includes('belirleyelim'),
-    `Response should ask for date/time slot, got: '${result.text}'`
+    result.text.includes('Önce hangi konu') || result.text.includes('hangi bilgiyi') || result.text.includes('hangi konuda bilgi'),
+    `Response should ask a neutral continuation question, got: '${result.text}'`
   );
-  // Must NOT just say "danışmanımız iletişime geçecek" passively
+  // Must NOT force callback scheduling or say "danışmanımız iletişime geçecek" passively
   assert(
-    !(result.text === 'Talebinizi not aldım, hasta danışmanımız sizinle iletişime geçecektir.'),
-    `Should not be passive 'danışmanımız iletişime geçecek', got: '${result.text}'`
+    !result.text.includes('hangi gün ve saat') &&
+    !result.text.includes('saat aralığında aramamız') &&
+    !result.text.includes('iletişime geçecektir'),
+    `Should not force callback scheduling, got: '${result.text}'`
   );
 });
 
@@ -12280,6 +12280,127 @@ test("Başkent v77 T46: outbound message delete hides panel message and removes 
   assert(chatArea.includes("message.providerMessageId || message.id"), "Chat UI should fall back to provider ID for realtime-created messages");
   assert(chatArea.includes("phone: activePhone"), "Chat UI should send phone fallback context for live cache message deletion");
   assert(chatArea.includes("deleteMessageAction(messageIdentifier, {"), "Chat UI should call the delete action with fallback message context");
+});
+
+test("Başkent v78 T47: no-form form fallback must not imply application or form context", async () => {
+  const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain("t1", "whatsapp", "payload-v78-t47", "Sen bir test asistanısın.", { industry: "healthcare" });
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "başvuru yaptım",
+    brain,
+    identityConfig: {},
+    unifiedContext: { history: [], patient_known_facts: [] }
+  });
+
+  assert(result.finalPath === "form_followup_bypass", `Expected form_followup_bypass, got: ${result.finalPath}`);
+  assert(!result.text.includes("Başvurunuzu aldık"), `No-form fallback must not say application received: ${result.text}`);
+  assert(!result.text.includes("doldurduğunuz form"), `No-form fallback must not mention form: ${result.text}`);
+  assert(!result.text.includes("uygun olduğunuz gün ve saat"), `No-form fallback must not force callback slot: ${result.text}`);
+  assert(result.text.includes("hangi konuda bilgi") || result.text.includes("şikayetinizi"), `No-form fallback should ask a neutral question: ${result.text}`);
+});
+
+test("Başkent v78 T48: form fallback may acknowledge form but must not force phone slot", async () => {
+  const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain("t1", "whatsapp", "payload-v78-t48", "Sen bir test asistanısın.", { industry: "healthcare" });
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "başvuru yaptım",
+    brain,
+    identityConfig: {},
+    unifiedContext: {
+      history: [],
+      latestForm: { data: { complaint: "check-up" }, name: "Check-up" },
+      patient_known_facts: ["Şikayet: check-up"]
+    }
+  });
+
+  assert(result.finalPath === "form_followup_bypass", `Expected form_followup_bypass, got: ${result.finalPath}`);
+  assert(result.text.includes("Form kaydınızı görüyorum"), `Form fallback should acknowledge real form: ${result.text}`);
+  assert(!result.text.includes("uygun olduğunuz gün ve saat"), `Form fallback must not force callback slot: ${result.text}`);
+  assert(result.text.includes("hangi konuda bilgi"), `Form fallback should ask a neutral continuation question: ${result.text}`);
+});
+
+test("Başkent v78 T49: short confirmation without active slot stays neutral", async () => {
+  const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain("t1", "whatsapp", "payload-v78-t49", "Sen bir test asistanısın.", { industry: "healthcare" });
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "evet",
+    brain,
+    identityConfig: {},
+    unifiedContext: { history: [], patient_known_facts: [] }
+  });
+
+  assert(result.finalPath === "short_confirmation_no_slot_safe", `Expected short confirmation fallback, got: ${result.finalPath}`);
+  assert(result.text.includes("hangi konuda yardımcı olayım"), `Short confirmation should ask neutral question: ${result.text}`);
+  assert(!result.text.includes("not aldım"), `Short confirmation must not imply saved task: ${result.text}`);
+  assert(!result.text.includes("iletişime geçecektir"), `Short confirmation must not imply future contact: ${result.text}`);
+});
+
+test("Başkent v78 T50: transfer fallback avoids old call-slot template", async () => {
+  const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain("t1", "whatsapp", "payload-v78-t50", "Sen bir test asistanısın.", { industry: "healthcare" });
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "beni birine aktarır mısınız",
+    brain,
+    identityConfig: {},
+    unifiedContext: { history: [], patient_known_facts: [] }
+  });
+
+  assert(result.finalPath === "human_transfer_bypass", `Expected human_transfer_bypass, got: ${result.finalPath}`);
+  assert(!result.text.includes("Talebinizi not aldım"), `Transfer fallback must not use old template: ${result.text}`);
+  assert(!result.text.includes("uygun olduğunuz gün ve saat"), `Transfer fallback must not ask call slot: ${result.text}`);
+  assert(result.text.toLowerCase().includes("hangi konuda destek"), `Transfer fallback should ask for support context: ${result.text}`);
+});
+
+test("Başkent v78 T51: bot intervention fallback is soft and only callback type asks slot", async () => {
+  const { BotInterventionService } = await import("../lib/services/bot-intervention.service");
+  const previousApiKey = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+
+  try {
+    const service = new BotInterventionService({} as any) as any;
+    const ctxLog = { warn() {}, error() {} };
+    const askCallback = await service.generateBotMessage("Hasta", "+905551112233", "ask_new_callback_time", undefined, ctxLog);
+    const docs = await service.generateBotMessage("Hasta", "+905551112233", "request_documents", undefined, ctxLog);
+
+    assert(askCallback.draftMsg.includes("Telefon görüşmesi için size uygun gün ve saat aralığını"), `Callback fallback should ask slot: ${askCallback.draftMsg}`);
+    assert(!askCallback.draftMsg.startsWith("Merhaba,"), `Callback fallback should avoid repeated generic greeting: ${askCallback.draftMsg}`);
+    assert(!docs.draftMsg.includes("gün ve saat aralığı"), `Document fallback must not ask callback slot: ${docs.draftMsg}`);
+    assert(docs.draftMsg.includes("paylaşmak istediğiniz belgeler"), `Document fallback should softly allow documents: ${docs.draftMsg}`);
+  } finally {
+    if (previousApiKey) process.env.GEMINI_API_KEY = previousApiKey;
+  }
+});
+
+test("Başkent v78 T52: smart draft without explicit form signal must not mention form", async () => {
+  const { generateSmartDraft, enforceGreetingDraftSafety, extractFormSlots } = await import("../lib/utils/smart-draft-generator");
+  const previousApiKey = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+
+  try {
+    const draft = await generateSmartDraft({}, "", "first_contact_intent_check");
+    assert(!draft.includes("doldurduğunuz form"), `No-form smart draft must not mention form: ${draft}`);
+    assert(!draft.includes("başvurunuz"), `No-form smart draft must not mention application: ${draft}`);
+    assert(draft.includes("hangi konuda bilgi"), `No-form smart draft should ask neutral question: ${draft}`);
+
+    const slots = extractFormSlots({}, "");
+    const safe = enforceGreetingDraftSafety(
+      "Merhaba,\n\nDoldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.",
+      slots,
+      { tenantDisplayName: "Kurumumuz", locationName: "", hasFormContext: false }
+    );
+    assert(!safe.includes("doldurduğunuz form"), `Safety rewrite must remove no-form form phrase: ${safe}`);
+    assert(safe.includes("hangi konuda bilgi"), `Safety rewrite should ask neutral question: ${safe}`);
+  } finally {
+    if (previousApiKey) process.env.GEMINI_API_KEY = previousApiKey;
+  }
 });
 
 
