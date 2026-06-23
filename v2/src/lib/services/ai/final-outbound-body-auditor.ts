@@ -114,6 +114,66 @@ function isShortGreetingInbound(inboundText?: string): boolean {
   return clean.length <= 30 && /\b(merhaba|selam|iyi günler|iyi aksamlar|iyi akşamlar|günaydın|gunaydin)\b/i.test(clean);
 }
 
+function formatTurkishDateFromIso(dateIso?: string | null): string | null {
+  if (!dateIso) return null;
+  const match = String(dateIso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const dt = new Date(`${match[1]}-${match[2]}-${match[3]}T12:00:00+03:00`);
+  if (isNaN(dt.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat('tr-TR', {
+    timeZone: 'Europe/Istanbul',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    weekday: 'long',
+  }).formatToParts(dt);
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+  const weekday = get('weekday');
+  return `${get('day')} ${get('month')} ${get('year')} ${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}`.trim();
+}
+
+function applyStaleYearDateRewrite(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
+  const inbound = ctx.inboundText || '';
+  if (!/\b(yar[ıi]n|bug[üu]n|pazartesi|sal[ıi]|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar)\b/i.test(inbound)) {
+    return { text, rewrote: false };
+  }
+
+  try {
+    const { parseDeterministicSuggestion } = require('../../utils/date-parser');
+    const parsed = parseDeterministicSuggestion(inbound, new Date(), null, null);
+    const replacementLabel = formatTurkishDateFromIso(parsed?.suggested_date);
+    if (!replacementLabel) return { text, rewrote: false };
+
+    const currentYear = Number(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Istanbul',
+      year: 'numeric',
+    }).format(new Date()));
+    const months = 'Ocak|Şubat|Subat|Mart|Nisan|Mayıs|Mayis|Haziran|Temmuz|Ağustos|Agustos|Eylül|Eylul|Ekim|Kasım|Kasim|Aralık|Aralik';
+    const weekdays = 'Pazartesi|Salı|Sali|Çarşamba|Carsamba|Perşembe|Persembe|Cuma|Cumartesi|Pazar';
+
+    let result = text;
+    let rewrote = false;
+    const starred = new RegExp(`\\*\\d{1,2}\\s+(?:${months})\\s+(20\\d{2})\\*\\s+(?:${weekdays})`, 'gi');
+    result = result.replace(starred, (match: string, year: string) => {
+      if (Number(year) >= currentYear) return match;
+      rewrote = true;
+      return `*${replacementLabel}*`;
+    });
+
+    const plain = new RegExp(`\\b\\d{1,2}\\s+(?:${months})\\s+(20\\d{2})(?:\\s+(?:${weekdays}))?\\b`, 'gi');
+    result = result.replace(plain, (match: string, year: string) => {
+      if (Number(year) >= currentYear) return match;
+      rewrote = true;
+      return replacementLabel;
+    });
+
+    return { text: result, rewrote };
+  } catch {
+    return { text, rewrote: false };
+  }
+}
+
 function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
   let result = text;
   let rewrote = false;
@@ -238,6 +298,12 @@ export class FinalOutboundBodyAuditor {
       const naturalTone = applyNaturalToneRewrites(result, ctx);
       if (naturalTone.rewrote) {
         result = naturalTone.text;
+        rewrote = true;
+      }
+
+      const staleYear = applyStaleYearDateRewrite(result, ctx);
+      if (staleYear.rewrote) {
+        result = staleYear.text;
         rewrote = true;
       }
     } catch (err) {

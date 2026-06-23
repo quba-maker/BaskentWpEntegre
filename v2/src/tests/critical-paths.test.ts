@@ -12567,6 +12567,43 @@ test("Başkent v79 T60: callback recovery uses natural confirmation wording", as
   assert(!result.text.includes("sizin için uygun görünüyor"), "Robotic callback wording must not remain");
 });
 
+test("Başkent v79 T61: final auditor rewrites stale year in relative date replies", async () => {
+  const { FinalOutboundBodyAuditor } = await import("../lib/services/ai/final-outbound-body-auditor");
+  const RealDate = Date;
+  const fixedNow = new RealDate("2026-06-23T12:00:00+03:00");
+  class MockDate extends RealDate {
+    constructor(...args: any[]) {
+      if (args.length === 0) {
+        super(fixedNow.getTime());
+      } else {
+        super(...(args as [any]));
+      }
+    }
+    static now() {
+      return fixedNow.getTime();
+    }
+  }
+
+  try {
+    (global as any).Date = MockDate as any;
+    const result = FinalOutboundBodyAuditor.audit(
+      "Yarın (*26 Haziran 2024* Çarşamba) Türkiye saatiyle *10:00* için not alayım mı?",
+      {
+        tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+        channel: "whatsapp",
+        replyLanguage: "tr",
+        inboundText: "yarın saat 10"
+      }
+    );
+
+    assert(!result.text.includes("2024"), `Stale year must be removed: ${result.text}`);
+    assert(result.text.includes("24 Haziran 2026 Çarşamba"), `Expected corrected date, got: ${result.text}`);
+    assert(result.rewrote === true, "Auditor should report stale year rewrite");
+  } finally {
+    (global as any).Date = RealDate;
+  }
+});
+
 
 async function runAllTests() {
   try {
