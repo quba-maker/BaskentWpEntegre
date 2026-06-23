@@ -1742,6 +1742,7 @@ export class AIResponseOrchestrator {
             brain,
             safeHistoryForState,
             resolvedActiveDepartment || null,
+            replyLanguage,
             workerPath
           );
           if (composed) {

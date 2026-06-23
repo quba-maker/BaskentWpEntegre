@@ -6030,7 +6030,8 @@ test("P0.16-K: 8. multi-intent compose — numbered blocks in output", async () 
   );
   assert(result !== null, "Should compose multi-intent response");
   assert(result!.composed === true, "Should mark as composed");
-  assert(result!.text.includes("1."), "Should have block 1");
+  assert(!result!.text.includes("1."), "Should NOT have numbered blocks in output");
+  assert(result!.text.includes("\n\n"), "Should separate blocks with paragraphs");
   assert(result!.intentList.length >= 2, `Should detect >= 2 intents, got: ${result!.intentList.length}`);
 });
 
@@ -12650,6 +12651,58 @@ test("Başkent Hotfix T79_4: TenantConfigResolver.getAddress Konya Başkent defa
     prompts: { metadata: { identity: { organizationName: "Konya Başkent Hastanesi" } } }
   });
   assert(address === "Hocacihan Mahallesi, Saray Caddesi No:1, Selçuklu / Konya", `Expected Konya Başkent address, got: ${address}`);
+});
+
+test("Başkent v79 T62: multi-intent multi-lingual and logistics regex check", () => {
+  const { MultiIntentConsultantComposer } = require("../lib/services/ai/multi-intent-consultant-composer");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v79-t62",
+    "Sen Rüya'sın.",
+    {
+      industry: "healthcare",
+      identity: { organizationName: "Konya Başkent Hastanesi" }
+    }
+  );
+
+  // 1. Verify logistics regex check on "gelmeden" vs "gelme"
+  const resultGelmeden = MultiIntentConsultantComposer.compose(
+    "gelmeden önce hastaneniz nerede ve fiyatlar nasıldır?",
+    brain,
+    [],
+    "Check-up",
+    "tr"
+  );
+  assert(resultGelmeden !== null, "Should compose multi-intent response");
+  assert(!resultGelmeden.intentList.includes("logistics_question"), "Should NOT match logistics_question for 'gelmeden'");
+  assert(resultGelmeden.intentList.includes("address_question"), "Should match address_question");
+  assert(resultGelmeden.intentList.includes("price_question"), "Should match price_question");
+
+  const resultGelme = MultiIntentConsultantComposer.compose(
+    "hastaneye gelme süreciniz, konaklama ve fiyatlar hakkında bilgi alabilir miyim?",
+    brain,
+    [],
+    "Check-up",
+    "tr"
+  );
+  assert(resultGelme !== null, "Should compose multi-intent response");
+  assert(resultGelme.intentList.includes("logistics_question"), "Should match logistics_question for 'gelme/konaklama'");
+
+  // 2. Verify English multi-lingual paragraph format (no numbers)
+  const resultEn = MultiIntentConsultantComposer.compose(
+    "where is your hospital and what are the prices?",
+    brain,
+    [],
+    "Check-up",
+    "en"
+  );
+  assert(resultEn !== null, "Should compose multi-intent response in English");
+  assert(!resultEn.text.includes("1."), "English output should NOT contain list numbering");
+  assert(resultEn.text.includes("\n\n"), "English output should use paragraph separators");
+  assert(resultEn.text.includes("Our location"), "English output should use address template in English");
+  assert(resultEn.text.includes("Since pricing is determined"), "English output should use price template in English");
 });
 
 
