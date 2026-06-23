@@ -743,7 +743,10 @@ export async function getMessages(
   });
 }
 
-export async function deleteMessageAction(messageIdentifier: string) {
+export async function deleteMessageAction(
+  messageIdentifier: string,
+  fallback?: { conversationId?: string | null; text?: string | null; timeMs?: number | null }
+) {
   const identifier = String(messageIdentifier || '').trim();
   if (!identifier || identifier.length > 255) {
     return { success: false, error: "Geçersiz mesaj ID." };
@@ -756,7 +759,7 @@ export async function deleteMessageAction(messageIdentifier: string) {
     },
     async (ctx) => {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
-      const rows = await ctx.db.executeSafe({
+      let rows = await ctx.db.executeSafe({
         text: isUuid ? `
           SELECT id, conversation_id, direction, content, media_metadata
           FROM messages
@@ -770,6 +773,57 @@ export async function deleteMessageAction(messageIdentifier: string) {
         `,
         values: [identifier, ctx.tenantId]
       }) as any[];
+
+      if (rows.length === 0 && fallback?.conversationId && fallback?.text) {
+        const conversationRef = String(fallback.conversationId || '').trim();
+        const isConversationUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(conversationRef);
+        const sentAround = typeof fallback.timeMs === 'number' && Number.isFinite(fallback.timeMs)
+          ? new Date(fallback.timeMs)
+          : null;
+
+        rows = await ctx.db.executeSafe({
+          text: isConversationUuid ? `
+            SELECT id, conversation_id, direction, content, media_metadata
+            FROM messages
+            WHERE tenant_id = $1
+              AND conversation_id = $2::uuid
+              AND direction = 'out'
+              AND content = $3
+              AND COALESCE(media_metadata->>'deleted_at', '') = ''
+              AND (
+                $4::timestamptz IS NULL
+                OR ABS(EXTRACT(EPOCH FROM (COALESCE(provider_timestamp, created_at) - $4::timestamptz))) <= 1800
+              )
+            ORDER BY
+              CASE
+                WHEN $4::timestamptz IS NULL THEN 0
+                ELSE ABS(EXTRACT(EPOCH FROM (COALESCE(provider_timestamp, created_at) - $4::timestamptz)))
+              END ASC,
+              COALESCE(provider_timestamp, created_at) DESC
+            LIMIT 1
+          ` : `
+            SELECT id, conversation_id, direction, content, media_metadata
+            FROM messages
+            WHERE tenant_id = $1
+              AND phone_number = $2
+              AND direction = 'out'
+              AND content = $3
+              AND COALESCE(media_metadata->>'deleted_at', '') = ''
+              AND (
+                $4::timestamptz IS NULL
+                OR ABS(EXTRACT(EPOCH FROM (COALESCE(provider_timestamp, created_at) - $4::timestamptz))) <= 1800
+              )
+            ORDER BY
+              CASE
+                WHEN $4::timestamptz IS NULL THEN 0
+                ELSE ABS(EXTRACT(EPOCH FROM (COALESCE(provider_timestamp, created_at) - $4::timestamptz)))
+              END ASC,
+              COALESCE(provider_timestamp, created_at) DESC
+            LIMIT 1
+          `,
+          values: [ctx.tenantId, conversationRef, fallback.text, sentAround]
+        }) as any[];
+      }
 
       if (rows.length === 0) {
         return { success: false, error: "Mesaj bulunamadı." };

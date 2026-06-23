@@ -1474,7 +1474,11 @@ export function ConversationViewport() {
     });
 
     try {
-      const res = await deleteMessageAction(messageIdentifier);
+      const res = await deleteMessageAction(messageIdentifier, {
+        conversationId: activeContactConversationId || activePhone,
+        text: message.text || null,
+        timeMs: message.timeMs || null
+      });
       if (!res.success) {
         throw new Error(res.error || "Mesaj silinemedi");
       }
