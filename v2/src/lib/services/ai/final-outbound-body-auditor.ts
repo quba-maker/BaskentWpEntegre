@@ -55,6 +55,10 @@ const KNOWN_BAD_MORPHOLOGY_PATTERNS: RegExp[] = [
   /s[üu]re[çc]ininiz/i,          // sürecininiz
   /olabilece[ğg]inizie?\s+anl/i, // olabileceğinizi anlıyorum (garbled)
   /m[üu]mk[üu]n\s+de[ğg]ildir\s+olmuyor/i,
+  /boyunuz\s+f[ıi]t[ıi][ğg][ıi]/i,
+  /şikayeti\s+oldu[ğg]unuzu/i,
+  /hastan[ıi]n[ıi]z\s+hastanemizde/i,
+  /form\s+başvurunuz\s+bize\s+ulaştı\.,/i,
 ];
 
 // Legacy close phrases that signal the conversation was terminated incorrectly
@@ -259,6 +263,59 @@ function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { t
     if (next !== result) {
       result = next;
       rewrote = true;
+    }
+  }
+
+  const morphologyRewrites: Array<[RegExp, string]> = [
+    [/form\s+başvurunuz\s+bize\s+ulaştı\.,/gi, 'form başvurunuz bize ulaştı.'],
+    [/boyunuz\s+f[ıi]t[ıi][ğg][ıi]/gi, 'boyun fıtığı'],
+    [/baban[ıi]z[ıi]n\s+([^.\n,]+?)\s+şikayeti\s+oldu[ğg]unuzu/gi, 'babanızın $1 şikayeti olduğunu'],
+    [/annenizin\s+([^.\n,]+?)\s+şikayeti\s+oldu[ğg]unuzu/gi, 'annenizin $1 şikayeti olduğunu'],
+    [/ve\s+(\d+\s+y[ıi]ld[ıi]r)\s+y[üu]r[üu]yemedi[ğg]inizi/gi, 've babanızın $1 yürüyemediğini'],
+    [/Kesin\s+de[ğg]erlendirme\s+i[çc]in\s+hastan[ıi]n[ıi]z\s+hastanemizde/gi, 'Kesin değerlendirme için hastanın hastanemizde'],
+    [/Ge[çc]mi[şs]\s+olsun\s+dileklerimi\s+iletmek\s+isterim\.?/gi, 'Öncelikle geçmiş olsun.'],
+    [/(^|\n)size\s+en\s+uygun/gi, '$1Size en uygun'],
+  ];
+  for (const [pattern, replacement] of morphologyRewrites) {
+    const next = result.replace(pattern, replacement);
+    if (next !== result) {
+      result = next;
+      rewrote = true;
+    }
+  }
+
+  const accommodationInbound = /konaklama|kalacak\s+yer|otel|misafirhane|accommodation|stay|unterkunft/i.test(ctx.inboundText || '');
+  if (accommodationInbound) {
+    const accommodationRewrites: Array<[RegExp, string]> = [
+      [/Karar\s+vermeden\s+[öo]nce\s+[öo]deme,\s+ula[şs][ıi]m\s+ve\s+konaklama\s+taraf[ıi]n[ıi]\s+netle[şs]tirmek\s+istemeniz\s+[çc]ok\s+anla[şs][ıi]l[ıi]r\.\s*En\s+[çc]ok\s+hangi\s+ba[şs]l[ıi]k\s+sizi\s+d[üu][şs][üu]nd[üu]r[üu]yor\?/gi, 'Konaklama tarafını netleştirmek istemeniz çok anlaşılır.'],
+      [/En\s+[çc]ok\s+hangi\s+ba[şs]l[ıi]k\s+sizi\s+d[üu][şs][üu]nd[üu]r[üu]yor\?/gi, 'Konaklama konusunda özellikle neyi netleştirmek istersiniz?'],
+      [/havaliman[ıi]\s+transferi,\s+konaklama\s+ve\s+s[üu]re[çc]\s+planlama\s+koordinasyonu\s+ekibimiz\s+taraf[ıi]ndan\s+organize\s+edilmektedir/gi, 'hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda ekibimiz danışmanlık yapabilir'],
+      [/konaklama\s+(?:ayarlan[ıi]r|ayarlar[ıi]z|organize\s+edilir|organize\s+ederiz|rezervasyon\s+yapar[ıi]z)/gi, 'konaklama seçenekleri konusunda danışmanlık yapılabilir'],
+      [/misafirhanemiz\s+(?:var|bulunuyor)/gi, 'hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller bulunuyor'],
+    ];
+    for (const [pattern, replacement] of accommodationRewrites) {
+      const next = result.replace(pattern, replacement);
+      if (next !== result) {
+        result = next;
+        rewrote = true;
+      }
+    }
+  }
+
+  const infoFirstInbound = /(?:[öo]nce\s+bilgi|bilgi\s+almak|fiyat|[üu]cret|[öo]deme|konaklama|kalacak\s+yer|doktorla\s+g[öo]r[üu][şs]mek)/i.test(ctx.inboundText || '');
+  const explicitSchedulingInbound = /(?:arama|aranmak|telefon|randevu\s+(?:almak|olu[şs]turmak|planlamak)|saat\s+\d{1,2})/i.test(ctx.inboundText || '');
+  if (infoFirstInbound && !explicitSchedulingInbound) {
+    const ctaPatterns = [
+      /\s*Sizi\s+hangi\s+g[üu]n\s+ve\s+saat\s+aral[ıi][ğg][ıi]nda\s+aramam\s+uygun\s+olur\??/gi,
+      /\s*Hangi\s+g[üu]n\s+ve\s+saat\s+aral[ıi][ğg][ıi]\s+sizin\s+i[çc]in\s+uygun\s+olur\??/gi,
+      /\s*Telefon\s+g[öo]r[üu][şs]mesi\s+i[çc]in\s+size\s+uygun\s+g[üu]n\s+ve\s+saat\s+aral[ıi][ğg][ıi]\s+nedir\??/gi,
+    ];
+    for (const pattern of ctaPatterns) {
+      const next = result.replace(pattern, '').trim();
+      if (next !== result) {
+        result = next;
+        rewrote = true;
+      }
     }
   }
 

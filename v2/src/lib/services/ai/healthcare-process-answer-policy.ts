@@ -37,17 +37,20 @@ export class HealthcareProcessAnswerPolicy {
       docSection = `${dept} değerlendirmesi gerekir. Hekim listesini bu ekrandan net doğrulayamıyorum ve hatalı bilgi vermemek adına isim uydurmam; ancak danışman ekibimiz uygun hekim seçeneklerini sizin için netleştirecektir.`;
     }
     
-    return `Sorularınızı memnuniyetle yanıtlayayım:
+    return `Sorular tek cevapta doğal biçimde yanıtlanmalı:
 
-*Doktor / bölüm yönlendirmesi*
+- Doktor / bölüm yönlendirmesi:
 ${docSection}
 
-*Süreç nasıl ilerler*
-Varsa güncel MR, tahlil veya raporlarınızı bizimle buradan paylaşabilirsiniz. Ancak kesin değerlendirme hastanede ilgili uzman hekim muayenesi sonrasında yapılır.
+- Süreç:
+Kesin değerlendirme hastanede ilgili uzman hekim muayenesi sonrasında yapılır. Rapor/görsel paylaşılırsa tıbbi yorum sözü verme; hastanın özellikle ne sorduğunu netleştir.
 
-*Fiyat neden netleşir / neye göre değişir*
-Tedavi ücretleri, yapılacak tetkikler ve hekimimizin belirleyeceği kişiye özel tedavi planına göre değişir. Bu nedenle buradan kesin bir fiyat belirtmemiz doğru olmaz.
+- Fiyat:
+Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.
 
-*Sonraki adım*${timePhrase} Detayları netleştirmek için hasta danışmanımız ile bilgilendirme amaçlı bir telefon görüşmesi yapmak ister misiniz? 🙏`;
+- Konaklama:
+Hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda danışmanlık yapılabilir. Misafirhane, garanti veya rezervasyon sözü verme.
+
+- Sonraki adım:${timePhrase} Telefon görüşmesini otomatik dayatma; hasta önce bilgi istiyorsa bilgi verip tek doğal soru sor.`;
   }
 }

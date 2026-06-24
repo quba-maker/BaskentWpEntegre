@@ -664,10 +664,10 @@ export class ContextAwareSafeFallbackResolver {
       }));
 
       const text = `${location}'dan bizimle iletişime geçtiğiniz için teşekkür ederiz. ${dept} süreci, ulaşım ve fiyatlandırma ile ilgili bilgiler aşağıdadır:\n\n` +
-        `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen ziyaretçilerimiz için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.\n` +
+        `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen hastalar için hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda danışmanlık yapılabilir. Konaklama garantisi veya rezervasyon sözü veremem.\n` +
         `• **${dept} Süreci**: İlgili branşımız bünyesinde değerlendirme ve hizmet süreçleri uzman ekibimiz kontrolünde planlanmaktadır.\n` +
         `• **Fiyatlandırma**: Hizmet ücretleri, yapılacak değerlendirme ve oluşturulacak kişiye özel plana göre belirlenmektedir.\n` +
-        `• **Sonraki Adım**: Önce hangi başlığı netleştirelim: ücret, ulaşım, konaklama veya geliş planı?`;
+        `• **Sonraki Adım**: Önce sorduğunuz başlık üzerinden ilerleyelim; konaklama, ödeme veya geliş sürecinde hangi detayı netleştirmek istersiniz?`;
 
       return {
         text,
@@ -1439,7 +1439,7 @@ export class ContextAwareSafeFallbackResolver {
 
     if (detectedIntent === 'distance_objection') {
       const text = isHealthcare
-        ? `Uzaklık endişenizi anlıyorum. Ulaşım, konaklama ve süreç planlamasıyla ilgili hangi noktayı önce netleştirmek istersiniz?`
+        ? `Uzaklık ve konaklama endişenizi anlıyorum. Hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda danışmanlık yapılabilir; garanti veya rezervasyon sözü veremem. Bu konuda özellikle hangi bilgiyi netleştirmek istersiniz?`
         : `Mesafe konusundaki endişenizi anlıyorum. Ulaşım veya süreçle ilgili hangi noktayı önce netleştirmek istersiniz?`;
       return {
         text,

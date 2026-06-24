@@ -1710,8 +1710,12 @@ export class AIResponseOrchestrator {
       const cleanInboundPunct = cleanInbound.replace(/[?.!,;:]/g, '').trim();
       const isWhatTurkishBypass = cleanInboundPunct === 'what' && (replyLanguage === 'tr');
 
+      const multiIntentGuidance = isMultiIntentQuery
+        ? MultiIntentConsultantComposer.buildPromptGuidance(inboundText)
+        : '';
+
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge
-        || shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery || isDoctorNamesRequest || isDoctorProfileQuestion || isWhatTurkishBypass;
+        || shouldBypassDoctorLookup || isRecallWithFacts || isDoctorNamesRequest || isDoctorProfileQuestion || isWhatTurkishBypass;
 
       let text = '';
       let bypassed = false;
@@ -1728,7 +1732,7 @@ export class AIResponseOrchestrator {
         if (isPromptChallenge)        intentList.push('prompt_challenge');
         if (isBotAccusation || isAiAccusation) intentList.push('identity_question');
         if (isMixedDoctorProcess)     intentList.push('process_question');
-        if (isMultiIntentQuery)       intentList.push('multi_intent_query');
+        if (isMultiIntentQuery)       intentList.push('multi_intent_query_hint_only');
         if (isDoctorNamesRequest)     intentList.push('doctor_names_request');
         if (isDoctorProfileQuestion)  intentList.push('doctor_profile_question');
         if (effectiveIsCallbackConfirmation)   intentList.push('callback_confirmation');
@@ -1756,30 +1760,6 @@ export class AIResponseOrchestrator {
         const consultantState = ConsultantConversationStateResolver.resolve(safeHistoryForState);
 
         let fallbackResult: any;
-
-        // ── P0.16-K: Multi-intent query (4-question burst) — highest priority ──
-        if (isMultiIntentQuery) {
-          const composed = MultiIntentConsultantComposer.compose(
-            inboundText,
-            brain,
-            safeHistoryForState,
-            resolvedActiveDepartment || null,
-            replyLanguage,
-            workerPath
-          );
-          if (composed) {
-            fallbackResult = { text: composed.text, finalPath: 'multi_intent_consultant_composed' };
-            console.log(JSON.stringify({
-              tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
-              path: 'multi_intent_consultant_composed',
-              intentCount: composed.intentList.length,
-              tenantId,
-              conversationId: conversationId || 'unknown',
-              workerPath
-            }));
-          }
-        }
-
         // ── Doctor profile/trust question — grounded, no subjective ranking ─────────
         if (!fallbackResult && isDoctorProfileQuestion) {
           const depts: string[] = [];
@@ -1881,8 +1861,20 @@ export class AIResponseOrchestrator {
       } else {
         // P0.16-K: "başka bilgi" open-continuation — ensure LLM doesn't close conversation
         let llmSystemPrompt = systemPromptText;
+        if (multiIntentGuidance) {
+          llmSystemPrompt = llmSystemPrompt + `\n\n[ÇOKLU NİYET REHBERİ - HASTAYA AYNEN YAZMA]\n${multiIntentGuidance}\n[/ÇOKLU NİYET REHBERİ]`;
+          try {
+            console.log(JSON.stringify({
+              tag: 'MULTI_INTENT_LLM_GUIDANCE_INJECTED',
+              tenantId,
+              conversationId: conversationId || 'unknown',
+              intentList: MultiIntentConsultantComposer.detectIntentList(inboundText),
+              workerPath
+            }));
+          } catch { /* non-fatal */ }
+        }
         if (isOpenContinuation || isOpenContinuationIntent || isThanksButContinue) {
-          llmSystemPrompt = systemPromptText + '\n\n[NOT: Kullanıcı konuşmayı sürdürmek istiyor. "İyi günler" veya kapatma cümlesi KULLANMA. Yeni sorusunu bekle veya yardıma açık olduğunu nazikçe belirt.]';
+          llmSystemPrompt = llmSystemPrompt + '\n\n[NOT: Kullanıcı konuşmayı sürdürmek istiyor. "İyi günler" veya kapatma cümlesi KULLANMA. Yeni sorusunu bekle veya yardıma açık olduğunu nazikçe belirt.]';
         }
 
         // P0.16-M: Short affirmative ("tamam", "olur", "evet", "peki") — inject conversation-state-first directive

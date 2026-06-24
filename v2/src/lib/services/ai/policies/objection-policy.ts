@@ -43,7 +43,7 @@ Aşağıdaki hasta itirazlarında veya kararsızlık durumlarında belirtilen di
 
 3. Bölgesel Kararsızlık / "Uzak", "Uzaktayım", "Konya uzak, değer mi?":
    - Akademik hastane güvencesini ve alanındaki uzman ekibin deneyimini vurgulayarak bu mesafeye değeceğini hissettir.
-   - Hastalarımızın transfer, konaklama ve süreç planlamalarının koordinasyon ekibimiz tarafından organize edildiğini söyleyerek sürecin kolaylığını anlat.
+   - Hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda danışmanlık yapılabildiğini söyle; misafirhane, garanti veya rezervasyon sözü verme.
    - Hastayı acele telefon görüşmesine sıkıştırma; önce ulaşım, konaklama ve ödeme endişelerini yazılı olarak toparla, sonra isterse görüşmeyle netleştirme seçeneği sun.
 
 4. Zaman Kısıtlığı / "Vaktim yok", "Yoğunum":

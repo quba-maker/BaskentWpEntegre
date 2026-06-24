@@ -4545,7 +4545,7 @@ test("P0.15 - 9: Bot accusation safety policy (polite response)", () => {
   assert(text.includes("Ben Rüya, Başkent Hastanesi'nden size yardımcı olmaya çalışıyorum"), "Kibar kimlik tanımı olmalı");
 });
 
-test("P0.15 - 10: Multi-intent process policy structured response", () => {
+test("P0.15 - 10: Multi-intent process policy guidance response", () => {
   const { HealthcareProcessAnswerPolicy } = require("../lib/services/ai/healthcare-process-answer-policy");
   const facts = {
     previousDepartments: ["Ortopedi"],
@@ -4555,11 +4555,13 @@ test("P0.15 - 10: Multi-intent process policy structured response", () => {
   assert(isMulti === true, "Çoklu niyet tespit edilmeli");
 
   const response = HealthcareProcessAnswerPolicy.getMultiIntentFallbackResponse(facts, false);
-  assert(response.includes("*Doktor / bölüm yönlendirmesi*"), "Doktor başlığı olmalı");
-  assert(response.includes("*Süreç nasıl ilerler*"), "Süreç başlığı olmalı");
-  assert(response.includes("*Fiyat neden netleşir / neye göre değişir*"), "Fiyat başlığı olmalı");
-  assert(response.includes("*Sonraki adım*"), "Sonraki adım başlığı olmalı");
+  assert(response.includes("Sorular tek cevapta doğal biçimde yanıtlanmalı"), "LLM guidance olmalı");
+  assert(response.includes("- Doktor / bölüm yönlendirmesi:"), "Doktor rehberi olmalı");
+  assert(response.includes("- Süreç:"), "Süreç rehberi olmalı");
+  assert(response.includes("- Fiyat:"), "Fiyat rehberi olmalı");
+  assert(response.includes("- Sonraki adım:"), "Sonraki adım rehberi olmalı");
   assert(response.includes("Ağustos ayı planınızı da not ettim"), "Tarih continuity bulunmalı");
+  assert(!response.includes("En çok hangi başlık sizi düşündürüyor"), "Eski tekrar sorusu olmamalı");
 });
 
 test("P0.15 - 11: User correction continuity recovery fallback", () => {
@@ -6135,7 +6137,7 @@ test("P0.16-K: 7. multi-intent detection — nerede + fiyat + surec", async () =
   assert(isMulti, "Should detect multi-intent (address+price+process)");
 });
 
-test("P0.16-K: 8. multi-intent compose — numbered blocks in output", async () => {
+test("P0.16-K: 8. multi-intent compose — guidance only, no patient-facing blocks", async () => {
   const { MultiIntentConsultantComposer } = await import("../lib/services/ai/multi-intent-consultant-composer");
   const mockBrain = {
     context: { config: {}, settings: {} },
@@ -6152,8 +6154,10 @@ test("P0.16-K: 8. multi-intent compose — numbered blocks in output", async () 
   );
   assert(result !== null, "Should compose multi-intent response");
   assert(result!.composed === true, "Should mark as composed");
-  assert(!result!.text.includes("1."), "Should NOT have numbered blocks in output");
-  assert(result!.text.includes("\n\n"), "Should separate blocks with paragraphs");
+  assert(result!.guidanceOnly === true, "Multi-intent composer should now return LLM guidance only");
+  assert(result!.text.includes("Çoklu niyet algılandı"), "Should build a guidance note for LLM");
+  assert(!result!.text.includes("Elbette yanıtlayayım"), "Should not produce old patient-facing intro");
+  assert(!result!.text.includes("En çok hangi başlık sizi düşündürüyor"), "Should not contain the repeated objection question");
   assert(result!.intentList.length >= 2, `Should detect >= 2 intents, got: ${result!.intentList.length}`);
 });
 
@@ -12326,12 +12330,14 @@ test("Başkent v75 Live T41: multi-intent price/logistics answer avoids broken T
     "test"
   );
 
-  assert(result && result.text, "Multi-intent composer should produce a response");
+  assert(result && result.text, "Multi-intent composer should produce guidance");
+  assert(result.guidanceOnly === true, "Multi-intent composer should be guidance-only");
   assert(!result.text.includes("planınızı sonrasında"), "Broken 'planınızı sonrasında' must not appear");
   assert(!result.text.includes("Tahminizi maliyet"), "Broken 'Tahminizi maliyet' must not appear");
   assert(!result.text.includes("yaklaşık maliyet"), "Price block must not mention approximate cost");
-  assert(result.text.includes("buradan net fiyat paylaşamıyorum"), "Price block should use exact safe price wording");
-  assert(result.text.includes("konaklama"), "Logistics block should handle accommodation naturally");
+  assert(result.text.includes("buradan net fiyat paylaşamıyorum"), "Guidance should preserve exact safe price wording");
+  assert(result.text.includes("konaklama"), "Guidance should cover accommodation");
+  assert(!result.text.includes("En çok hangi başlık sizi düşündürüyor"), "Guidance must not preserve repeated old block");
 });
 
 test("Başkent v75 Live T42: final auditor rewrites repeated identity after callback time answer", () => {
@@ -12826,7 +12832,7 @@ test("Başkent v79 T62: multi-intent multi-lingual and logistics regex check", (
   assert(resultGelme !== null, "Should compose multi-intent response");
   assert(resultGelme.intentList.includes("logistics_question"), "Should match logistics_question for 'gelme/konaklama'");
 
-  // 2. Verify English multi-lingual paragraph format (no numbers)
+  // 2. Verify English multi-lingual detection still produces LLM guidance only
   const resultEn = MultiIntentConsultantComposer.compose(
     "where is your hospital and what are the prices?",
     brain,
@@ -12835,10 +12841,10 @@ test("Başkent v79 T62: multi-intent multi-lingual and logistics regex check", (
     "en"
   );
   assert(resultEn !== null, "Should compose multi-intent response in English");
-  assert(!resultEn.text.includes("1."), "English output should NOT contain list numbering");
-  assert(resultEn.text.includes("\n\n"), "English output should use paragraph separators");
-  assert(resultEn.text.includes("Our location"), "English output should use address template in English");
-  assert(resultEn.text.includes("Since pricing is determined"), "English output should use price template in English");
+  assert(resultEn.guidanceOnly === true, "English multi-intent should be guidance-only");
+  assert(resultEn.text.includes("Çoklu niyet algılandı"), "Should produce canonical guidance");
+  assert(!resultEn.text.includes("Our location"), "Should not produce patient-facing address template");
+  assert(!resultEn.text.includes("Since pricing is determined"), "Should not produce patient-facing price template");
 });
 
 test("Başkent v79 T63: outbound greeting phrase rewrite in FinalOutboundBodyAuditor", () => {
@@ -12957,7 +12963,7 @@ test("Başkent v79 T69: FinalOutboundBodyAuditor arrival date self-introduction 
   assert(audited.text.includes("telefon görüşmesi"), "Should offer phone call");
 });
 
-test("Başkent v79 T70: MultiIntentConsultantComposer price check with TA12 returns insurance disclaimer", () => {
+test("Başkent v79 T70: MultiIntentConsultantComposer price check with TA12 returns guidance only", () => {
   const { MultiIntentConsultantComposer } = require("../lib/services/ai/multi-intent-consultant-composer");
   const result = MultiIntentConsultantComposer.compose(
     "fiyatlar nedir? TA12 anlaşmanız var mı? kimler var?",
@@ -12973,8 +12979,11 @@ test("Başkent v79 T70: MultiIntentConsultantComposer price check with TA12 retu
   );
 
   assert(result !== null, "Should resolve multi-intent response");
-  assert(result.text.includes("yurt dışı SGK (TA12) anlaşması bulunmamakta"), "Should contain TA12 invalidity disclaimer");
-  assert(result.text.includes("özel hasta statüsünde"), "Should mention private patient status");
+  assert(result.guidanceOnly === true, "Multi-intent should only guide the LLM");
+  assert(result.text.includes("Çoklu niyet algılandı"), "Should produce guidance for detected topics");
+  assert(result.text.includes("buradan net fiyat paylaşamıyorum"), "Should preserve safe price wording");
+  assert(!result.text.includes("yurt dışı SGK (TA12) anlaşması bulunmamakta"), "Composer must not hardcode TA12 disclaimer");
+  assert(!result.text.includes("özel hasta statüsünde"), "Composer must not hardcode private patient status");
 });
 
 test("Başkent v79 T71: successful callback confirmation falls through to LLM in Turkish", async () => {
@@ -13655,6 +13664,89 @@ test("Başkent v81 T93: Verb after 'ben' must not become patient name", async ()
     replyLanguage: "tr"
   } as any);
   assert(!fallback.text.includes("Atmak"), `Fallback must not thank/use Atmak as name: ${fallback.text}`);
+});
+
+test("Başkent v80 T94: multi-intent is LLM guidance, not hardcoded patient response", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const orchestratorPath = path.join(__dirname, "../lib/services/ai/ai-response-orchestrator.ts");
+  const code = fs.readFileSync(orchestratorPath, "utf8");
+  assert(!code.includes("|| shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery"), "Multi-intent must not force LLM bypass");
+  assert(code.includes("MULTI_INTENT_LLM_GUIDANCE_INJECTED"), "Orchestrator should inject multi-intent guidance into LLM prompt");
+});
+
+test("Başkent v80 T95: form extractor keeps complaint separate from complaint duration and splits requester country", () => {
+  const { extractFormFields } = require("../lib/utils/form-field-extractor");
+  const result = extractFormFields({
+    "Şikayetiniz Nedir?": "Bel ve boyun fıtığı nedeniyle 3 yıldır yürüyemiyor babam ameliyat riskli",
+    "Şikayetiniz Ne Zaman Başladı?": "3 yıl önce",
+    "Nerede yaşıyorsunuz?": "Babam turkiyede ben almanyadayım",
+    "Size ne zaman randevu oluşturmamızı istersiniz?": "?"
+  });
+  assert(result.complaint && result.complaint.includes("Bel ve boyun fıtığı"), `Complaint should stay as complaint, got: ${result.complaint}`);
+  assert(result.complaint !== "3 yıl önce", "Complaint duration must not overwrite complaint");
+  assert(result.country === "Almanya", `Requester country should be Almanya, got: ${result.country}`);
+});
+
+test("Başkent v80 T96: known facts separate applicant from father patient", () => {
+  const { ConversationKnownFactsResolver } = require("../lib/services/ai/conversation-known-facts-resolver");
+  const facts = ConversationKnownFactsResolver.resolve({
+    history: [],
+    latestForm: {
+      name: "Gurbetçiler Form Randevu",
+      data: {
+        country: "Babam turkiyede ben almanyadayım",
+        sikayet: "Bel ve boyun fıtığı nedeniyle 3 yıldır yürüyemiyor babam ameliyat riskli sinirlerinin zedelendiğini söylediler"
+      }
+    }
+  });
+  const formatted = ConversationKnownFactsResolver.formatFacts(facts).join("\n");
+  assert(formatted.includes("Başvuran kişinin bulunduğu yer: Almanya"), formatted);
+  assert(formatted.includes("Hastanın bulunduğu yer: Türkiye"), formatted);
+  assert(formatted.includes("Yakını (Babası) konusu: Bel ve boyun fıtığı"), formatted);
+  assert(!formatted.includes("Kendisinin şikayeti: Bel ve boyun fıtığı"), "Father complaint must not become applicant self complaint");
+});
+
+test("Başkent v80 T97: final auditor fixes father-form grammar and accommodation loop", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden ben Rüya, form başvurunuz bize ulaştı., babanızın bel ve boyunuz fıtığı şikayeti olduğunuzu ve 3 yıldır yürüyemediğinizi belirtmişsiniz.\n\nKarar vermeden önce ödeme, ulaşım ve konaklama tarafını netleştirmek istemeniz çok anlaşılır. En çok hangi başlık sizi düşündürüyor?\n\nŞehir dışından veya yurt dışından gelen hastalar için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v80-t97",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "Diyorum ya konaklama diye. Endişem var işte."
+    }
+  );
+  assert(!result.text.includes("ulaştı.,"), result.text);
+  assert(!result.text.includes("boyunuz fıtığı"), result.text);
+  assert(result.text.includes("babanızın bel ve boyun fıtığı şikayeti olduğunu"), result.text);
+  assert(result.text.includes("babanızın 3 yıldır yürüyemediğini"), result.text);
+  assert(!result.text.includes("En çok hangi başlık sizi düşündürüyor"), result.text);
+  assert(result.text.includes("hastaneye yakın konaklama seçenekleri"), result.text);
+  assert(!/rezervasyon yaparız|misafirhanemiz var/i.test(result.text), result.text);
+});
+
+test("Başkent v80 T98: prompt multi-intent guide does not demand rigid template", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v80-t98",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    effectiveIntent: "generic_other",
+    currentMessageText: "fiyat, konaklama ve doktorla görüşme benim için önemli",
+    history: [{ role: "user", content: "fiyat, konaklama ve doktorla görüşme benim için önemli" }]
+  });
+  assert(prompt.includes("Intent: multi_intent_query"), "Prompt should include multi-intent guide");
+  assert(prompt.includes("hazır blok"), "Prompt should explicitly avoid hardcoded blocks");
+  assert(!prompt.includes("Şablon dışına çıkma"), "Old rigid template instruction must not remain");
 });
 
 

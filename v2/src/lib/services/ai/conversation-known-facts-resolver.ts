@@ -6,6 +6,7 @@ export type RelatedPersonFact = {
   relation: 'mother' | 'father' | 'spouse' | 'relative' | 'acquaintance';
   topic?: string;
   urgency?: string;
+  location?: string;
 };
 
 export type PatientKnownFacts = {
@@ -26,6 +27,8 @@ export type PatientKnownFacts = {
   hasLinkedForm?: boolean;
   formTopic?: string;
   countryOrLanguageHint?: string;
+  requesterLocation?: string;
+  patientLocation?: string;
   scheduledCall?: {
     time?: string;
     note?: string;
@@ -33,6 +36,89 @@ export type PatientKnownFacts = {
   formNote?: string;
   preferredCallTime?: string;
 };
+
+const COUNTRY_ALIASES: Array<{ label: string; aliases: string[] }> = [
+  { label: 'Türkiye', aliases: ['türkiye', 'turkiye', 'turkiyede', 'türkiyede'] },
+  { label: 'Almanya', aliases: ['almanya', 'almanyada', 'almanyadayım', 'almanyadayim', 'germany', 'deutschland'] },
+  { label: 'Kazakistan', aliases: ['kazakistan', 'kazakistandan', 'kazakhstan'] },
+  { label: 'Özbekistan', aliases: ['özbekistan', 'ozbekistan', "o'zbekiston", 'uzbekistan'] },
+  { label: 'Hollanda', aliases: ['hollanda', 'netherlands'] },
+  { label: 'Fransa', aliases: ['fransa', 'france'] },
+  { label: 'Belçika', aliases: ['belçika', 'belcika', 'belgium'] },
+  { label: 'İngiltere', aliases: ['ingiltere', 'londra', 'uk', 'england', 'united kingdom'] },
+  { label: 'Avusturya', aliases: ['avusturya', 'austria'] },
+  { label: 'İsviçre', aliases: ['isviçre', 'isvicre', 'switzerland'] },
+  { label: 'Rusya', aliases: ['rusya', 'russia'] },
+  { label: 'Kanada', aliases: ['kanada', 'canada'] },
+  { label: 'ABD', aliases: ['amerika', 'abd', 'usa', 'united states'] },
+];
+
+function detectRelationFromText(text?: string | null): RelatedPersonFact['relation'] | null {
+  const lower = (text || '').toLocaleLowerCase('tr-TR');
+  if (/\b(?:babam|babamın|babasi|babası|baba)\b/.test(lower)) return 'father';
+  if (/\b(?:annem|annemin|annesi|anne)\b/.test(lower)) return 'mother';
+  if (/\b(?:eşim|esim|eşimin|esimin|eşi|esi|karım|kocam)\b/.test(lower)) return 'spouse';
+  if (/\b(?:kardeşim|kardesim|abim|ablam|çocuğum|cocugum|oğlum|oglum|kızım|kizim|yakınım|yakinim)\b/.test(lower)) return 'relative';
+  return null;
+}
+
+function extractCountryMentions(text?: string | null): Array<{ label: string; index: number }> {
+  const lower = (text || '').toLocaleLowerCase('tr-TR');
+  const mentions: Array<{ label: string; index: number }> = [];
+  for (const entry of COUNTRY_ALIASES) {
+    for (const alias of entry.aliases) {
+      const idx = lower.indexOf(alias);
+      if (idx >= 0) {
+        mentions.push({ label: entry.label, index: idx });
+        break;
+      }
+    }
+  }
+  return mentions.sort((a, b) => a.index - b.index);
+}
+
+function parseRequesterAndPatientLocations(text?: string | null): { requesterLocation?: string; patientLocation?: string } {
+  const lower = (text || '').toLocaleLowerCase('tr-TR');
+  const mentions = extractCountryMentions(text);
+  const result: { requesterLocation?: string; patientLocation?: string } = {};
+  if (mentions.length === 0) return result;
+
+  for (let i = 0; i < mentions.length; i++) {
+    const mention = mentions[i];
+    const prevIndex = i > 0 ? mentions[i - 1].index : 0;
+    const nextIndex = i < mentions.length - 1 ? mentions[i + 1].index : lower.length;
+    const localStart = Math.max(prevIndex, mention.index - 28);
+    const localEnd = Math.min(nextIndex, mention.index + 28);
+    const before = lower.slice(localStart, mention.index);
+    const after = lower.slice(mention.index, localEnd);
+    const localContext = `${before} ${after}`;
+
+    if (/\b(?:babam|babamın|babasi|babası|annem|annemin|annesi|eşim|esim|yakınım|yakinim)\b/.test(localContext)) {
+      result.patientLocation = mention.label;
+    } else if (/\b(?:ben|bense|kendim|yaşıyorum|yasiyorum|dayım|dayim|deyim)\b/.test(localContext)) {
+      result.requesterLocation = mention.label;
+    }
+  }
+
+  if (!result.requesterLocation && mentions.length > 0 && /\bben\b/.test(lower)) {
+    result.requesterLocation = mentions[mentions.length - 1].label;
+  }
+  if (!result.patientLocation && detectRelationFromText(text)) {
+    result.patientLocation = mentions[0].label;
+  }
+  return result;
+}
+
+function summarizeComplaintTopic(text: string): string {
+  const clean = normalizeFormValue(text).replace(/\s+/g, ' ').trim();
+  const lower = clean.toLocaleLowerCase('tr-TR');
+  const hasBel = /bel\s+ve\s+boyun|bel\s+.*boyun|bel\s+f[ıi]t/.test(lower);
+  const hasBoyun = /boyun\s+f[ıi]t/.test(lower);
+  if (hasBel && hasBoyun) return 'Bel ve boyun fıtığı';
+  if (/bel\s+f[ıi]t/.test(lower)) return 'Bel fıtığı';
+  if (/boyun\s+f[ıi]t/.test(lower)) return 'Boyun fıtığı';
+  return clean.length > 220 ? `${clean.slice(0, 217).trim()}...` : clean;
+}
 
 
 export class ConversationKnownFactsResolver {
@@ -118,7 +204,10 @@ export class ConversationKnownFactsResolver {
       const formData = typeof latestForm.data === 'string' ? (() => { try { return JSON.parse(latestForm.data); } catch { return {}; } })() : latestForm.data;
       const formCountry = formData?.country || null;
       if (formCountry && typeof formCountry === 'string' && formCountry.trim().length > 0) {
-        facts.countryOrLanguageHint = formCountry.trim();
+        const splitLocations = parseRequesterAndPatientLocations(formCountry);
+        if (splitLocations.requesterLocation) facts.requesterLocation = splitLocations.requesterLocation;
+        if (splitLocations.patientLocation) facts.patientLocation = splitLocations.patientLocation;
+        facts.countryOrLanguageHint = splitLocations.requesterLocation || splitLocations.patientLocation || normalizeFormValue(formCountry.trim());
       }
     }
 
@@ -298,7 +387,18 @@ export class ConversationKnownFactsResolver {
         // Fallback: randevu_tercihi (many forms put complaint text there)
         const formAppointmentPref = data?.randevu_tercihi || null;
         if (formComplaint) {
-          self.complaint = normalizeFormValue(formComplaint);
+          const relation = detectRelationFromText(formComplaint);
+          if (relation) {
+            const existing = relatedPersons.find(rp => rp.relation === relation);
+            const topic = summarizeComplaintTopic(formComplaint);
+            if (existing) {
+              existing.topic = existing.topic || topic;
+            } else {
+              relatedPersons.push({ relation, topic });
+            }
+          } else {
+            self.complaint = normalizeFormValue(formComplaint);
+          }
         } else if (formAppointmentPref) {
           self.complaint = normalizeFormValue(formAppointmentPref);
         }
@@ -317,6 +417,13 @@ export class ConversationKnownFactsResolver {
       if (formAppointmentPref && typeof formAppointmentPref === 'string' && formAppointmentPref.trim().length > 0) {
         facts.formNote = formAppointmentPref.trim();
       }
+
+      const rawCountry = data?.country || null;
+      if (rawCountry && typeof rawCountry === 'string') {
+        const splitLocations = parseRequesterAndPatientLocations(rawCountry);
+        if (splitLocations.requesterLocation) facts.requesterLocation = splitLocations.requesterLocation;
+        if (splitLocations.patientLocation) facts.patientLocation = splitLocations.patientLocation;
+      }
     }
 
 
@@ -328,6 +435,9 @@ export class ConversationKnownFactsResolver {
     facts.self = self;
     if (facts.relatedPersons && facts.relatedPersons.length > 0) {
       relatedPersons.push(...facts.relatedPersons);
+    }
+    if (facts.patientLocation && relatedPersons.length > 0) {
+      relatedPersons[0].location = relatedPersons[0].location || facts.patientLocation;
     }
     facts.relatedPersons = relatedPersons;
 
@@ -461,7 +571,13 @@ export class ConversationKnownFactsResolver {
   public static formatFacts(facts: PatientKnownFacts): string[] {
     const list: string[] = [];
     if (facts.name) {
-      list.push(`Hastanın adı: ${facts.name}.`);
+      list.push(`Başvuran kişinin adı: ${facts.name}.`);
+    }
+    if (facts.requesterLocation) {
+      list.push(`Başvuran kişinin bulunduğu yer: ${facts.requesterLocation}.`);
+    }
+    if (facts.patientLocation) {
+      list.push(`Hastanın bulunduğu yer: ${facts.patientLocation}.`);
     }
 
     // Self facts
@@ -485,7 +601,7 @@ export class ConversationKnownFactsResolver {
                        : rp.relation === 'spouse' ? 'Eşi'
                        : rp.relation === 'relative' ? 'Yakını'
                        : 'Tanıdığı';
-        list.push(`Yakını (${relLabel}) konusu: ${rp.topic || 'Belirtilmedi'}${rp.urgency ? ` (Durum acil)` : ''}.`);
+        list.push(`Yakını (${relLabel}) konusu: ${rp.topic || 'Belirtilmedi'}${rp.location ? `; bulunduğu yer: ${rp.location}` : ''}${rp.urgency ? ` (Durum acil)` : ''}.`);
       }
     }
 

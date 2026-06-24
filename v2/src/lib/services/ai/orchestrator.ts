@@ -426,10 +426,10 @@ export class AIOrchestrator {
         const location = matchedLocation.key;
         const dept = matchedDept?.key || 'Tedavi';
         fallbackText = `${location}'dan bizimle iletişime geçtiğiniz için teşekkür ederiz. ${dept} süreci, ulaşım ve fiyatlandırma ile ilgili bilgiler aşağıdadır:\n\n` +
-          `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen ziyaretçilerimiz için havalimanı transferi, konaklama ve süreç planlama koordinasyonu ekibimiz tarafından organize edilmektedir.\n` +
+          `• **Ulaşım ve Konaklama**: Şehir dışı ve yurt dışından gelen hastalar için hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda danışmanlık yapılabilir. Konaklama garantisi veya rezervasyon sözü veremem.\n` +
           `• **${dept} Süreci**: İlgili branşımız bünyesinde değerlendirme ve hizmet süreçleri uzman ekibimiz kontrolünde planlanmaktadır.\n` +
           `• **Fiyatlandırma**: Hizmet ücretleri, yapılacak değerlendirme ve oluşturulacak kişiye özel plana göre belirlenmektedir.\n` +
-          `• **Sonraki Adım**: Detayları görüşmek ve planlama yapmak üzere görüşme planlanabilir. Hangi gün ve saat aralığında görüşmek istersiniz? 🙏`;
+          `• **Sonraki Adım**: Önce sorduğunuz başlık üzerinden ilerleyelim; konaklama, ödeme veya geliş sürecinde hangi detayı netleştirmek istersiniz?`;
       } else if (e.message?.startsWith('COST_LIMIT_EXCEEDED')) {
         fallbackText = "Mesajınız alındı. Şu an yoğunluk nedeniyle kısa bir gecikme yaşanıyor. Lütfen biraz sonra tekrar yazınız. 🙏";
       } else if (e.message?.startsWith('CIRCUIT_OPEN')) {

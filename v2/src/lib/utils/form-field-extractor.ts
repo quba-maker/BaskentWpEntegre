@@ -67,6 +67,39 @@ const COMPLAINT_KEYWORD_MAP: { keywords: string[]; department: string; confidenc
   { keywords: ['kulak çınlaması', 'çınlama', 'tinnitus', 'kulak', 'işitme', 'boğaz', 'burun', 'geniz', 'bademcik', 'burun tıkanıklığı', 'sinüzit'], department: 'KBB', confidence: 1.0 }
 ];
 
+const COUNTRY_VALUE_MAP: Array<{ label: string; aliases: string[] }> = [
+  { label: 'Türkiye', aliases: ['türkiye', 'turkiye', 'turkiyede', 'türkiyede'] },
+  { label: 'Almanya', aliases: ['almanya', 'almanyada', 'almanyadayım', 'almanyadayim', 'germany', 'deutschland'] },
+  { label: 'Kazakistan', aliases: ['kazakistan', 'kazakistandan', 'kazakhstan'] },
+  { label: 'Özbekistan', aliases: ['özbekistan', 'ozbekistan', "o'zbekiston", 'uzbekistan'] },
+  { label: 'Hollanda', aliases: ['hollanda', 'netherlands'] },
+  { label: 'Fransa', aliases: ['fransa', 'france'] },
+  { label: 'Belçika', aliases: ['belçika', 'belcika', 'belgium'] },
+  { label: 'İngiltere', aliases: ['ingiltere', 'londra', 'uk', 'england', 'united kingdom'] },
+  { label: 'Avusturya', aliases: ['avusturya', 'austria'] },
+  { label: 'İsviçre', aliases: ['isviçre', 'isvicre', 'switzerland'] },
+  { label: 'Kanada', aliases: ['kanada', 'canada'] },
+];
+
+function normalizeCountryValue(raw: string | null): string | null {
+  if (!raw) return null;
+  const lower = raw.toLocaleLowerCase('tr-TR');
+  const mentions: Array<{ label: string; index: number }> = [];
+  for (const entry of COUNTRY_VALUE_MAP) {
+    for (const alias of entry.aliases) {
+      const idx = lower.indexOf(alias);
+      if (idx >= 0) {
+        mentions.push({ label: entry.label, index: idx });
+        break;
+      }
+    }
+  }
+  if (mentions.length === 0) return raw;
+  mentions.sort((a, b) => a.index - b.index);
+  const requesterMention = mentions.find(m => /\b(?:ben|bense|kendim|yaşıyorum|yasiyorum|dayım|dayim|deyim)\b/.test(lower.slice(Math.max(0, m.index - 45), m.index)));
+  return requesterMention?.label || mentions[mentions.length - 1].label;
+}
+
 export function extractFormFields(rawData: any): FormExtraction {
   const result: FormExtraction = {
     department: null,
@@ -129,16 +162,30 @@ export function extractFormFields(rawData: any): FormExtraction {
       .replace(/[^a-z0-9]/g, '');
     
     const valStr = String(value || '').trim();
+    const isDurationOrStartKey =
+      k.includes('nezamanbasladi') ||
+      k.includes('nekadarzamandir') ||
+      k.includes('sikayetiniznezaman') ||
+      k.includes('sikayetnezaman') ||
+      k.includes('sikayetsuresi') ||
+      k.includes('sure') ||
+      k.includes('duration') ||
+      k.includes('started');
 
     // Match complaint keys
     if (
-      k.includes('sikayet') || 
-      k.includes('sagligidurumu') || 
-      k.includes('durumunuzunasil') || 
-      k.includes('hastaliginiz') ||
-      k.includes('complaint')
+      !isDurationOrStartKey &&
+      (
+        k.includes('sikayet') || 
+        k.includes('sagligidurumu') || 
+        k.includes('durumunuzunasil') || 
+        k.includes('hastaliginiz') ||
+        k.includes('complaint')
+      )
     ) {
-      rawComplaint = valStr;
+      if (valStr && (!rawComplaint || valStr.length > rawComplaint.length)) {
+        rawComplaint = valStr;
+      }
     }
     // Match report/MR status keys
     else if (
@@ -185,7 +232,7 @@ export function extractFormFields(rawData: any): FormExtraction {
   result.complaint = rawComplaint;
   result.appointmentPref = rawAppointmentPref;
   result.age = rawAge;
-  result.country = rawCountry;
+  result.country = normalizeCountryValue(rawCountry);
 
   // Normalize report status values
   if (rawReportStatus) {

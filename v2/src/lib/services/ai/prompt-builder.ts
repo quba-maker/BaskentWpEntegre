@@ -15,6 +15,7 @@ import { resolvePatientCountryDetailed } from '@/lib/utils/country-normalizer';
 import { buildObjectionPolicy } from './policies/objection-policy';
 import { buildFewShotPolicy } from './policies/few-shot-policy';
 import { buildProgressFunnelPolicy } from './policies/progress-funnel-policy';
+import { MultiIntentConsultantComposer } from './multi-intent-consultant-composer';
 
 
 export class PromptBuilder {
@@ -1114,19 +1115,8 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     });
 
     if (isMultiIntent && isHealthcare) {
-      const doctorDirectory = brain.context.config?.doctors || brain.context.config?.doctorDirectory || brain.context.config?.doctor_directory;
-      let verifiedDoctorsText = '';
-      if (Array.isArray(doctorDirectory) && doctorDirectory.length > 0) {
-        verifiedDoctorsText = doctorDirectory.join('\n');
-      } else if (typeof doctorDirectory === 'string' && doctorDirectory.trim().length > 0) {
-        verifiedDoctorsText = doctorDirectory.trim();
-      }
-      const structuredGuide = HealthcareProcessAnswerPolicy.getMultiIntentFallbackResponse(
-        resolvedFactsForGuide,
-        !!doctorDirectory,
-        verifiedDoctorsText
-      );
-      intentGuide = `Multi-Intent: Hekim, Süreç ve Fiyat sorularını tek turda aldın. Bu soruları yanıtlamak için tam olarak şu şablon ve başlıkları kullanmalısın. Şablon dışına çıkma, kesinlikle fiyat uydurma ve hekim isimlerini doğrulanmış liste dışından uydurma:\n${structuredGuide}`;
+      const multiIntentGuidance = MultiIntentConsultantComposer.buildPromptGuidance(lastUserMessage || '');
+      intentGuide = `Intent: multi_intent_query\n${multiIntentGuidance || 'Hasta aynı turda birden fazla konuyu sordu. Tüm konuları tek doğal cevapta ele al.'}\nYAPMA: Hazır blok, numaralı liste veya mekanik "tek tek yanıtlayayım" kalıbı kullanma. Hastanın özellikle sorduğu başlıkları tekrar "hangi başlık" diye sorma.`;
     } else if (interpretedIntent === 'user_correction') {
       intentGuide = `Frustration/Correction: user_correction\nSon kullanıcı cevabı: "${lastUserMessage}"\nHasta/müşteri botu veya asistanı düzeltiyor ya da soruya cevap verdiğini söylüyor. Cevabını aldığını kibarca teyit et. Haklı olduğunu belirt, jenerik kaçış cümleleri kullanma, son cevabı/durumu teyit ederek süreci ilerlet.`;
     } else if (!arbitration.staleSlotSuppressed && pendingSlot && pendingSlot !== 'generic_none') {
