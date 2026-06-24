@@ -28,7 +28,14 @@ export function cleanString(val: string | null | undefined): string | undefined 
  */
 export function safeName(name: string | null | undefined, fallbackPhone?: string): string {
   const clean = cleanString(name);
-  if (clean) return clean;
+  if (clean) {
+    try {
+      const { isValidPatientName } = require('../utils/patient-name-resolver');
+      if (isValidPatientName(clean)) return clean;
+    } catch (_) {
+      return clean;
+    }
+  }
   if (fallbackPhone) {
     // Mask phone for display: 905321234506 → +90 *** 45 06
     const digits = fallbackPhone.replace(/\D/g, '');

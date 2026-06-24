@@ -65,6 +65,14 @@ function getInitials(name: string) {
   return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
 }
 
+function formatNoReplyBadge(hours?: number | null) {
+  if (hours === null || hours === undefined || Number.isNaN(hours)) return "Süre";
+  if (hours < 1 / 60) return "az önce";
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}dk`;
+  if (hours < 24) return `${Math.round(hours)}s`;
+  return `${Math.round(hours / 24)}g`;
+}
+
 interface InitialsAvatarProps {
   name: string;
   channel: string;
@@ -1502,7 +1510,7 @@ export function ContactRail() {
                         {/* No Reply / Follow up alerts */}
                         {c.is_no_reply_eligible && (
                           <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-50 text-[#FF3B30] border border-red-100 shadow-sm flex-shrink-0">
-                            Cevap Bekliyor · {c.no_reply_hours !== null && c.no_reply_hours !== undefined ? (c.no_reply_hours < 24 ? `${Math.round(c.no_reply_hours)}s` : `${Math.round(c.no_reply_hours / 24)}g`) : "Süre"}
+                            Cevap Bekliyor · {formatNoReplyBadge(c.no_reply_hours)}
                           </span>
                         )}
                         {c.active_task_type && (() => {

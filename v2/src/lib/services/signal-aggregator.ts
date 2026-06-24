@@ -187,7 +187,7 @@ export class SignalAggregator {
 
     // ── 4. Build sanitized content ──
     const name = safeName(input.patientName, input.phoneNumber);
-    const dept = cleanString(input.department) || 'Genel';
+    const dept = cleanString(input.department) || '';
     const callbackDt = cleanString(crmData.requested_callback_datetime) || null;
     const country = cleanString(input.country) || '';
     const taskTitle = this.buildTaskTitle(taskGroup, name);
@@ -314,7 +314,9 @@ export class SignalAggregator {
 
     // Primary action
     if (signals.includes('appointment_request')) {
-      parts.push(`${name}, ${dept} bölümü için randevu talep ediyor.`);
+      parts.push(dept
+        ? `${name}, ${dept} bölümü için randevu talep ediyor.`
+        : `${name}, bölüm bilgisi netleşmemiş randevu talep ediyor.`);
     } else if (signals.includes('callback_requested')) {
       if (callbackDt) {
         let timeStr = formatHumanDate(callbackDt);
@@ -339,7 +341,9 @@ export class SignalAggregator {
     } else if (signals.includes('human_escalation')) {
       parts.push(`${name} için insan müdahalesi gerekiyor.`);
     } else if (signals.includes('hot_lead')) {
-      parts.push(`${name}, ${dept} hakkında ciddi ilgi gösteriyor — sıcak fırsat.`);
+      parts.push(dept
+        ? `${name}, ${dept} hakkında ciddi ilgi gösteriyor — sıcak fırsat.`
+        : `${name}, sağlık talebi hakkında ciddi ilgi gösteriyor — sıcak fırsat.`);
     } else {
       parts.push(`${name} için koordinatör incelemesi gerekiyor.`);
     }

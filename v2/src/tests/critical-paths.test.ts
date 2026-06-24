@@ -7715,7 +7715,7 @@ test("P0.26: Identity Sync & Autopilot Defaults & Form Gate Tooltips", async () 
     };
 
     // 1. Verify checkNameValidity placeholders
-    const invalidNames = ["İsimsiz", "Unknown", "null", "undefined", "+90 (554) 683 33 06", "123456", "", "Telefonla"];
+    const invalidNames = ["İsimsiz", "Unknown", "null", "undefined", "+90 (554) 683 33 06", "123456", "", "Telefonla", "Bana", "Yardımcı"];
     for (const name of invalidNames) {
       assert(checkNameValidity(name).isValid === false, `Name "${name}" should be invalid`);
     }
@@ -7744,6 +7744,13 @@ test("P0.26: Identity Sync & Autopilot Defaults & Form Gate Tooltips", async () 
       metadata: {}
     });
     assert(resolvedName3.displayName !== "Telefonla", "Generic panel/contact label must not be used as patient name");
+
+    const resolvedName4 = resolvePatientNameDetailed({
+      convPatientName: "Bana",
+      phoneFallback: "+905535874260",
+      metadata: {}
+    });
+    assert(resolvedName4.displayName !== "Bana", "User-pronoun contact label must not be used as patient name");
 
     // 3. Verify resolvePatientCountryDetailed priority chain
     const resolvedCountry1 = resolvePatientCountryDetailed({
@@ -13507,6 +13514,30 @@ test("Başkent v81 T91: Country-only fallback does not immediately repeat Turkey
   } as any);
   assert(!/gelme ihtimaliniz|gelmeyi düşünüyor musunuz/i.test(result.text), `Fallback should not ask repetitive visit question, got: ${result.text}`);
   assert(/hangi konuda bilgi|hangi bilgiyi netleştirelim|nasıl yardımcı/i.test(result.text), `Fallback should keep conversation open with a topic question, got: ${result.text}`);
+});
+
+test("Başkent v81 T92: Inbox task summaries avoid invalid names and fake Genel department", async () => {
+  const { SignalAggregator } = await import("../lib/services/signal-aggregator");
+  const aggregator = new SignalAggregator();
+
+  const aggregated = aggregator.aggregate(
+    {
+      intent_type: "appointment_request",
+      opportunity_priority: "hot",
+    },
+    {
+      patientName: "Bana",
+      phoneNumber: "905535874260",
+      department: null,
+      country: "Türkiye",
+    }
+  );
+
+  assert(!!aggregated, "Aggregator should create an appointment follow-up task");
+  assert(!aggregated!.taskTitle.includes("Bana"), `Task title must not contain invalid patient name: ${aggregated!.taskTitle}`);
+  assert(!aggregated!.taskDescription.includes("Bana"), `Task description must not contain invalid patient name: ${aggregated!.taskDescription}`);
+  assert(!aggregated!.taskDescription.includes("Genel bölümü"), `Task description must not fake a Genel department: ${aggregated!.taskDescription}`);
+  assert(/bölüm bilgisi netleşmemiş/i.test(aggregated!.taskDescription), `Task description should show missing department honestly: ${aggregated!.taskDescription}`);
 });
 
 

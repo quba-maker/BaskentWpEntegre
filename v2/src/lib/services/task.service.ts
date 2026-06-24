@@ -157,7 +157,9 @@ const CRM_TASK_RULES: CrmTaskRule[] = [
     condition: (d) => d.intent_type === 'appointment_request',
     taskType: 'coordinator_review',
     title: (d) => `📅 Randevu Talebi — ${d.patient_name || 'Hasta'}`,
-    description: (d) => `${d.department || 'Genel'} bölümü için randevu talebi.`,
+    description: (d) => d.department
+      ? `${d.department} bölümü için randevu talebi.`
+      : `Bölüm bilgisi netleşmemiş randevu talebi.`,
     dueOffsetHours: 2,
   },
   {

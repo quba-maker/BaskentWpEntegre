@@ -27,17 +27,17 @@ export function AiRuntimeTimeline({ conversationId }: { conversationId: string }
         className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-mono transition-all bg-[--q-bg-primary] border border-[--q-border-default] text-[--q-text-secondary] hover:border-[--q-blue] hover:text-[--q-blue] shadow-sm cursor-pointer"
       >
         <Activity className="w-3.5 h-3.5" />
-        <span>⚡ AI Executed {traces.length} Tools</span>
+        <span>⚡ AI {traces.length} araç çalıştırdı</span>
         {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
       </button>
 
       {isExpanded && (
         <div className="w-full max-w-[85%] mt-3 bg-[--q-bg-primary] border border-[--q-border-default] rounded-xl overflow-hidden shadow-sm text-left font-mono text-[11px]">
           <div className="px-3 py-2 bg-[--q-bg-secondary] border-b border-[--q-border-default] flex justify-between items-center">
-            <span className="font-bold text-[--q-text-primary]">Runtime Execution Trace</span>
+            <span className="font-bold text-[--q-text-primary]">AI çalışma detayı</span>
             <span className="text-[--q-text-secondary] flex items-center gap-1">
               <Shield className="w-3 h-3" />
-              Observable
+              İzlenebilir
             </span>
           </div>
           
@@ -51,11 +51,11 @@ export function AiRuntimeTimeline({ conversationId }: { conversationId: string }
                   <span className="text-[--q-text-primary] font-bold">{trace.tool_name}</span>
                   {trace.validation_passed ? (
                     <span className="flex items-center gap-1 text-[--q-green] bg-[--q-green-bg] px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">
-                      <CheckCircle2 className="w-3 h-3" /> Passed
+                      <CheckCircle2 className="w-3 h-3" /> Geçti
                     </span>
                   ) : (
                     <span className="flex items-center gap-1 text-[--q-red] bg-[--q-red-bg] px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">
-                      <XCircle className="w-3 h-3" /> Failed
+                      <XCircle className="w-3 h-3" /> Hata
                     </span>
                   )}
                   {trace.execution_duration_ms && (

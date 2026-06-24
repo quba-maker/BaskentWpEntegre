@@ -61,6 +61,14 @@ function translateAiLabel(label?: string) {
   return aiLabelTranslation[key] || label;
 }
 
+function formatNoReplyElapsed(hours?: number | null) {
+  if (hours === null || hours === undefined || Number.isNaN(hours)) return "Süre Aşımı";
+  if (hours < 1 / 60) return "Az önce";
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} dk geçti`;
+  if (hours < 24) return `${Math.round(hours)} saat geçti`;
+  return `${Math.round(hours / 24)} gün geçti`;
+}
+
 // ==========================================
 // CONTEXT PANEL — Right-side CRM engine
 // Architecture: Contextual CRM engine (not display component)
@@ -1479,7 +1487,7 @@ export function ContextPanel() {
                   <span className="text-[8px] font-bold text-green-600 bg-green-50 border border-green-100 px-1.5 py-0.5 rounded-full">Gönderildi</span>
                 ) : (
                   <span className="text-[8px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded-full">
-                    {activeContact.noReplyFollowup?.no_reply_hours ? `${activeContact.noReplyFollowup.no_reply_hours}s geçti` : 'Süre Aşımı'}
+                    {formatNoReplyElapsed(activeContact.noReplyFollowup?.no_reply_hours)}
                   </span>
                 )}
               </div>
