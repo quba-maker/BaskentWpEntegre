@@ -4991,6 +4991,7 @@ test("P0.16 - 13f: Doctor profile question generic kaçışa düşmez", () => {
   const { DoctorNamesPolicy, isDoctorProfileQuestionText } = require("../lib/services/ai/doctor-names-policy");
   const { createTenantBrain } = require("../lib/brain/tenant-brain");
   const systemPrompt = `
+    --- VERIFIED BİLGİ ARŞİVİ ---
     Kadın Hastalıkları ve Doğum:
     - Doç. Dr. Mehmet Ufuk CERAN
   `;
@@ -13747,6 +13748,100 @@ test("Başkent v80 T98: prompt multi-intent guide does not demand rigid template
   assert(prompt.includes("Intent: multi_intent_query"), "Prompt should include multi-intent guide");
   assert(prompt.includes("hazır blok"), "Prompt should explicitly avoid hardcoded blocks");
   assert(!prompt.includes("Şablon dışına çıkma"), "Old rigid template instruction must not remain");
+});
+
+test("Başkent v81 T99: doctor directory never parses unsafe prompt instructions as doctors", () => {
+  const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v81-t99",
+    `--- SYSTEM PROMPT ---
+Hasta bel fıtığı doktorlarını sorarsa doğrulanmış listedeki ilgili isimleri paylaş:
+- Beyin ve Sinir Cerrahisi: Doç. Dr. Mustafa Kemal İLİK
+- Fizik Tedavi ve Rehabilitasyon: Öğr. Gör. Dr. Şenay KARTAL, Öğr. Gör. Dr. Ayşe Nur TEKİN`,
+    { industry: "healthcare" }
+  );
+  const doctors = DoctorDirectoryResolver.getDoctors(brain, "Fizik Tedavi ve Rehabilitasyon");
+  assert(doctors.length === 0, "Instruction text must not become doctor directory data");
+});
+
+test("Başkent v81 T100: doctor directory parses only explicit verified doctor blocks", () => {
+  const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v81-t100",
+    `--- SYSTEM PROMPT ---
+--- VERIFIED HEKİM LİSTESİ ---
+Fizik Tedavi ve Rehabilitasyon:
+- Öğr. Gör. Dr. Şenay KARTAL
+- Öğr. Gör. Dr. Ayşe Nur TEKİN
+--- DİĞER KURALLAR ---
+Hasta bel fıtığı sorarsa doğru bölüme yönlendir.`,
+    { industry: "healthcare" }
+  );
+  const doctors = DoctorDirectoryResolver.getDoctors(brain, "Fizik Tedavi ve Rehabilitasyon");
+  assert(doctors.length === 2, `Expected 2 doctors, got ${doctors.length}`);
+  assert(doctors.some((d: any) => d.name.includes("Şenay KARTAL")), JSON.stringify(doctors));
+  assert(doctors.some((d: any) => d.name.includes("Ayşe Nur TEKİN")), JSON.stringify(doctors));
+});
+
+test("Başkent v81 T101: prompt leak in final outbound is replaced with safe fertility form response", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const raw = `Fizik Tedavi ve Rehabilitasyon: Öğr. Gör. Dr. Şenay KARTAL, Öğr.
+
+Gör.
+
+Dr.
+
+Ayşe Nur TEKİN, Hasta bel fıtığı doktorlarınızı sorarsa doğrulanmış listedeki ilgili isimleri paylaş bölümümüzde görev yapmaktadır.`;
+  const inbound = `Merhaba! Formunuzu doldurdum ve işletmeniz hakkında daha fazla bilgi edinmek istiyorum.
+
+WhatsApp number: +998991244018
+Full name: Medine
+Phone number: +998991244018
+Hangi ülkede yaşıyorsunuz?: Özbeksitan
+Türkiye'ye (Konya'ya) tedavi için gelme planınız nedir?: Malesef Yurdışına çıkamam ve Konya'ya gelemem.
+Şikayetiniz Nedir?: 39 yaşindayim ikki çocuğum var tekrar anne olmak istiyorum`;
+  const result = FinalOutboundBodyAuditor.audit(raw, {
+    tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    conversationId: "v81-t101",
+    workerPath: "test",
+    channel: "whatsapp",
+    replyLanguage: "tr",
+    inboundText: inbound
+  });
+  assert(!/Hasta bel fıtığı doktorlarınızı sorarsa/i.test(result.text), result.text);
+  assert(!/Fizik Tedavi ve Rehabilitasyon/i.test(result.text), result.text);
+  assert(result.text.includes("Tekrar anne olmak istediğinizi belirtmişsiniz"), result.text);
+  assert(result.text.includes("Konya’ya gelemeyeceğinizi"), result.text);
+  assert(result.rewrote === true, "Prompt leak should be rewritten");
+});
+
+test("Başkent v81 T102: complaint keyword overrides unrelated campaign funnel for fertility forms", () => {
+  const { extractFormFields } = require("../lib/utils/form-field-extractor");
+  const extracted = extractFormFields({
+    campaign_name: "2026_ORTA ASYA_TR_KADİYOLOJİ_FUNNEL",
+    form_name: "TR-ORTADOĞU-KARDİYOLOJİ 2026 (v2)",
+    "Hangi ülkede yaşıyorsunuz?": "Özbeksitan",
+    "Şikayetiniz Nedir?": "39 yaşindayim ikki çocuğum var tekrar anne olmak istiyorum"
+  });
+  assert(extracted.department === "Tüp Bebek", JSON.stringify(extracted));
+  assert(extracted.departmentSource === "complaint_keyword", JSON.stringify(extracted));
+  assert(extracted.country === "Özbekistan", JSON.stringify(extracted));
+});
+
+test("Başkent v81 T103: orchestrator disables doctor lookup gates for structured form payloads", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const code = fs.readFileSync(path.join(process.cwd(), "src/lib/services/ai/ai-response-orchestrator.ts"), "utf8");
+  assert(code.includes("isStructuredFormPayload"), "Structured form payload guard must exist");
+  assert(code.includes("const isDoctorLookup = !isStructuredFormPayload"), "Doctor lookup must ignore structured form payloads");
+  assert(code.includes("const isMultiIntentQuery = !isStructuredFormPayload"), "Multi-intent shortcut must ignore structured form payloads");
+  assert(code.includes("const isDoctorNamesRequest = !isStructuredFormPayload"), "Doctor name request must ignore structured form payloads");
 });
 
 

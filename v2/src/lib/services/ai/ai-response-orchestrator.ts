@@ -1631,6 +1631,7 @@ export class AIResponseOrchestrator {
       const isAiAccusation = ['yapay zeka', 'yapayzeka', 'gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model'].some(kw => cleanInbound.includes(kw));
       const isPromptChallenge = ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => cleanInbound.includes(kw));
       const isAngryPromptChallenge = isPromptChallenge && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => cleanInbound.includes(kw));
+      const isStructuredFormPayload = /(?:Full\s+name|Phone\s+number|WhatsApp\s+number|Şikayetiniz\s+Nedir|Sikayetiniz\s+Nedir|Hangi\s+[üu]lkede\s+ya[şs][ıi]yorsunuz|Date\s+of\s+birth|Türkiye'ye\s*\(Konya'ya\)\s+tedavi)/i.test(inboundText);
 
       // Resolve doctor directory — use resolvedActiveDepartment from full priority chain
       const doctorsList = DoctorDirectoryResolver.getDoctors(brain, resolvedActiveDepartment || undefined);
@@ -1638,7 +1639,7 @@ export class AIResponseOrchestrator {
       const hasDoctorDirectory = doctorsList.length > 0;
 
       // Doctor lookup check
-      const isDoctorLookup = ['doktor', 'hekim', 'uzman', 'cerrah', 'hoca'].some(kw => cleanInbound.includes(kw));
+      const isDoctorLookup = !isStructuredFormPayload && ['doktor', 'hekim', 'uzman', 'cerrah', 'hoca'].some(kw => cleanInbound.includes(kw));
       const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
 
       // P0.16-I: Mixed intent detection — doctor_lookup + process_question in same burst
@@ -1653,16 +1654,16 @@ export class AIResponseOrchestrator {
       // 'ne zaman' was also removed from router keywords to prevent misrouting.
 
       // P0.16-K: Multi-intent detection (address+price+doctor+process in one message)
-      const isMultiIntentQuery = MultiIntentConsultantComposer.isMultiIntent(inboundText);
+      const isMultiIntentQuery = !isStructuredFormPayload && MultiIntentConsultantComposer.isMultiIntent(inboundText);
 
       // P0.16-K: Doctor names request detection (with repeat check)
       const hasPreviousDoctorAsk = history.some(m =>
         m.role === 'user' &&
         isDoctorNameRequestText(String(m.content || ''), false)
       );
-      const isDoctorNamesRequest = isDoctorNameRequestText(inboundText, hasPreviousDoctorAsk);
+      const isDoctorNamesRequest = !isStructuredFormPayload && isDoctorNameRequestText(inboundText, hasPreviousDoctorAsk);
       const doctorsForProfileQuestion = doctorsList.length > 0 ? doctorsList : DoctorDirectoryResolver.getDoctors(brain);
-      const isDoctorProfileQuestion = isDoctorProfileQuestionText(inboundText, doctorsForProfileQuestion);
+      const isDoctorProfileQuestion = !isStructuredFormPayload && isDoctorProfileQuestionText(inboundText, doctorsForProfileQuestion);
 
       // P0.16-K: "başka bilgi" / open-ended continuation — kept for LLM hint injection only, NOT for bypass
       // P0.16-K: match both Turkish ş and ASCII s for real WhatsApp messages

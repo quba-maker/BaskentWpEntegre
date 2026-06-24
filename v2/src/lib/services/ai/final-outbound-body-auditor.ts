@@ -61,6 +61,15 @@ const KNOWN_BAD_MORPHOLOGY_PATTERNS: RegExp[] = [
   /form\s+başvurunuz\s+bize\s+ulaştı\.,/i,
 ];
 
+const PROMPT_LEAK_PATTERNS: RegExp[] = [
+  /\bHasta\s+[^.\n]{0,140}\s+sorarsa\b/i,
+  /\bdo[ğg]rulanm[ıi][şs]\s+listedeki\b/i,
+  /\b(?:sistem\s+prompt|system\s+prompt|prompt\s+challenge)\b/i,
+  /\bIntent:\s*[a-z_]+\b/i,
+  /\b(?:Kullan[ıi]m\s+kural[ıi]|YASAK|TAL[İI]MAT|D[İI]REKT[İI]F)\b/i,
+  /^-{3,}\s*(?:SYSTEM|PROMPT|RULE|KURAL|B[İI]LG[İI]|VERIFIED)[^-\n]*-{3,}/im,
+];
+
 // Legacy close phrases that signal the conversation was terminated incorrectly
 const LEGACY_CLOSE_PATTERNS: RegExp[] = [
   /rica\s+ederiz[,\s]+(?:iyi\s+g[üu]nler|g[üu]le\s+g[üu]le)/i,
@@ -154,6 +163,62 @@ function buildArrivalDateConfirmation(inboundText?: string, replyLanguage = 'tr'
   } else {
     return `Anladım, ${dateStr} gelme düşüncenizi not aldım. Başka bir sorunuz var mı, ya da detayları netleştirmek için hasta danışmanımızla bir telefon görüşmesi planlamak ister misiniz?`;
   }
+}
+
+function isStructuredFormPayload(text?: string): boolean {
+  if (!text) return false;
+  return /(?:Full\s+name|Phone\s+number|WhatsApp\s+number|Şikayetiniz\s+Nedir|Sikayetiniz\s+Nedir|Hangi\s+[üu]lkede\s+ya[şs][ıi]yorsunuz|Date\s+of\s+birth|Türkiye'ye\s*\(Konya'ya\)\s+tedavi)/i.test(text);
+}
+
+function extractPayloadField(text: string | undefined, labels: string[]): string | null {
+  if (!text) return null;
+  const escapedLabels = labels.map(label => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const pattern = new RegExp(`(?:^|\\n)\\s*(?:${escapedLabels})\\s*:\\s*([^\\n]+)`, 'i');
+  const match = text.match(pattern);
+  return match?.[1]?.trim() || null;
+}
+
+function hasFertilityComplaint(text: string | null): boolean {
+  if (!text) return false;
+  return /(?:tekrar\s+anne|anne\s+olmak|çocuk\s+sahibi|cocuk\s+sahibi|bebek\s+sahibi|gebelik|hamile|t[üu]p\s+bebek|ivf|infertilite|k[ıi]s[ıi]rl[ıi]k)/i.test(text);
+}
+
+function hasCannotTravelSignal(text?: string): boolean {
+  if (!text) return false;
+  return /(?:yurt\s*d[ıi][şs][ıi]na\s+[çc][ıi]kamam|konya'?ya\s+gelemem|t[üu]rkiye'?ye\s+gelemem|gelemem|[çc][ıi]kamam)/i.test(text);
+}
+
+function containsPromptLeak(text: string): boolean {
+  return PROMPT_LEAK_PATTERNS.some(pattern => pattern.test(text));
+}
+
+function buildPromptLeakRecovery(ctx: FinalOutboundAuditCtx): string {
+  const inbound = ctx.inboundText || '';
+  const complaint = extractPayloadField(inbound, ['Şikayetiniz Nedir?', 'Sikayetiniz Nedir?', 'Complaint']);
+  const structuredForm = isStructuredFormPayload(inbound);
+  const cannotTravel = hasCannotTravelSignal(inbound);
+
+  if (structuredForm && hasFertilityComplaint(complaint || inbound)) {
+    const travelLine = cannotTravel
+      ? 'Formunuzda şu an Konya’ya gelemeyeceğinizi belirtmişsiniz.'
+      : 'Geliş planınız netleştiğinde süreci buna göre birlikte planlayabiliriz.';
+
+    return [
+      'Merhaba,',
+      'Başkent Üniversitesi Konya Hastanesi’nden form başvurunuz bize ulaştı.',
+      'Tekrar anne olmak istediğinizi belirtmişsiniz. Gebelik planlaması ve çocuk sahibi olma sürecinde yaş, gebelik geçmişi ve genel sağlık durumu birlikte değerlendirilir. Bu nedenle doğru yönlendirme için Kadın Hastalıkları ve Doğum / Tüp Bebek alanında değerlendirme gerekir.',
+      `${travelLine} Önce buradan merak ettiğiniz konuyu yanıtlayabilirim; süreç, uygun bölüm veya görüşme planı hakkında hangi bilgiyi netleştirelim?`,
+    ].join('\n\n');
+  }
+
+  if (structuredForm) {
+    return [
+      'Merhaba,',
+      'Form başvurunuz bize ulaştı. Sağlık talebinizi doğru değerlendirebilmem için bu aşamada merak ettiğiniz ana konuyu buradan yazabilir misiniz?',
+    ].join('\n\n');
+  }
+
+  return 'Mesajınızı aldım. Bu konuda doğru bilgiyle yardımcı olayım; hangi başlığı netleştirelim?';
 }
 
 function isShortGreetingInbound(inboundText?: string): boolean {
@@ -499,6 +564,16 @@ export class FinalOutboundBodyAuditor {
       if (staleYear.rewrote) {
         result = staleYear.text;
         rewrote = true;
+      }
+
+      if (containsPromptLeak(result)) {
+        result = buildPromptLeakRecovery(ctx);
+        rewrote = true;
+        if (!formatterApplied && (!ctx.channel || ctx.channel === 'whatsapp')) {
+          const fmtResult = WhatsAppFormattingFinalizer.format(result);
+          result = fmtResult.text;
+          formatterApplied = formatterApplied || fmtResult.wasModified;
+        }
       }
     } catch (err) {
       // Non-fatal — use original text

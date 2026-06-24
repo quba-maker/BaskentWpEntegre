@@ -57,6 +57,7 @@ const DEPARTMENT_MAP: Record<string, string> = {
 
 // Deterministic Turkish keyword mapping for complaint texts in the form
 const COMPLAINT_KEYWORD_MAP: { keywords: string[]; department: string; confidence: number }[] = [
+  { keywords: ['tekrar anne', 'anne olmak', 'çocuk sahibi', 'cocuk sahibi', 'bebek sahibi', 'gebelik', 'hamile', 'tüp bebek', 'tup bebek', 'ivf', 'infertilite', 'kısırlık', 'kisirlik'], department: 'Tüp Bebek', confidence: 1.0 },
   { keywords: ['çarpıntı', 'kalp', 'kalp doktoru', 'ritim', 'kalp krizi', 'bypass', 'kardiyoloji'], department: 'Kardiyoloji', confidence: 1.0 },
   { keywords: ['diz', 'diz ağrısı', 'menisküs', 'eklem', 'kireçlenme', 'dizim ağrıyor', 'kalça protezi', 'diz protezi', 'kırık', 'kalça', 'protez', 'omuz', 'bağ yaralanması'], department: 'Ortopedi', confidence: 1.0 },
   { keywords: ['bel ağrısı', 'boyun fıtığı', 'fıtık', 'siyatik', 'bel fıtığı', 'bel', 'omurga', 'omurilik', 'boyun ağrısı', 'sinir sıkışması', 'nöroşirürji'], department: 'Beyin Cerrahi', confidence: 1.0 },
@@ -71,7 +72,7 @@ const COUNTRY_VALUE_MAP: Array<{ label: string; aliases: string[] }> = [
   { label: 'Türkiye', aliases: ['türkiye', 'turkiye', 'turkiyede', 'türkiyede'] },
   { label: 'Almanya', aliases: ['almanya', 'almanyada', 'almanyadayım', 'almanyadayim', 'germany', 'deutschland'] },
   { label: 'Kazakistan', aliases: ['kazakistan', 'kazakistandan', 'kazakhstan'] },
-  { label: 'Özbekistan', aliases: ['özbekistan', 'ozbekistan', "o'zbekiston", 'uzbekistan'] },
+  { label: 'Özbekistan', aliases: ['özbekistan', 'ozbekistan', 'özbeksitan', 'ozbeksitan', "o'zbekiston", 'uzbekistan'] },
   { label: 'Hollanda', aliases: ['hollanda', 'netherlands'] },
   { label: 'Fransa', aliases: ['fransa', 'france'] },
   { label: 'Belçika', aliases: ['belçika', 'belcika', 'belgium'] },
@@ -248,8 +249,9 @@ export function extractFormFields(rawData: any): FormExtraction {
     }
   }
 
-  // 3. Fallback to parsing complaint keyword if department is still unresolved
-  if (!result.department && rawComplaint) {
+  // 3. Parse complaint keyword. A strong complaint signal can override a broad
+  // marketing/campaign funnel name, because campaign names may be reused.
+  if (rawComplaint) {
     const compLower = rawComplaint.toLowerCase();
     let bestMatch: { department: string; confidence: number } | null = null;
 
@@ -263,7 +265,14 @@ export function extractFormFields(rawData: any): FormExtraction {
       }
     }
 
-    if (bestMatch) {
+    const canOverrideCampaign =
+      !!result.department &&
+      (result.departmentSource === 'campaign_name' || result.departmentSource === 'form_name') &&
+      bestMatch &&
+      bestMatch.department !== result.department &&
+      bestMatch.confidence >= result.confidence;
+
+    if (bestMatch && (!result.department || canOverrideCampaign)) {
       result.department = bestMatch.department;
       result.departmentSource = 'complaint_keyword';
       result.confidence = bestMatch.confidence;

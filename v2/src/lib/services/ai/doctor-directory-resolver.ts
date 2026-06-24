@@ -7,13 +7,85 @@ export interface Doctor {
 
 export class DoctorDirectoryResolver {
   private static readonly DOCTOR_LINE_PATTERN = /\b(?:prof\.?|doç\.?|doc\.?|op\.?|uzm\.?|dr\.?|dt\.?|öğr\.?\s*gör\.?)\b/i;
+  private static readonly EXPLICIT_DIRECTORY_HEADING_PATTERN =
+    /(?:(?:verified|dogrulanmis|guncel)\s+(?:hekim|doktor|bilgi)\s+(?:listesi|kadrosu|arsivi|directory)|(?:hekim|doktor)\s+(?:listesi|kadrosu|arsivi|directory))/i;
+  private static readonly UNSAFE_INSTRUCTION_HEADING_PATTERN =
+    /\b(?:hasta|sorarsa|kural|talimat|yasak|kullan|cevap|[öo]rnek|payla[şs]|listele)\b/i;
 
   private static stripBullet(line: string): string {
     return line.replace(/^[*\-•]\s*/, '').trim();
   }
 
+  private static normalizeSearchText(text: string): string {
+    return text
+      .replace(/İ/g, 'I')
+      .replace(/ı/g, 'i')
+      .replace(/Ş/g, 'S')
+      .replace(/ş/g, 's')
+      .replace(/Ğ/g, 'G')
+      .replace(/ğ/g, 'g')
+      .replace(/Ü/g, 'U')
+      .replace(/ü/g, 'u')
+      .replace(/Ö/g, 'O')
+      .replace(/ö/g, 'o')
+      .replace(/Ç/g, 'C')
+      .replace(/ç/g, 'c')
+      .toLowerCase();
+  }
+
   private static isDoctorLine(line: string): boolean {
     return this.DOCTOR_LINE_PATTERN.test(line);
+  }
+
+  private static splitInlineDoctorList(text: string): string[] {
+    return text
+      .split(/,\s*(?=(?:prof\.?|doç\.?|doc\.?|op\.?|uzm\.?|dr\.?|dt\.?|öğr\.?\s*gör\.?))/i)
+      .map(part => part.trim())
+      .filter(Boolean);
+  }
+
+  private static isUnsafeInstructionHeading(line: string): boolean {
+    return this.UNSAFE_INSTRUCTION_HEADING_PATTERN.test(this.normalizeSearchText(line));
+  }
+
+  private static extractExplicitDoctorDirectoryBlocks(source: string): string[] {
+    const lines = source.split('\n');
+    const blocks: string[] = [];
+    let collecting = false;
+    let current: string[] = [];
+
+    const flush = () => {
+      if (current.length > 0) {
+        blocks.push(current.join('\n'));
+        current = [];
+      }
+    };
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      const normalizedLine = this.normalizeSearchText(line);
+      const isDirectoryHeading = this.EXPLICIT_DIRECTORY_HEADING_PATTERN.test(normalizedLine);
+      const isMajorSection = /^-{3,}.*-{3,}$/.test(line) || /^={3,}/.test(line) || /^#{1,6}\s+/.test(line);
+
+      if (isDirectoryHeading) {
+        if (collecting) flush();
+        collecting = true;
+        continue;
+      }
+
+      if (collecting && isMajorSection && !isDirectoryHeading) {
+        flush();
+        collecting = false;
+        continue;
+      }
+
+      if (collecting) {
+        current.push(rawLine);
+      }
+    }
+
+    if (collecting) flush();
+    return blocks;
   }
 
   private static extractDoctorEntries(source: string): string[] {
@@ -26,8 +98,20 @@ export class DoctorDirectoryResolver {
       const isBullet = /^[*\-•]\s*/.test(line);
       const isHeading = /:$/.test(line) && !this.isDoctorLine(line);
 
+      const colonIndex = withoutBullet.indexOf(':');
+      if (colonIndex > 0 && this.isDoctorLine(withoutBullet.slice(colonIndex + 1))) {
+        const department = withoutBullet.slice(0, colonIndex).trim();
+        if (!this.isUnsafeInstructionHeading(department)) {
+          for (const doctor of this.splitInlineDoctorList(withoutBullet.slice(colonIndex + 1))) {
+            entries.push(`${doctor} - ${department}`);
+          }
+        }
+        continue;
+      }
+
       if (isHeading) {
-        currentDepartment = line.replace(/:$/, '').trim();
+        const heading = line.replace(/:$/, '').trim();
+        currentDepartment = this.isUnsafeInstructionHeading(heading) ? null : heading;
         continue;
       }
 
@@ -67,18 +151,13 @@ export class DoctorDirectoryResolver {
       }
     }
 
-    // Fallback: Parse from system prompt and knowledge base if DB config is empty.
-    // In the UI, tenants often keep the full verified doctor archive in
-    // "Bilgi Bankası / Kurallar" instead of the main system prompt.
+    // Fallback: parse only explicit verified doctor-directory blocks.
+    // Never parse the whole prompt/rules text as a doctor directory; tenant prompts
+    // often contain instructions such as "Hasta X sorarsa..." and those must not
+    // become patient-facing doctor data.
     if (rawList.length === 0 && brain.prompts?.systemPrompt) {
-      const promptText = brain.prompts.systemPrompt;
-      const verifiedListIndex = promptText.indexOf('Verified Hekim Listesi:');
-      if (verifiedListIndex !== -1) {
-        const block = promptText.substring(verifiedListIndex + 'Verified Hekim Listesi:'.length);
-        rawList = this.extractDoctorEntries(block);
-      } else {
-        rawList = this.extractDoctorEntries(promptText);
-      }
+      rawList = this.extractExplicitDoctorDirectoryBlocks(brain.prompts.systemPrompt)
+        .flatMap(block => this.extractDoctorEntries(block));
     }
 
     if (rawList.length === 0) {
@@ -92,7 +171,12 @@ export class DoctorDirectoryResolver {
       ].filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
 
       for (const source of knowledgeSources) {
-        rawList.push(...this.extractDoctorEntries(source));
+        const explicitBlocks = this.extractExplicitDoctorDirectoryBlocks(source);
+        if (explicitBlocks.length > 0) {
+          rawList.push(...explicitBlocks.flatMap(block => this.extractDoctorEntries(block)));
+        } else {
+          rawList.push(...this.extractDoctorEntries(source));
+        }
       }
     }
 
