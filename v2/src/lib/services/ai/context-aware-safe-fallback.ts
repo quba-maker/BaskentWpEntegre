@@ -1180,6 +1180,29 @@ export class ContextAwareSafeFallbackResolver {
       }
     }
 
+    if (detectedIntent === 'callback_confirmation' || detectedIntent === 'schedule_confirmation') {
+      let text = '';
+      if (lang === 'tr') {
+        text = "Anladım. Hangi gün ve saat için konuşmuştuk?";
+      } else if (lang === 'de') {
+        text = "Verstanden. Für welchen Tag und welche Uhrzeit hatten wir gesprochen?";
+      } else if (lang === 'nl') {
+        text = "Begrepen. Over welke dag en welk tijdstip hadden we het?";
+      } else if (lang === 'ar') {
+        text = "فهمت. عن أي يوم ووقت كنا نتحدث؟";
+      } else {
+        text = "Understood. Which day and time were we discussing?";
+      }
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint,
+        finalPath: `intent_callback_confirmation_fallback_${lang}`,
+        detectedIntent
+      };
+    }
+
     // Priority 4: General Intent Fallbacks
     if (detectedIntent === 'call_scheduling_request') {
       const factsText = Array.isArray(unifiedContext?.patient_known_facts) ? unifiedContext.patient_known_facts.join(' ').toLowerCase() : '';
@@ -1445,6 +1468,7 @@ export class ContextAwareSafeFallbackResolver {
     ];
     return keywords.some(kw => lower.includes(kw));
   }
+
 }
 
 export function buildRecallFactsSummary(history: any[]): string {

@@ -130,7 +130,12 @@ export class PendingQuestionResolver {
         'belirleyebilir miyiz',
         'degistirelim mi',
         'aransin mi',
-        'goruselim mi'
+        'goruselim mi',
+        'passt es',
+        'bestatigen',
+        'wilt u',
+        'confirm',
+        'correct?'
       ];
       if (confirmationKeywords.some(kw => clean.includes(kw))) {
         return 'confirmation_yes_no';

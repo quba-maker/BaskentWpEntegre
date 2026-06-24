@@ -168,7 +168,7 @@ export class ConversationStateArbitrator {
     };
 
     const lowerUser = (lastUserMessage || '').toLowerCase().trim();
-    const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'arayın', 'arayin', 'ararlar'];
+    const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'arayın', 'arayin', 'ararlar', 'ja', 'confirmed', 'approved', 'نعم', 'موافق'];
     const isAffirmative = affirmatives.some(kw => lowerUser === kw || lowerUser.startsWith(kw + ' ') || lowerUser.endsWith(' ' + kw) || lowerUser.includes(' ' + kw + ' '));
 
     // P0.28: arrival_date_answer check

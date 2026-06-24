@@ -82,13 +82,19 @@ export class ShortAnswerInterpreter {
     }
 
     // 6. Affirmative (Yes)
-    const affirmativeKeywords = ['olur', 'tamam', 'evet', 'tabi', 'tabiki', 'uygun', 'ok', 'peki', 'kabul', 'onayliyorum', 'dogrudur', 'himm olur', 'he olur'];
+    const affirmativeKeywords = [
+      'olur', 'tamam', 'evet', 'tabi', 'tabiki', 'uygun', 'ok', 'peki', 'kabul', 'onayliyorum', 'dogrudur', 'himm olur', 'he olur',
+      'ja', 'yes', 'okay', 'yep', 'confirmed', 'نعم', 'موافق', 'akkoord'
+    ];
     if (affirmativeKeywords.includes(clean) || (words.length <= 2 && affirmativeKeywords.some(kw => clean.includes(kw)))) {
       return 'affirmative_answer';
     }
 
     // 7. Negative (No)
-    const negativeKeywords = ['hayir', 'olmaz', 'kalsin', 'istemiyorum', 'hayır', 'istemem'];
+    const negativeKeywords = [
+      'hayir', 'olmaz', 'kalsin', 'istemiyorum', 'hayır', 'istemem',
+      'nein', 'no', 'nee', 'لا', 'neyn'
+    ];
     if (negativeKeywords.includes(clean) || (words.length <= 2 && negativeKeywords.some(kw => clean.includes(kw)))) {
       return 'negative_answer';
     }

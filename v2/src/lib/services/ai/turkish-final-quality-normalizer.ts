@@ -272,6 +272,25 @@ const REWRITE_RULES: RewriteRule[] = [
     pattern: /\btahminizi\s+maliyet\b/gi,
     replacement: 'tahmini maliyet',
   },
+  {
+    id: 'bugunuz_standalone_fix',
+    pattern: /(^|\s)([bB]ug[üu]n[üu]z)(?=\s|[.,;:!?]|$)/gi,
+    replacement: (_match, prefix, word) => {
+      const isCapitalized = word.charAt(0) === 'B';
+      const replacementWord = isCapitalized ? 'Bugün' : 'bugün';
+      return prefix + replacementWord;
+    },
+  },
+  {
+    id: 'istebil_morphology_fix',
+    pattern: /(^|\s)([iıİI]stebil[eıioöuüa-z]*)(?=\s|[.,;:!?]|$)/gi,
+    replacement: (_match, prefix, word) => {
+      const isCapitalized = word.startsWith('İ') || word.startsWith('I');
+      const suffix = word.slice(7);
+      const base = isCapitalized ? 'İsteyebil' : 'isteyebil';
+      return prefix + base + suffix;
+    }
+  },
 ];
 
 // ─── Normalizer ───────────────────────────────────────────────────────────────

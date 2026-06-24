@@ -411,7 +411,14 @@ export class AIResponseOrchestrator {
           }
         }
 
-        return { isSuccess: true, status: 'success' };
+        return {
+          isSuccess: true,
+          status: 'success',
+          requestedTime: parsedSugg?.suggested_time || undefined,
+          requestedTimeEnd: parsedSugg?.suggested_time_end || undefined,
+          requestedDate: parsedSugg?.suggested_date || undefined,
+          timezoneBasis: timezoneBasisToUse
+        };
       }
 
       return buildCallbackState('failed', 'missing_fields');
@@ -1431,7 +1438,6 @@ export class AIResponseOrchestrator {
 
       let callbackResult: any = null;
       let shouldBypassCallbackTimeAnswer = false;
-      let shouldBypassCallbackConfirmation = false;
 
       if (effectiveIsCallbackTimeAnswer && shouldProcessCallbackTimeAnswer) {
         const { parseDeterministicSuggestion } = require('../../utils/date-parser');
@@ -1471,8 +1477,15 @@ export class AIResponseOrchestrator {
         if (lastOffer && lastOffer.proposed_due_at) {
           const dt = new Date(lastOffer.proposed_due_at);
           if (!isNaN(dt.getTime())) {
+            const country = unifiedContext?.opportunity?.country || convMeta?.patient_country || null;
+            const { resolvePatientTimezone } = require('../../utils/timezone');
+            const tzRes = resolvePatientTimezone(country);
+            const targetTz = (lastOffer.timezone === 'patient_local_time' && tzRes.timezone)
+              ? tzRes.timezone
+              : 'Europe/Istanbul';
+
             const formatter = new Intl.DateTimeFormat('en-US', {
-              timeZone: 'Europe/Istanbul',
+              timeZone: targetTz,
               year: 'numeric', month: '2-digit', day: '2-digit',
               hour: '2-digit', minute: '2-digit',
               hour12: false
@@ -1539,7 +1552,6 @@ export class AIResponseOrchestrator {
           });
           
           unifiedContext.callbackResult = callbackResult;
-          shouldBypassCallbackConfirmation = callbackResult.isSuccess;
         }
       } else if (isArrivalDateAnswer) {
         const ambiguity = DateAnswerResolver.isAmbiguousNumericDateReply(inboundText);
