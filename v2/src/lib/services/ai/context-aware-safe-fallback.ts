@@ -394,7 +394,7 @@ export class ContextAwareSafeFallbackResolver {
     if (isHealthcare && countryOnlyAnswer && lastAskedCountryOrTimezone) {
       let text = lastAskedTimezone
         ? `${countryOnlyAnswer}’da olduğunuzu not ediyorum. Arama için ${countryOnlyAnswer} saati mi, Türkiye saati mi esas alınsın?`
-        : `${countryOnlyAnswer}’da olduğunuzu not ediyorum. Türkiye’ye/Konya’ya gelme ihtimaliniz olur mu?`;
+        : `${countryOnlyAnswer}’da olduğunuzu not ediyorum. Sağlık talebinizle ilgili hangi bilgiyi netleştirelim?`;
       const languageOffer = ContextAwareSafeFallbackResolver.shouldOfferLanguagePreference(countryOnlyAnswer, inboundText, history)
         ? ContextAwareSafeFallbackResolver.languagePreferenceOffer(countryOnlyAnswer)
         : null;
@@ -593,7 +593,7 @@ export class ContextAwareSafeFallbackResolver {
         } else if (turkeyVisitIntent === 'turkey_visit_intent_negative' || turkeyVisitIntent === 'turkey_visit_intent_uncertain') {
           text = `Merhaba, tekrar hoş geldiniz. Bu durumda sizi randevuya yönlendirmeyeyim. Merak ettiğiniz konular olursa buradan bilgi vermeye devam edebilirim.`;
         } else {
-          text = `Merhaba, tekrar hoş geldiniz. ${deptPhraseTr} planlamanızla ilgili buradan devam edebiliriz. Öncelikle Türkiye’ye gelmeyi düşünüyor musunuz, yoksa şu aşamada sadece bilgi almak mı istiyorsunuz? 🙏`;
+          text = `Merhaba, tekrar hoş geldiniz. ${deptPhraseTr} planlamanızla ilgili buradan devam edebiliriz. Bu konuda hangi bilgiyi netleştirmek istersiniz?`;
         }
 
         return {
@@ -1393,7 +1393,7 @@ export class ContextAwareSafeFallbackResolver {
     if (detectedIntent === 'callback_time_answer' || detectedIntent === 'time_availability') {
       if (turkeyVisitIntent === 'turkey_visit_intent_unknown') {
         return {
-          text: "Paylaştığınız saati not aldım. Arama planlamasına geçmeden önce Türkiye’ye gelmeyi düşünüyor musunuz, yoksa şu aşamada sadece bilgi almak mı istiyorsunuz?",
+          text: "Paylaştığınız saati not aldım. Arama planlamasına geçmeden önce bu görüşmeyi hangi konu için istediğinizi kısaca netleştirir misiniz?",
           sector: resolvedIndustry,
           hasFormContext,
           hasComplaint,

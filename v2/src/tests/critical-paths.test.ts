@@ -13467,6 +13467,48 @@ test("Başkent v81 T89: ConversationStateArbitrator confirmation_yes_no handles 
   assert(resultArabic.effectiveIntent === "callback_confirmation", `Expected callback_confirmation for نعم, got: ${resultArabic.effectiveIntent}`);
 });
 
+test("Başkent v81 T90: PromptBuilder prevents repetitive Turkey visit question on info/doctor/address turns", async () => {
+  const { PromptBuilder } = await import("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain("t1", "whatsapp", "payload1", "--- SYSTEM PROMPT ---", {
+    industry: "healthcare"
+  });
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    conversation: { patient_name: "Telefonla" },
+    turkeyVisitIntent: "turkey_visit_intent_unknown",
+    currentMessageText: "Dermatoloji doktorunun ismini öğrenmek istiyorum"
+  } as any);
+  assert(prompt.includes("GELİŞ NİYETİ SORUSU"), "Prompt should include visit-intent repetition guard");
+  assert(prompt.includes("Hasta bilgi, fiyat, doktor adı, adres, bölüm, süreç veya güven sorusu soruyorsa önce o soruyu cevapla"), "Prompt should prioritize current user question over visit CTA");
+});
+
+test("Başkent v81 T91: Country-only fallback does not immediately repeat Turkey visit question", async () => {
+  const { ContextAwareSafeFallbackResolver } = await import("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain("t1", "whatsapp", "payload1", "--- SYSTEM PROMPT ---", {
+    industry: "healthcare"
+  });
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "Almanya",
+    brain,
+    identityConfig: { personaName: "Rüya", organizationName: "Başkent Üniversitesi Konya Hastanesi" },
+    unifiedContext: {
+      conversation: {},
+      opportunity: {},
+      latestForm: null,
+      profile: {},
+      patient_known_facts: []
+    },
+    history: [
+      { role: "assistant", content: "Hangi ülkede yaşıyorsunuz?" }
+    ],
+    replyLanguage: "tr",
+    turkeyVisitIntent: "turkey_visit_intent_unknown"
+  } as any);
+  assert(!/gelme ihtimaliniz|gelmeyi düşünüyor musunuz/i.test(result.text), `Fallback should not ask repetitive visit question, got: ${result.text}`);
+  assert(/hangi konuda bilgi|hangi bilgiyi netleştirelim|nasıl yardımcı/i.test(result.text), `Fallback should keep conversation open with a topic question, got: ${result.text}`);
+});
+
 
 async function runAllTests() {
   try {

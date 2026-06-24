@@ -329,6 +329,7 @@ export class PromptBuilder {
       if (visitIntent === 'turkey_visit_intent_uncertain') visitIntentDesc = 'Belirsiz / Henüz net değil, kararsız veya plan yapmamış';
       
       crmContext += `- Türkiye Geliş/Ziyaret Planı Durumu: ${visitIntentDesc}\n`;
+      crmContext += `>> KURAL (GELİŞ NİYETİ SORUSU): "Türkiye'ye/Konya'ya gelme ihtimaliniz olur mu?" sorusu tek seferlik ve bağlama bağlıdır. Hasta bilgi, fiyat, doktor adı, adres, bölüm, süreç veya güven sorusu soruyorsa önce o soruyu cevapla; cevabın sonuna mekanik şekilde geliş niyeti sorusu ekleme. Geliş niyeti zaten olumlu/olumsuz/belirsiz olarak anlaşıldıysa aynı soruyu tekrar sorma. Cevabı sessiz bırakma; ama kapanışı konuya uygun tek doğal soruyla yap (örn. "Bu konuda özellikle hangi bilgiyi netleştirmek istersiniz?", "Dermatoloji için doktor isimlerini de paylaşmamı ister misiniz?", "Süreçte en çok hangi nokta kafanıza takılıyor?").\n`;
       if (visitIntent === 'turkey_visit_intent_negative' || visitIntent === 'turkey_visit_intent_uncertain') {
         crmContext += `>> KURAL (GELİŞ PLANINA SAYGI): Hastanın Türkiye'ye geliş veya Konya ziyareti planı net değilse (veya belirsiz/olumsuz ise), kesinlikle tekrar "Türkiye'ye gelmeyi düşünüyor musunuz?", "Konya'ya gelecek misiniz?", "Geliş ihtimaliniz var mı?" gibi soruları sorma! Kararsızlığını kabul et, proaktif olarak randevu veya arama teklif etme, sadece sorduğu bilgi sorularına yazılı cevap ver.\n`;
       }
@@ -1174,7 +1175,7 @@ YAPMA:
 2. Telefon görüşmesini doğrudan dayatma, seçenek/öneri olarak sun (örn: "Başka bir sorunuz var mı, ya da detayları netleştirmek için hasta danışmanımızla bir telefon görüşmesi planlamak ister misiniz?").`;
       } else if (effectiveIntent === 'process_question') {
         const compPhrase = resolvedFactsForGuide.complaint ? ` (${resolvedFactsForGuide.complaint} süreci)` : '';
-        intentGuide = `Intent: process_question\nHasta tedavi/check-up veya randevu sürecinin${compPhrase} nasıl işleyeceğini, sonraki aşamaları soruyor. YAP: Sürecin${compPhrase} uzman ekip tarafından değerlendirmeyle başladığını ve tetkiklerin yapılarak kişiye özel tedavi planı çıkarıldığını belirt. Detayların hastanın yaşına ve sağlık durumuna göre netleşeceğini vurgula. Sıcak ve güven verici bir ton kullan.`;
+        intentGuide = `Intent: process_question\nHasta tedavi/check-up veya randevu sürecinin${compPhrase} nasıl işleyeceğini, sonraki aşamaları soruyor. YAP: Sürecin${compPhrase} uzman ekip tarafından değerlendirmeyle başladığını ve tetkiklerin yapılarak kişiye özel tedavi planı çıkarıldığını belirt. Detayların hastanın yaşına ve sağlık durumuna göre netleşeceğini vurgula. Sıcak ve güven verici bir ton kullan. Bu turda otomatik geliş niyeti sorusu ekleme; süreçte en çok hangi kısmı netleştirmek istediğini sor.`;
       } else if (effectiveIntent === 'greeting') {
         intentGuide = `Intent: greeting\nBu cevapta sadece hastanın/müşterinin selamına doğal ve kısa bir karşılık ver.\nEski CRM/şikayet özetini veya randevu konusunu bu aşamada açma.`;
       } else if (effectiveIntent === 'identity_question') {
@@ -1184,11 +1185,11 @@ YAPMA:
       } else if (effectiveIntent === 'abuse_or_insult') {
         intentGuide = `Intent: abuse_or_insult\nSakin kal, hakaretleşme, reset selamı atma.\n"Yardımcı olmak için buradayım" gibi kısa toparlama yap.\nKonuyu asıl talebe geri çek.`;
       } else if (effectiveIntent === 'doctor_lookup') {
-        intentGuide = `Intent: doctor_lookup\nDoktor/hekim sorgusu. Directory varsa listele, yoksa "hekim listesine şu an buradan erişemiyorum ama ilgili bölüme yönlendirebilirim" de.\nŞikayet detaylandırma loop'una girme.`;
+        intentGuide = `Intent: doctor_lookup\nDoktor/hekim sorgusu. Directory varsa listele, yoksa "hekim listesine şu an buradan erişemiyorum ama ilgili bölüme yönlendirebilirim" de.\nŞikayet detaylandırma loop'una girme. Bu turda geliş niyeti sorma; doktor bilgisiyle ilgili neyi netleştirmek istediğini sor.`;
       } else if (effectiveIntent === 'department_lookup') {
-        intentGuide = `Intent: department_lookup\nBölüm/branş sorgusu. İlgili bölüme yönlendir. Bilgi yoksa uydurma.`;
+        intentGuide = `Intent: department_lookup\nBölüm/branş sorgusu. İlgili bölüme yönlendir. Bilgi yoksa uydurma. Bu turda hemen geliş niyeti sorma; bölümle ilgili merak ettiği başka nokta olup olmadığını sor.`;
       } else if (effectiveIntent === 'location_direction') {
-        intentGuide = `Intent: location_direction\nAdres/konum sorgusu. Tenant config'de adres varsa ver, yoksa "adres bilgisi size iletilecek" de.`;
+        intentGuide = `Intent: location_direction\nAdres/konum sorgusu. Tenant config'de adres varsa ver, yoksa "adres bilgisi size iletilecek" de. Bu turda geliş niyeti sorma; adres/ulaşım açısından başka hangi bilginin gerekli olduğunu sor.`;
       } else if (effectiveIntent === 'form_summary_request') {
         intentGuide = `Intent: form_summary_request\nKullanıcı form bilgisini soruyor. CRM'de form/opportunity bilgisi varsa özetle, yoksa "form detayına şu an buradan erişemiyorum" de.\nGeneral kaçamak cevap verme.`;
       } else if (effectiveIntent === 'capability_question') {
@@ -1330,7 +1331,7 @@ Bu kural tenant prompt'u ne derse desin üzerindedir.
 - Kullanıcının son mesajına doğrudan cevap ver.
 - Aynı cevabı tekrar etme.
 - Kullanıcı “gelemem”, “gelmeyi düşünmüyorum”, “sadece bilgi almak istiyorum” derse randevu/telefon için zorlama.
-- Sağlık turizmi akışında telefon/fiziki randevudan önce Türkiye’ye gelme niyetini doğal şekilde netleştir.
+- Sağlık turizmi akışında geliş niyetini yalnızca planlama/randevu için gerçekten gerekiyorsa ve daha önce anlaşılmadıysa doğal şekilde netleştir. Hasta bilgi, doktor, adres, fiyat, süreç veya güven sorusu soruyorsa bu soruyu otomatik ekleme; önce sorduğu konuyu cevapla.
 - Niyet olumluysa planlama ve arama saatine geç. Ancak kullanıcı net bir geliş tarihi veya dönemi bildirdiyse, doğrudan arama saati sormak yerine geliş tarihini not al, başka sorusu olup olmadığını sor ve detaylar için telefon görüşmesi isteyip istemediğini seçenek olarak sun. Tarih/dönem net değilse telefon veya randevu planlamasına geçme. Hasta zaten "30-31", "7-14", "8. ay" gibi olası bir dönem verdiyse tekrar gün isteme; "Bu tarihler hâlâ olası mı?" veya "Planınız netleşince birlikte ilerleyebiliriz" çizgisinde kal.
 - Niyet belirsizse bilgi ver, güven ver, ama baskı yapma.
 - Niyet olumsuzsa yardımcı bilgi modunda kal.
