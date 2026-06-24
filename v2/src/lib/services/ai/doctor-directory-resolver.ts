@@ -92,14 +92,16 @@ export class DoctorDirectoryResolver {
       return doctors;
     }
 
-    const cleanDept = department.toLowerCase().trim();
+    const cleanDept = department.toLocaleLowerCase('tr-TR').trim();
     
     return doctors.filter(doc => {
-      const docDept = doc.department.toLowerCase();
+      const docDept = doc.department.toLocaleLowerCase('tr-TR');
       // Match department name or common synonyms
       if (cleanDept.includes('kardiyoloji') && docDept.includes('kardiyo')) return true;
       if (cleanDept.includes('dermatoloji') && (docDept.includes('dermatoloji') || docDept.includes('deri'))) return true;
       if (cleanDept.includes('cildiye') && (docDept.includes('dermatoloji') || docDept.includes('deri'))) return true;
+      if ((cleanDept.includes('kadın') || cleanDept.includes('kadin') || cleanDept.includes('doğum') || cleanDept.includes('dogum') || cleanDept.includes('jinekoloji')) &&
+          (docDept.includes('kadın') || docDept.includes('kadin') || docDept.includes('doğum') || docDept.includes('dogum') || docDept.includes('jinekoloji'))) return true;
       if (cleanDept.includes('plastik') && docDept.includes('plastik')) return true;
       if (cleanDept.includes('estetik') && docDept.includes('plastik')) return true;
       if (cleanDept.includes('burun') && docDept.includes('plastik')) return true;

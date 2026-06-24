@@ -41,9 +41,9 @@ const CANCELLATION_PHRASES: RegExp[] = [
   /vazge[cç]iyorum/i,             // vazgeçiyorum
   /iptal\s*(et|edin|edelim|ediyorum|istiyorum)/i,  // iptal et, iptal edin
   /randevuyu?\s*(iptal|iptale)/i,  // randevuyu iptal
-  /istemiyorum/i,                  // istemiyorum
   /ilgilenmiyorum/i,               // ilgilenmiyorum
   /art[iı]k\s+gerek\s+yok/i,      // artık gerek yok
+  /(?:randevu|arama|telefon|g[oö]r[uü][sş]me)\s+istemiyorum/i, // randevu/arama/görüşme istemiyorum
   /g[oö]r[uü][sş]mek\s+istemiyorum/i, // görüşmek istemiyorum
   /gelme[ky]\s*(istemiyorum|niyetim\s+yok)/i, // gelmek istemiyorum
   /ba[sş]ka\s+hastane(?:ye|de|den)?\s+(?:gittim|gidece[gğ]im|gitmeye\s+karar|tercih\s+ettim)/i, // kesin başka hastane tercihi
@@ -278,7 +278,14 @@ export function detectCancellation(messageText: string): IntentDetection {
       const falsePositives = ['de', 'da', 'bir', 'ne', 'bu', 'şu', 'o', 've', 'ile', 'ben', 'sen', 'biz', 'siz', 
         'merhaba', 'selam', 'günaydın', 'hello', 'hi', 'hey', 'iyi', 'teşekkür', 'tamam', 'evet', 'hayır',
         'am', 'is', 'are', 'the', 'and', 'for', 'not', 'but', 'you', 'all', 'can', 'her', 'was', 'one'];
-      if (!falsePositives.includes(name.toLowerCase()) && name.length >= 2) {
+      let isValidDetectedName = true;
+      try {
+        const { isValidPatientName } = require('../../utils/patient-name-resolver');
+        isValidDetectedName = isValidPatientName(name);
+      } catch {
+        isValidDetectedName = true;
+      }
+      if (!falsePositives.includes(name.toLowerCase()) && name.length >= 2 && isValidDetectedName) {
         newIdentity = true;
         detectedName = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
         matched.push(`new_identity:${pattern.source}→${detectedName}`);

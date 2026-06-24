@@ -50,6 +50,7 @@ export function isDoctorNameRequestText(text: string, hasPriorDoctorAsk = false)
 
   const directPatterns = [
     /\b(?:doktor|doktorunuz|doktorunun|doktorlar|hekim|hekimler|uzman|uzmanlar|hoca|hocanin|hocanın|kadro|kadronuz)\b.{0,50}\b(?:isim|ismi|ismini|isimleri|ad|adi|adini|adlari|kim|kimler|liste|listesi)\b/,
+    /\b(?:doktor|doktorlar|hekim|hekimler|uzman|uzmanlar|hoca|hocalar)\b.{0,50}\b(?:var|vardir|vardır|bulunuyor|calisiyor|çalışıyor)\b/,
     /\b(?:isim|ismi|ismini|isimleri|ad|adi|adini|adlari)\b.{0,50}\b(?:ogren|oren|arastir|bak|ver|paylas|soyle)\b/,
     /\bhangi\s+(?:doktor|hekim|uzman|hoca)\b/,
     /\b(?:doktor|hekim|uzman|hoca)\s+kadrosu\b/,
@@ -65,7 +66,75 @@ export function isDoctorNameRequestText(text: string, hasPriorDoctorAsk = false)
   return false;
 }
 
+const DOCTOR_QUALITY_WORDS = /\b(?:nasil|nasıl|iyi\s+mi|guvenilir|güvenilir|tecrube|tecrübe|yorum|onerir|önerir|emin|basarili|başarılı|hakkinda|hakkında)\b/;
+
+function doctorSearchTokens(name: string): string[] {
+  return normalizeDoctorAskText(name)
+    .replace(/\b(?:prof|doc|doç|dr|uzm|op|ogr|gör|gor)\b/g, ' ')
+    .split(/\s+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 3);
+}
+
+export function isDoctorProfileQuestionText(text: string, doctors: { name: string; department: string }[] = []): boolean {
+  const clean = normalizeDoctorAskText(text);
+  if (!clean) return false;
+  const hasDoctorWord = /\b(?:doktor|hekim|uzman|hoca|hocamiz|hocamız)\b/.test(clean);
+  const hasQualityWord = DOCTOR_QUALITY_WORDS.test(clean);
+  const mentionsKnownDoctor = doctors.some(doc => doctorSearchTokens(doc.name).some(token => clean.includes(token)));
+  return hasQualityWord && (hasDoctorWord || mentionsKnownDoctor);
+}
+
 export class DoctorNamesPolicy {
+  public static resolveDoctorProfile(
+    brain: TenantBrain,
+    text: string,
+    departments: string[],
+    lang = 'tr'
+  ): DoctorNamesPolicyResult | null {
+    const activeDepts = departments.filter(Boolean);
+    const scopedDoctors = activeDepts.length > 0
+      ? activeDepts.flatMap(dept => DoctorDirectoryResolver.getDoctors(brain, dept))
+      : DoctorDirectoryResolver.getDoctors(brain);
+    const doctors = scopedDoctors.length > 0 ? scopedDoctors : DoctorDirectoryResolver.getDoctors(brain);
+    const clean = normalizeDoctorAskText(text);
+    const matched = doctors.find(doc => doctorSearchTokens(doc.name).some(token => clean.includes(token)));
+    if (!matched && !isDoctorProfileQuestionText(text, doctors)) return null;
+
+    const resolvedLang = (lang || 'tr').toLowerCase();
+    const doctorLabel = matched?.name || null;
+    const deptLabel = matched?.department || (activeDepts[0] || 'ilgili bölüm');
+    let responseText: string;
+
+    if (resolvedLang === 'en') {
+      responseText = doctorLabel
+        ? `${doctorLabel} works in our ${deptLabel} department. I cannot make a personal comparison or subjective evaluation about a physician here, but I can help with appointment planning and the process.`
+        : `I cannot make a personal comparison or subjective evaluation about a physician here, but I can help with appointment planning and the process.`;
+    } else if (resolvedLang === 'de') {
+      responseText = doctorLabel
+        ? `${doctorLabel} ist in unserer Abteilung ${deptLabel} tätig. Eine persönliche Bewertung oder ein Vergleich von Ärzten wäre hier nicht richtig; ich kann aber beim Terminablauf und bei der Planung helfen.`
+        : `Eine persönliche Bewertung oder ein Vergleich von Ärzten wäre hier nicht richtig; ich kann aber beim Terminablauf und bei der Planung helfen.`;
+    } else if (resolvedLang === 'nl') {
+      responseText = doctorLabel
+        ? `${doctorLabel} werkt op onze afdeling ${deptLabel}. Ik kan hier geen persoonlijke beoordeling of vergelijking van artsen geven, maar ik kan wel helpen met de afspraakplanning en het proces.`
+        : `Ik kan hier geen persoonlijke beoordeling of vergelijking van artsen geven, maar ik kan wel helpen met de afspraakplanning en het proces.`;
+    } else if (resolvedLang === 'ar') {
+      responseText = doctorLabel
+        ? `${doctorLabel} يعمل/تعمل في قسم ${deptLabel}. لا يمكنني تقديم تقييم شخصي أو مقارنة بين الأطباء هنا، لكن يمكنني مساعدتكم في خطوات الموعد والتخطيط.`
+        : `لا يمكنني تقديم تقييم شخصي أو مقارنة بين الأطباء هنا، لكن يمكنني مساعدتكم في خطوات الموعد والتخطيط.`;
+    } else {
+      responseText = doctorLabel
+        ? `${doctorLabel}, ${deptLabel} bölümümüzde görev yapmaktadır. Hekimlerimiz hakkında kişisel yorum veya başarı kıyaslaması yapmam doğru olmaz; ancak muayene/randevu sürecini netleştirmede yardımcı olabilirim.`
+        : `Hekimlerimiz hakkında kişisel yorum veya başarı kıyaslaması yapmam doğru olmaz; ancak muayene/randevu sürecini netleştirmede yardımcı olabilirim.`;
+    }
+
+    return {
+      mode: matched ? 'verified_list' : 'first_soft',
+      text: responseText,
+      departments: activeDepts
+    };
+  }
+
   /**
    * Generates a response for a doctor name request.
    *

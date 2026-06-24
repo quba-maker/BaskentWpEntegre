@@ -1730,7 +1730,7 @@ export function buildHistoryAwareRecoveryFallback(
       return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Size nasıl yardımcı olabilirim? 🌿`;
     }
     return isHealthcare
-      ? 'Merhaba, size sağlık talebinizle ilgili yardımcı olayım. Hangi konuda bilgi almak istiyorsunuz?'
+      ? 'Merhaba, sağlık talebinizle ilgili yardımcı olayım. Şikayetinizi veya randevu almak istediğiniz bölümü yazabilirsiniz.'
       : 'Merhaba, size yardımcı olmak üzere buradayım. Hangi konuda bilgi almak istersiniz?';
   }
 
@@ -1802,7 +1802,7 @@ export function buildHistoryAwareRecoveryFallback(
     if (hasPersona && !identityAlreadyIntroduced) {
       return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Size sağlık talebinizle ilgili yardımcı olayım.`;
     }
-    return 'Size sağlık talebinizle ilgili yardımcı olayım. Hangi konuda bilgi almak istiyorsunuz?';
+    return 'Devam edelim; son mesajınızdaki talebi tam yakalayamadım. Hekim bilgisi, randevu planı veya süreçten hangisini netleştirelim?';
   }
 
   if (hasPersona && !identityAlreadyIntroduced) {

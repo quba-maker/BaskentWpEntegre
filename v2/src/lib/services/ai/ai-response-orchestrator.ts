@@ -17,7 +17,7 @@ import { withTenantDB } from '@/lib/core/tenant-db';
 // P0.16-K: Consultant brain imports
 import { ConsultantConversationStateResolver } from './consultant-conversation-state-resolver';
 import { MultiIntentConsultantComposer } from './multi-intent-consultant-composer';
-import { DoctorNamesPolicy, isDoctorNameRequestText } from './doctor-names-policy';
+import { DoctorNamesPolicy, isDoctorNameRequestText, isDoctorProfileQuestionText } from './doctor-names-policy';
 import { ConversationIntentRouter } from './conversation-intent-router';
 // P0.16-L: Live/test parity pipeline imports
 import { ConversationFrameResolver } from './conversation-frame-resolver';
@@ -1642,7 +1642,11 @@ export class AIResponseOrchestrator {
       const shouldBypassDoctorLookup = isDoctorLookup && !hasDoctorDirectory;
 
       // P0.16-I: Mixed intent detection — doctor_lookup + process_question in same burst
-      const isProcessQuestion = ['süreç', 'surec', 'nasıl ışliyor', 'nasıl çalışıyor', 'nasıl yürüyor', 'tanı', 'tedavi', 'muayene', 'operasyon', 'ameliyat', 'aşama', 'adım'].some(kw => cleanInbound.includes(kw));
+      const isProcessQuestion = [
+        'süreç', 'surec', 'nasıl işliyor', 'nasil isliyor', 'nasıl çalışıyor', 'nasil calisiyor',
+        'nasıl yürüyor', 'nasil yuruyor', 'tedavi süreci', 'muayene süreci', 'randevu süreci',
+        'tanı süreci', 'tani sureci', 'aşama', 'asama', 'adım', 'adim'
+      ].some(kw => cleanInbound.includes(kw));
       const isMixedDoctorProcess = isDoctorLookup && isProcessQuestion;
 
       // P0.30 Gate Diet: isNextStepRequest bypass removed — LLM handles next-step/process questions.
@@ -1657,6 +1661,8 @@ export class AIResponseOrchestrator {
         isDoctorNameRequestText(String(m.content || ''), false)
       );
       const isDoctorNamesRequest = isDoctorNameRequestText(inboundText, hasPreviousDoctorAsk);
+      const doctorsForProfileQuestion = doctorsList.length > 0 ? doctorsList : DoctorDirectoryResolver.getDoctors(brain);
+      const isDoctorProfileQuestion = isDoctorProfileQuestionText(inboundText, doctorsForProfileQuestion);
 
       // P0.16-K: "başka bilgi" / open-ended continuation — kept for LLM hint injection only, NOT for bypass
       // P0.16-K: match both Turkish ş and ASCII s for real WhatsApp messages
@@ -1705,7 +1711,7 @@ export class AIResponseOrchestrator {
       const isWhatTurkishBypass = cleanInboundPunct === 'what' && (replyLanguage === 'tr');
 
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge
-        || shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery || isDoctorNamesRequest || isWhatTurkishBypass;
+        || shouldBypassDoctorLookup || isRecallWithFacts || isMultiIntentQuery || isDoctorNamesRequest || isDoctorProfileQuestion || isWhatTurkishBypass;
 
       let text = '';
       let bypassed = false;
@@ -1724,6 +1730,7 @@ export class AIResponseOrchestrator {
         if (isMixedDoctorProcess)     intentList.push('process_question');
         if (isMultiIntentQuery)       intentList.push('multi_intent_query');
         if (isDoctorNamesRequest)     intentList.push('doctor_names_request');
+        if (isDoctorProfileQuestion)  intentList.push('doctor_profile_question');
         if (effectiveIsCallbackConfirmation)   intentList.push('callback_confirmation');
         if (isArrivalDateAnswer)      intentList.push('arrival_date_answer');
         if (shouldBypassCallbackTimeAnswer) intentList.push('callback_time_answer');
@@ -1773,6 +1780,26 @@ export class AIResponseOrchestrator {
           }
         }
 
+        // ── Doctor profile/trust question — grounded, no subjective ranking ─────────
+        if (!fallbackResult && isDoctorProfileQuestion) {
+          const depts: string[] = [];
+          for (const p of consultantState.participants) {
+            if (p.department && !depts.includes(p.department)) depts.push(p.department);
+          }
+          if (depts.length === 0 && resolvedActiveDepartment) depts.push(resolvedActiveDepartment);
+          const profilePolicy = DoctorNamesPolicy.resolveDoctorProfile(brain, inboundText, depts, replyLanguage);
+          if (profilePolicy) {
+            fallbackResult = { text: profilePolicy.text, finalPath: `doctor_profile_policy_${profilePolicy.mode}` };
+            console.log(JSON.stringify({
+              tag: 'LIVE_TEST_PARITY_PATH_SELECTED',
+              path: `doctor_profile_policy_${profilePolicy.mode}`,
+              tenantId,
+              conversationId: conversationId || 'unknown',
+              workerPath
+            }));
+          }
+        }
+
         // ── P0.16-K: Doctor names request ────────────────────────────────────
         if (!fallbackResult && isDoctorNamesRequest) {
           // Collect departments from consultant state (multi-patient aware)
@@ -1806,9 +1833,8 @@ export class AIResponseOrchestrator {
           const dept = resolvedActiveDepartment || (mixedDepts[0] || 'ilgili bölümümüz');
           const processText = [
             `${dept} sürecinde ilk adım uzman hekim değerlendirmesidir.`,
-            `Bu değerlendirmede mevcut bulgularınız (varsa MR/tetkikler) incelenerek size özel bir tedavi planı oluşturulur.`,
-            `Sonraki adım için kısa bir telefon görüşmesi planlanabilir.`,
-            `Hangi gün ve saat aralığında uygun olursunuz?`,
+            `Muayenede şikayetiniz ve varsa mevcut tetkikleriniz birlikte değerlendirilir; size özel plan hekim değerlendirmesiyle netleşir.`,
+            `Bu bölümde özellikle hangi bilgiyi netleştirmek istersiniz?`,
           ].join('\n');
 
           const composedText = [mixedDoctorPolicy.text, processText]

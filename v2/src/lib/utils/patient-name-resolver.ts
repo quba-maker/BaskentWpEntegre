@@ -55,11 +55,18 @@ export function checkNameValidity(name?: string | null): {
     "user", "test", "admin", "deneme", "guest", "unknown", "undefined", "null", "bot", "sistem", "lead", "yeni lead", "nitelikli", "manuel",
     "ülke", "sehir", "şehir", "departman", "country", "city", "department", "telefon numarası",
     "kiminle", "kimle", "kim", "ne", "neden", "niye", "nasil", "nasıl", "hangi", "kac", "kaç", "nerede", "nerde", "suan", "şuan", "simdi", "şimdi",
-    "ben", "bana", "beni", "biz", "bize", "yardim", "yardım", "yardimci", "yardımcı", "yardimci olun", "yardımcı olun"
+    "ben", "bana", "beni", "biz", "bize", "yardim", "yardım", "yardimci", "yardımcı", "yardimci olun", "yardımcı olun",
+    "atmak", "bakmak", "gelmek", "gitmek", "olmak", "almak", "vermek", "istemek", "öğrenmek", "ogrenmek",
+    "göndermek", "gondermek", "aramak", "konuşmak", "konusmak", "yazmak", "paylaşmak", "paylasmak",
+    "istiyorum", "istemiyorum", "öğrenmek istiyorum", "ogrenmek istiyorum"
   ];
 
   if (blacklist.includes(lower)) {
     return { isValid: false, reason: "Geçersiz/Sistem kelimesi", confidence: 'low' };
+  }
+
+  if (/^[a-zçğıöşü]+m[ae]k$/i.test(lower)) {
+    return { isValid: false, reason: "Fiil/mastar biçimi", confidence: 'low' };
   }
 
   const words = cleaned.split(/\s+/);

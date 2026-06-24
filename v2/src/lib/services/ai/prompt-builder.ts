@@ -733,6 +733,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       const lp = languagePolicy;
       langContextText = `\n\n=== 🌐 YANIT DİLİ TALİMATI ===\n`;
       langContextText += `- Yanıt dili: ${lp.replyLanguageName}. Bu cevapta ${lp.replyLanguageName} kullan.\n`;
+      langContextText += `- Hasta yabancı ülkede yaşıyor diye otomatik dil tercihi sorma. Dil tercihini yalnızca aşağıda açıkça "DİL TERCİHİ NETLEŞTİRME" bloğu varsa veya hasta kendisi dil değiştirmek isterse sor.\n`;
       if (lp.languageSwitchDetected) {
         langContextText += `- ⚡ Dil değişikliği algılandı. Kullanıcı ${lp.replyLanguageName} dilinde cevap istiyor.\n`;
       }
