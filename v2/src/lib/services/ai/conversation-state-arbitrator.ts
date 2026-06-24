@@ -155,16 +155,22 @@ export class ConversationStateArbitrator {
     const isSpecificCallTimeOffer = (text: string) => {
       if (hasOfferInMeta && !isArrivalDateQuestion(text)) return true;
       const lowerText = text.toLowerCase();
-      
-      const hasCallKw = isCallOffer(text);
-      if (!hasCallKw) return false;
 
+      const hasCallKw = isCallOffer(text);
       const hasTimeOrDate = [
         'saat', 'saatiyle', 'saatinde', 'pazartesi', 'salı', 'sali', 'çarşamba', 'carsamba', 'perşembe', 'persembe', 'cuma', 'cumartesi', 'pazar',
         'yarın', 'yarin', 'bugün', 'bugun', 'haziran', 'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim', 'aralık', 'aralik'
       ].some(kw => lowerText.includes(kw)) || /\d{1,2}[:.]\d{2}/.test(lowerText);
 
-      return hasTimeOrDate;
+      if (hasCallKw) return hasTimeOrDate;
+
+      const hasConfirmationPrompt = [
+        'uygun mu', 'teyit ediyor musunuz', 'teyit eder misiniz',
+        'onaylıyor musunuz', 'onayliyor musunuz', 'onaylar mısınız', 'onaylar misiniz',
+        'bu şekilde teyit', 'bu sekilde teyit', 'doğru mu', 'dogru mu'
+      ].some(kw => lowerText.includes(kw));
+
+      return hasTimeOrDate && hasConfirmationPrompt;
     };
 
     const lowerUser = (lastUserMessage || '').toLowerCase().trim();

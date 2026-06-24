@@ -13304,6 +13304,26 @@ test("Başkent v81 T85: final Turkish normalizer fixes missing space after sente
   assert(result.appliedPatterns.includes("missing_space_after_sentence_punctuation"), "Should record punctuation rewrite");
 });
 
+test("Başkent v81 T86: typo affirmative after summarized callback slot confirms the slot", () => {
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  const result = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "Evet uygun olar",
+    rawPendingSlot: "confirmation_yes_no",
+    rawInterpretedIntent: "generic_short",
+    routerIntent: "generic_other",
+    history: [
+      { role: "user", content: "15.30 uygin olar ne zaman arirsiniz" },
+      { role: "assistant", content: "15:30 bilgisini not alabilirim. Bu saat Türkiye saatiyle mi, yoksa yaşadığınız ülkenin saatiyle mi olacak? Ayrıca hangi gün için uygun olur?" },
+      { role: "user", content: "Türkiyede yaşayarım gün de bellidir çarşamba uygin olar" },
+      { role: "assistant", content: "Çarşamba günü Türkiye saatiyle *15:30* uygun mu, bu şekilde teyit ediyor musunuz?" }
+    ],
+    convMeta: {}
+  });
+
+  assert(result.effectiveIntent === "callback_confirmation", `Expected callback_confirmation, got: ${result.effectiveIntent}`);
+  assert(result.suppressionReason === "callback_confirmed", `Expected callback_confirmed, got: ${result.suppressionReason}`);
+});
+
 
 async function runAllTests() {
   try {
