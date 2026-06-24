@@ -13041,6 +13041,148 @@ test("Başkent v79 T73: Turkish normalizer rewrites bugünüz and istebilir morp
   assert(norm3.includes("İsteyebilecek"), `Should correct İstebilecek to İsteyebilecek, got: ${norm3}`);
 });
 
+test("Başkent v80 T74: Turkish normalizer fixes live form greeting morphology regressions", () => {
+  const { TurkishFinalQualityNormalizer } = require("../lib/services/ai/turkish-final-quality-normalizer");
+
+  const raw = [
+    "Bel fıtığı şikayetiniz olduğunuzu belirtmişsiniz.",
+    "Kesin değerlendirme için hastanınız hastanemizde ilgili uzman hekim tarafından muayene edilmesi gerekir.",
+    "size en uygun takip ve tedavi süreci daha sağlıklı şekilde planlanabilir.",
+    "Formunuzda 30-31 Haziran tarihlerinde Konya’ya gelmeyi planladığınızı belirtmişsiniz."
+  ].join("\n\n");
+
+  const result = TurkishFinalQualityNormalizer.normalize(raw);
+
+  assert(!result.text.includes("şikayetiniz olduğunuzu"), `Broken complaint morphology must be removed: ${result.text}`);
+  assert(result.text.includes("Bel fıtığı şikayetiniz olduğunu"), `Complaint phrase should be corrected: ${result.text}`);
+  assert(!result.text.includes("hastanınız hastanemizde"), `Broken hospital phrase must be removed: ${result.text}`);
+  assert(result.text.includes("hastanemizde ilgili uzman hekim tarafından muayene edilmeniz"), `Hospital phrase should be direct and natural: ${result.text}`);
+  assert(result.text.includes("Size en uygun takip"), `Sentence case should be fixed: ${result.text}`);
+  assert(!result.text.includes("30-31 Haziran"), `Ambiguous invalid June range must not remain: ${result.text}`);
+  assert(result.wasModified === true, "Normalizer should report modification");
+});
+
+test("Başkent v80 T75: PromptBuilder instructs ambiguous form dates and undecided patients safely", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v80-t75",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    currentMessageText: "daha belli değil işte",
+    hasVerifiedFormContext: true,
+    latestForm: {
+      id: "form-1",
+      data: {
+        complaint: "Bel fıtığı",
+        appointment_request: "30-31 kesin olmamakla birlikte yurt dışındayım işlerimi ayarlıyorum"
+      }
+    },
+    outreachContext: { greetingSent: false },
+    opportunity: { department: "Beyin ve Sinir Cerrahisi", resolvedFrom: "latest_form" }
+  });
+
+  assert(prompt.includes("BELİRSİZ GELİŞ TARİHİ"), "Prompt should include ambiguous date guard");
+  assert(prompt.includes("31 Haziran"), "Prompt should explicitly forbid invalid 31 June style dates");
+  assert(prompt.includes("hemen gün/saat isteme"), "Prompt should avoid early call-slot pressure for undecided patients");
+  assert(prompt.includes('tekrar "hangi günler sizin için uygun olur?" diye sorma'), "Prompt should not ask day availability again when user already gave an uncertain date range");
+  assert(prompt.includes("Bu tarihler hâlâ olası mı"), "Prompt should ask whether the uncertain date range is still possible");
+  assert(prompt.includes("hastanemizde ilgili uzman hekim tarafından muayene edilmeniz"), "Prompt should enforce natural direct medical wording");
+});
+
+test("Başkent v80 T76: price question final guard strips phone day-time CTA", async () => {
+  const { FinalOutboundBodyAuditor } = await import("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "Fiyat bilgisi, hastanemizdeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net bir fiyat paylaşamıyorum.\n\nİsterseniz süreç hakkında bilgilendirme amaçlı bir telefon görüşmesi planlayabiliriz. Size uygun gün ve saat aralığı nedir?",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "Fiyatları ne kadar"
+    }
+  );
+
+  assert(result.text.includes("Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum."), `Exact safe price sentence expected: ${result.text}`);
+  assert(!/telefon görüşmesi|uygun gün ve saat|saat aralığı nedir/i.test(result.text), `Price answer must not force callback slot: ${result.text}`);
+  assert(result.rewrote === true, "Final guard should rewrite unsafe price CTA");
+});
+
+test("Başkent v80 T77: immediate call answer after callback CTA does not reset to identity fallback", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v80-t77",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "Hemen",
+    brain,
+    identityConfig: {
+      personaName: "Rüya",
+      organizationName: "Başkent Üniversitesi Konya Uygulama ve Araştırma Merkezi"
+    },
+    unifiedContext: {
+      history: [
+        { role: "user", content: "Fiyatları ne kadar" },
+        { role: "assistant", content: "İsterseniz süreç hakkında bilgilendirme amaçlı bir telefon görüşmesi planlayabiliriz. Size uygun gün ve saat aralığı nedir?" }
+      ]
+    },
+    replyLanguage: "tr"
+  });
+
+  assert(result.finalPath === "immediate_call_request_needs_slot_fallback", `Expected immediate-call fallback, got ${result.finalPath}`);
+  assert(result.text.includes("Hemen görüşmek istediğinizi"), `Should acknowledge immediate request: ${result.text}`);
+  assert(!result.text.includes("Ben *Rüya*"), `Must not reset to identity fallback: ${result.text}`);
+  assert(!result.text.includes("Hangi konuda bilgi almak istiyorsunuz"), `Must not forget context: ${result.text}`);
+});
+
+test("Başkent v80 T78: O'zbekiston country answer is recognized and continues context", () => {
+  const { normalizeCountry } = require("../lib/utils/country-normalizer");
+  const normalized = normalizeCountry("O'zbekiston", null, "patient_statement");
+  assert(normalized.country === "Özbekistan", `O'zbekiston should normalize to Özbekistan, got ${normalized.country}`);
+  const typoCountry = normalizeCountry("hransa", null, "patient_statement");
+  assert(typoCountry.country === "Fransa", `Typo country hransa should normalize to Fransa, got ${typoCountry.country}`);
+
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v80-t78",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "O'zbekiston",
+    brain,
+    identityConfig: {
+      personaName: "Rüya",
+      organizationName: "Başkent Üniversitesi Konya Uygulama ve Araştırma Merkezi"
+    },
+    unifiedContext: {
+      history: [
+        { role: "user", content: "Psoryaziçeskiy artrit" },
+        { role: "assistant", content: "Daha doğru yönlendirme yapabilmemiz için hangi ülkede yaşadığınızı öğrenebilir miyim?" }
+      ]
+    },
+    replyLanguage: "tr"
+  });
+
+  assert(result.finalPath === "country_answer_continuation_fallback", `Expected country continuation, got ${result.finalPath}`);
+  assert(result.text.includes("Özbekistan"), `Should acknowledge Özbekistan: ${result.text}`);
+  assert(!result.text.includes("Hangi konuda bilgi almak istiyorsunuz"), `Must not reset after country answer: ${result.text}`);
+});
+
 
 async function runAllTests() {
   try {

@@ -263,6 +263,56 @@ const REWRITE_RULES: RewriteRule[] = [
     replacement: (_match: string, prefix: string) => `${prefix}tetkiklerin yapılması`,
   },
   {
+    id: 'sikayetiniz_oldugunuzu_fix',
+    pattern: /([A-ZÇĞİÖŞÜa-zçğıöşü\s-]+?)\s+[şs]ikayetiniz\s+oldu[ğg]unuzu\b/gi,
+    replacement: (_match: string, complaint: string) => `${complaint.trim()} şikayetiniz olduğunu`,
+  },
+  {
+    id: 'oldugunuzu_anladim_fix',
+    pattern: /oldu[ğg]unuzu\s+anlad[ıi]m\b/gi,
+    replacement: 'olduğunu anladım',
+  },
+  {
+    id: 'ihtimalinizin_oldugunuzu_fix',
+    pattern: /(gelme\s+ihtimaliniz(?:in)?|plan[ıi]n[ıi]z(?:[ıi]n)?)\s+oldu[ğg]unuzu\b/gi,
+    replacement: (_match: string, subject: string) => `${subject} olduğunu`,
+  },
+  {
+    id: 'hastaniniz_hastanemizde_fix',
+    pattern: /\bhastan[ıi]n[ıi]z\s+hastanemizde\b/gi,
+    replacement: 'hastanemizde',
+  },
+  {
+    id: 'hastanemizde_muayene_edilmesi_direct_fix',
+    pattern: /\bhastanemizde\s+ilgili\s+uzman\s+hekim\s+taraf[ıi]ndan\s+muayene\s+edilmesi\b/gi,
+    replacement: 'hastanemizde ilgili uzman hekim tarafından muayene edilmeniz',
+  },
+  {
+    id: 'hastanin_hastanemizde_direct_fix',
+    pattern: /\bhastan[ıi]n\s+hastanemizde\s+ilgili\s+uzman\s+hekim\s+taraf[ıi]ndan\s+muayene\s+edilmesi\b/gi,
+    replacement: 'hastanemizde ilgili uzman hekim tarafından muayene edilmeniz',
+  },
+  {
+    id: 'hastanemizde_hasta_muayene_fix',
+    pattern: /\bhastanemizde\s+hastanemizde\s+ilgili\s+uzman\s+hekim\s+taraf[ıi]ndan\s+muayene\s+edilmesi\b/gi,
+    replacement: 'hastanemizde ilgili uzman hekim tarafından muayene edilmeniz',
+  },
+  {
+    id: 'size_en_uygun_sentence_case_fix',
+    pattern: /(^|[.!?]\s+)size\s+en\s+uygun\b/g,
+    replacement: (_match: string, prefix: string) => `${prefix}Size en uygun`,
+  },
+  {
+    id: 'invalid_june_31_range_fix',
+    pattern: /\b30-31\s+Haziran\s+tarihlerinde\b/gi,
+    replacement: '30-31 olarak belirttiğiniz tarihlerde',
+  },
+  {
+    id: 'uncertain_30_31_june_fix',
+    pattern: /\b30-31\s+Haziran\b/gi,
+    replacement: '30-31 olarak belirttiğiniz tarih aralığı',
+  },
+  {
     id: 'tedavi_planinizi_sonrasinda_fix',
     pattern: /\btedavi\s+plan[ıi]n[ıi]z[ıi]\s+sonras[ıi]nda\b/gi,
     replacement: 'tedavi planı sonrasında',

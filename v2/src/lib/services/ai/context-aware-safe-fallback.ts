@@ -31,6 +31,54 @@ export interface DeterministicFallbackResult {
 }
 
 export class ContextAwareSafeFallbackResolver {
+  private static normalizeLooseText(text?: string): string {
+    return (text || '')
+      .replace(/İ/g, 'i')
+      .replace(/I/g, 'ı')
+      .toLowerCase()
+      .replace(/[’`´]/g, "'")
+      .trim();
+  }
+
+  private static latestAssistantText(history: any[] = []): string {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i];
+      if (msg?.role === 'assistant' && msg?.content) {
+        return this.normalizeLooseText(String(msg.content));
+      }
+    }
+    return '';
+  }
+
+  private static detectCountryOnlyAnswer(inboundText?: string): string | null {
+    const clean = this.normalizeLooseText(inboundText)
+      .replace(/[^\p{L}\s']/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!clean || clean.length > 40) return null;
+    try {
+      const { normalizeCountry } = require('../../utils/country-normalizer');
+      const normalized = normalizeCountry(clean, null, 'patient_statement');
+      if (normalized?.country && normalized.countryConfidence !== 'low') {
+        return normalized.country;
+      }
+    } catch {
+      // Fall back to a tiny safety list if the shared normalizer is unavailable.
+    }
+
+    const countryAliases: Array<[RegExp, string]> = [
+      [/\b(?:o'?zbekiston|ozbekiston|uzbekiston|uzbekistan|özbekistan|ozbekistan)\b/i, 'Özbekistan'],
+      [/\b(?:fransa|france|hransa)\b/i, 'Fransa'],
+      [/\b(?:almanya|deutschland|germany)\b/i, 'Almanya'],
+      [/\b(?:hollanda|netherlands)\b/i, 'Hollanda'],
+      [/\b(?:belçika|belcika|belgium)\b/i, 'Belçika'],
+      [/\b(?:kanada|canada)\b/i, 'Kanada'],
+      [/\b(?:türkiye|turkiye|turkey)\b/i, 'Türkiye'],
+    ];
+    const match = countryAliases.find(([pattern]) => pattern.test(clean));
+    return match?.[1] || null;
+  }
+
   private static resolveArabic(params: DeterministicFallbackParams): DeterministicFallbackResult {
     const { inboundText, brain, identityConfig, unifiedContext } = params;
     const orchestratorDept = params.resolvedActiveDepartment || null;
@@ -272,6 +320,37 @@ export class ContextAwareSafeFallbackResolver {
 
     const detectedIntent = arbitration.effectiveIntent;
     const pendingSlot = arbitration.effectivePendingSlot;
+    const lastAssistantText = ContextAwareSafeFallbackResolver.latestAssistantText(history);
+
+    const immediateCallRequest = /\b(?:hemen|haman|hamaan|şimdi|simdi)\b/i.test(lowerInbound);
+    const lastAskedCallSlot = /(telefon\s+görüşmesi|arama|aranma|uygun\s+gün\s+ve\s+saat|gün\s+ve\s+saat\s+aralığı|saat\s+aralığı|hangi\s+gün\s+ve\s+saat)/i.test(lastAssistantText);
+    if (isHealthcare && immediateCallRequest && lastAskedCallSlot) {
+      return {
+        text: "Hemen görüşmek istediğinizi anladım. Arama planlaması için bugün mü uygun, yoksa başka bir gün/saat mi? Yurt dışındaysanız saat diliminizi de yazabilir misiniz?",
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'immediate_call_request_needs_slot_fallback',
+        detectedIntent
+      };
+    }
+
+    const countryOnlyAnswer = ContextAwareSafeFallbackResolver.detectCountryOnlyAnswer(inboundText);
+    const lastAskedCountryOrTimezone = /(hangi\s+ülkede|hangi\s+ulkede|nerede\s+yaşıyorsunuz|nerede\s+yasiyorsunuz|ülkede\s+yaşıyorsunuz|ulkede\s+yasiyorsunuz|saat\s+dilimi|hangi\s+ülke|hangi\s+ulke)/i.test(lastAssistantText);
+    const lastAskedTimezone = /(saat\s+dilimi|hangi\s+ülke\s+veya\s+şehir|hangi\s+ulke\s+veya\s+sehir|saatine\s+göre|saatine\s+gore)/i.test(lastAssistantText);
+    if (isHealthcare && countryOnlyAnswer && lastAskedCountryOrTimezone) {
+      const text = lastAskedTimezone
+        ? `${countryOnlyAnswer}’da olduğunuzu not ediyorum. Arama için ${countryOnlyAnswer} saati mi, Türkiye saati mi esas alınsın?`
+        : `${countryOnlyAnswer}’da olduğunuzu not ediyorum. Türkiye’ye/Konya’ya gelme ihtimaliniz olur mu?`;
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'country_answer_continuation_fallback',
+        detectedIntent
+      };
+    }
 
     const isHealthcareOrForm = isHealthcare || hasFormContext;
     let complaint = '';

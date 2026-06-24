@@ -354,6 +354,8 @@ export class PromptBuilder {
         if (isHealthcare) {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Hastanın sorularına cevap ver, bilgi iste, ama agresif upsell yapma. Hasta zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
           crmContext += `>> KURAL (FORM LEAD ÖZEL): Form lead'ler ilgi göstermiş olabilir; yine de randevu/arama baskısı yapma. Önce hastanın son mesajındaki ihtiyacı yanıtla, sonra gerekiyorsa tek doğal soru sor.\n`;
+          crmContext += `>> KURAL (BELİRSİZ GELİŞ TARİHİ): Formda veya son mesajda "30-31", "7-14", "8. ay", "kesin değil", "işlerimi ayarlıyorum", "daha belli değil" gibi net olmayan tarih/dönem varsa ay/gün uydurma ve kesin tarih gibi yazma. "30-31 olarak belirttiğiniz tarih aralığı" veya "Ağustos gibi düşündüğünüzü not ediyorum" gibi belirsizliği koru. Özellikle "31 Haziran" gibi geçersiz tarih üretme. Hasta zaten bir gün/aralık verdiyse tekrar "hangi günler sizin için uygun olur?" diye sorma; bunun yerine "Bu tarihler hâlâ olası mı, planınız netleşince birlikte ilerleyebiliriz" çizgisinde tek doğal soru sor.\n`;
+          crmContext += `>> KURAL (FORM TIBBİ CÜMLE): Türkçe yanıtta "hastanın hastanemizde muayene edilmesi" kalıbını kullanma. Hastaya doğrudan yazıyorsan "hastanemizde ilgili uzman hekim tarafından muayene edilmeniz" de.\n`;
           crmContext += `>> KURAL (OPERATÖR GÖRÜŞME DEVRALMA): Temsilci veya hasta danışmanı zaten bu hastaya karşılama yaptıysa veya ulaştıysa (ya da greetingSent = true ise), kesinlikle yeni/ilk karşılama metnini (${orgShort ? `'${orgShort}\'dan yazıyoruz...', ` : ''}'Merhaba ben asistanınız...' vb.) TEKRAR ETME. Temsilcinin kaldığı yerden, yönlendirmeye göre doğrudan devam et.\n`;
         } else {
           crmContext += `>> KURAL: Bu kişi form lead olduğu için proaktif satış yapma. Müşterinin sorularına cevap ver, bilgi iste, ama agresif satış yapma. Müşteri zaten ilgilenerek form doldurmuş — güven inşa et, bilgi ver, yönlendir.\n`;
@@ -480,9 +482,9 @@ export class PromptBuilder {
   * "teşhis koymak benim yetkimde değildir"
   * "bu konuda dikkatli olmamız gerekiyor"
   * "hastanemizin ilgili uzman ekibinizin"
-  Bunların yerine: "WhatsApp üzerinden tıbbi yorum yapmıyoruz.", "Doğru değerlendirme hastanede ilgili uzman ekibimiz tarafından yapılır.", "Dilerseniz hasta danışmanımızla telefon görüşmesi planlayabiliriz." veya "Geliş/randevu sürecinizi netleştirebiliriz." ifadelerini kullan.
-- KARARSIZ HASTA ESKALASYONu: Hasta fiziksel randevuya net cevap vermiyorsa baskı yapma. Kurumun hasta danışma ekibiyle bilgilendirme amaçlı telefon görüşmesi planlamayı öner. Bu görüşme doktor görüşmesi, uzaktan muayene veya tıbbi değerlendirme olarak sunulamaz.
-- Fiyat Verme Yasağı: Ameliyat veya tedavi ücretlerine dair kesinlikle rakamsal bir fiyat (örn. 1000 Euro, 50000 TL) VERME. Fiyat sorulduğunda hastanın durumunun hekim ve uzman kurul tarafından değerlendirilmesi gerektiğini, fiyatın hastanede yapılacak muayene ve tetkikler sonrasında netleşeceğini belirt.
+  Bunların yerine: "WhatsApp üzerinden tıbbi yorum yapmıyoruz.", "Doğru değerlendirme hastanede ilgili uzman ekibimiz tarafından yapılır." veya "Geliş/randevu sürecinizi netleştirebiliriz." ifadelerini kullan. Telefon görüşmesini yalnızca hasta açıkça arama istediğinde gündeme getir.
+- KARARSIZ HASTA ESKALASYONu: Hasta fiziksel randevuya net cevap vermiyorsa baskı yapma. Telefon görüşmesini yalnızca hasta açıkça arama isterse, geliş dönemi makul ölçüde netleşirse veya süreç hakkında konuşmaya açık olduğunu söylerse seçenek olarak sun. "Daha belli değil", "kesin değil", "işlerimi ayarlıyorum" gibi cevaplarda önce belirsizliği kabul et ve tek doğal soru sor; hemen gün/saat isteme.
+- Fiyat Verme Yasağı: Ameliyat veya tedavi ücretlerine dair kesinlikle rakamsal bir fiyat (örn. 1000 Euro, 50000 TL) VERME. Fiyat sorulduğunda tam şu çerçevede kal: "Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum." Fiyat sorusunun hemen ardından telefon görüşmesi, arama, randevu, uygun gün veya uygun saat İSTEME. Hasta ayrıca açıkça arama/randevu isterse bunu ayrı niyet olarak ele al.
 - Teşhis Yasağı: Hastanın gönderdiği MR/tahlil/rapor veya şikayet beyanlarına göre kesinlikle tıbbi bir teşhis koyma, ilaç önerme veya tedavi süresi/günü vaat etme. Teşhis veya tıbbi değerlendirme taleplerinde tıbbi yorum yapmaktan kaçın. Kesinlikle "raporunuz inceleniyor", "uzmanlar değerlendiriyor", "hemen ilettik" gibi takip vaadi verme. Bunun yerine: "Kesin değerlendirme hastanede ilgili uzman hekim muayenesi sonrasında yapılır." de.
 - Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, hekim ismini teyit etme, talebini planlama için not aldığını söyle.
 - SGK VE TA12 ANLAŞMASI POLİTİKASI: Yurt dışından gelen hastalar için Almanya/yurt dışı SGK (TA12, T12 vb.) veya yurt dışı sigorta anlaşmaları hastanemizde GEÇERLİ DEĞİLDİR. SGK anlaşmamız yalnızca Türkiye'de ikamet eden/yaşayan vatandaşlarımız için geçerlidir. Yurt dışı hastaları özel hasta statüsünde hizmet almaktadır. Bu yöndeki sorulara net ve dürüst bir şekilde "yurt dışı/Almanya SGK/TA12 anlaşmamızın geçerli olmadığını, yurt dışından gelen misafirlerimizin özel hasta statüsünde olduğunu" söyle.
@@ -1148,7 +1150,7 @@ YAPMA:
       } else if (effectiveIntent === 'time_availability') {
         intentGuide = `Intent: time_availability\nBu cevapta hastanın/müşterinin uygun zamanını not et ve onay al.\nKesin bir randevu saati taahhüt etme, ekibin arayacağını belirt.`;
       } else if (effectiveIntent === 'price_question') {
-        intentGuide = `Intent: price_question\nBu cevapta fiyat/ödeme/TA12 gibi kaygıları önce anladığını göster. Fiyatın kişiye özel değerlendirme sonrasında belirlendiğini açıkla.\nKesinlikle rakamsal fiyat verme. Telefon görüşmesini dayatma; hastanın yazdığı ödeme, evrak, geliş ve konaklama sorularını tek tek sahiplenip, gerekirse "isterseniz bunu telefonla da netleştirebiliriz" şeklinde seçenek sun.`;
+        intentGuide = `Intent: price_question\nBu cevapta fiyat/ödeme/TA12 gibi kaygıları önce anladığını göster. Hastanın yazdığı ödeme, evrak, geliş ve konaklama kaygılarını varsa tek tek sahiplen. Fiyat için şu güvenli cümleyi kullan: "Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum."\nKesinlikle rakamsal fiyat verme. Telefon görüşmesini dayatma. Bu turda telefon görüşmesi, arama, randevu, uygun gün veya uygun saat isteme. Hasta ayrıca açıkça arama/randevu isterse bunu sonraki turda ayrı niyet olarak ele al ve seçenek sun.`;
       } else if (effectiveIntent === 'distance_objection') {
         intentGuide = `Intent: distance_objection\nBu cevapta mesafe/ulaşım/konaklama endişesini küçümsemeden anladığını belirt. Transfer, konaklama ve süreç planlamasında koordinasyon desteği verilebildiğini doğal biçimde anlat.\nAkademik uzman ekibe değin; telefon görüşmesini tek çıkış yolu gibi dayatma, önce endişeleri yazılı olarak toparla ve netleştirici tek soru sor.`;
       } else if (effectiveIntent === 'complaint_detail') {
@@ -1256,11 +1258,13 @@ Bu kural tenant prompt'u ne derse desin üzerindedir.
 - Aynı cevabı tekrar etme.
 - Kullanıcı “gelemem”, “gelmeyi düşünmüyorum”, “sadece bilgi almak istiyorum” derse randevu/telefon için zorlama.
 - Sağlık turizmi akışında telefon/fiziki randevudan önce Türkiye’ye gelme niyetini doğal şekilde netleştir.
-- Niyet olumluysa planlama ve arama saatine geç. Ancak kullanıcı net bir geliş tarihi veya dönemi bildirdiyse, doğrudan arama saati sormak yerine geliş tarihini not al, başka sorusu olup olmadığını sor ve detaylar için telefon görüşmesi isteyip istemediğini seçenek olarak sun. Bu aşamada saat sormanın mantığı yoktur.
+- Niyet olumluysa planlama ve arama saatine geç. Ancak kullanıcı net bir geliş tarihi veya dönemi bildirdiyse, doğrudan arama saati sormak yerine geliş tarihini not al, başka sorusu olup olmadığını sor ve detaylar için telefon görüşmesi isteyip istemediğini seçenek olarak sun. Tarih/dönem net değilse telefon veya randevu planlamasına geçme. Hasta zaten "30-31", "7-14", "8. ay" gibi olası bir dönem verdiyse tekrar gün isteme; "Bu tarihler hâlâ olası mı?" veya "Planınız netleşince birlikte ilerleyebiliriz" çizgisinde kal.
 - Niyet belirsizse bilgi ver, güven ver, ama baskı yapma.
 - Niyet olumsuzsa yardımcı bilgi modunda kal.
 - Daha önce form konuşulmuşsa tekrar ilk karşılama/tanıtım metni yazma.
 - “Merhaba” mesajı aktif form bağlamında gelirse kısa ve doğal devam cevabı ver.
+- Form veya son mesajda ayı belirsiz sayısal tarih aralığı varsa ay uydurma. "30-31 Haziran", "31 Haziran" gibi kesin/geçersiz tarih üretme; belirsizliği koru.
+- Türkçe hasta-facing cevapta "şikayetiniz olduğunuzu", "gelme ihtimalinizin olduğunuzu", "hastanınız hastanemizde", "hastanın hastanemizde muayene edilmesi" gibi bozuk kalıpları kullanma.
 - Kullanıcı Arapça yazıyorsa Arapça devam et.
 - Kullanıcı sadece konum sorarsa önce sadece şehir/ülke söyle.
 - Açık adresi sadece açık adres/konum/harita/tam adres istenirse ver.

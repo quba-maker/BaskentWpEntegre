@@ -22,6 +22,12 @@ const COUNTRY_MAPPINGS: Record<string, { country: string; confidence: 'high' | '
   'germany': { country: 'Almanya', confidence: 'high', confirmationNeeded: false },
   'kazakistan': { country: 'Kazakistan', confidence: 'high', confirmationNeeded: false },
   'kazakhstan': { country: 'Kazakistan', confidence: 'high', confirmationNeeded: false },
+  "o'zbekiston": { country: 'Özbekistan', confidence: 'high', confirmationNeeded: false },
+  'ozbekiston': { country: 'Özbekistan', confidence: 'high', confirmationNeeded: false },
+  'uzbekiston': { country: 'Özbekistan', confidence: 'high', confirmationNeeded: false },
+  'uzbekistan': { country: 'Özbekistan', confidence: 'high', confirmationNeeded: false },
+  'özbekistan': { country: 'Özbekistan', confidence: 'high', confirmationNeeded: false },
+  'ozbekistan': { country: 'Özbekistan', confidence: 'high', confirmationNeeded: false },
   'kırgızistan': { country: 'Kırgızistan', confidence: 'high', confirmationNeeded: false },
   'kirgizistan': { country: 'Kırgızistan', confidence: 'high', confirmationNeeded: false },
   'kyrgyzstan': { country: 'Kırgızistan', confidence: 'high', confirmationNeeded: false },
@@ -38,6 +44,85 @@ const COUNTRY_MAPPINGS: Record<string, { country: string; confidence: 'high' | '
   'avusturya': { country: 'Avusturya', confidence: 'high', confirmationNeeded: false },
   'austria': { country: 'Avusturya', confidence: 'high', confirmationNeeded: false }
 };
+
+function normalizeCountryKey(value: string): string {
+  return value
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'i')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[’`´]/g, "'")
+    .replace(/[^a-z'\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const curr = new Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(
+        curr[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost
+      );
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function fuzzyCountryMatch(raw: string): { country: string; confidence: 'high' | 'medium'; confirmationNeeded: boolean } | null {
+  const clean = normalizeCountryKey(raw);
+  if (!clean || clean.length < 4 || clean.length > 32 || /\d/.test(clean)) return null;
+  if (clean.split(/\s+/).length > 3) return null;
+
+  const candidates = new Map<string, string>();
+  for (const [key, mapping] of Object.entries(COUNTRY_MAPPINGS)) {
+    candidates.set(normalizeCountryKey(key), mapping.country);
+    candidates.set(normalizeCountryKey(mapping.country), mapping.country);
+  }
+  for (const [key, value] of Object.entries(COUNTRY_NAME_TR_MAP)) {
+    candidates.set(normalizeCountryKey(key), value);
+    candidates.set(normalizeCountryKey(value), value);
+  }
+  for (const [, info] of PHONE_PREFIX_MAP) {
+    candidates.set(normalizeCountryKey(info.name), info.name);
+    candidates.set(normalizeCountryKey(info.code), info.name);
+  }
+
+  let best: { country: string; dist: number; key: string } | null = null;
+  for (const [key, country] of candidates.entries()) {
+    if (!key || Math.abs(key.length - clean.length) > 2) continue;
+    const dist = levenshtein(clean, key);
+    if (!best || dist < best.dist) {
+      best = { country, dist, key };
+    }
+  }
+
+  if (!best) return null;
+  const maxDist = clean.length <= 6 ? 1 : 2;
+  if (best.dist > maxDist) return null;
+
+  return {
+    country: best.country,
+    confidence: best.dist === 1 ? 'high' : 'medium',
+    confirmationNeeded: false
+  };
+}
 
 export function normalizeCountry(
   rawCountry: string | null | undefined,
@@ -107,7 +192,18 @@ export function normalizeCountry(
     }
   }
 
-  // 4. Check phone prefix fallback if the country raw is still empty
+  // 4. Fuzzy typo tolerance for country-only answers and noisy form values
+  if (cleanRaw) {
+    const fuzzy = fuzzyCountryMatch(cleanRaw);
+    if (fuzzy) {
+      result.country = fuzzy.country;
+      result.countryConfidence = fuzzy.confidence;
+      result.countryConfirmationNeeded = fuzzy.confirmationNeeded;
+      return result;
+    }
+  }
+
+  // 5. Check phone prefix fallback if the country raw is still empty
   if (phone) {
     const phoneCountryInfo = getCountryFromPhone(phone);
     if (phoneCountryInfo) {

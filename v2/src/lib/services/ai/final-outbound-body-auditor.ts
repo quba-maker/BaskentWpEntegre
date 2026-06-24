@@ -295,6 +295,55 @@ function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { t
   return { text: result, rewrote };
 }
 
+function isPriceQuestionInbound(inboundText?: string): boolean {
+  const clean = (inboundText || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase();
+  return /\b(fiyat|ücret|ucret|tutar|ne kadar|kaç para|kac para|ödeme|odeme)\b/i.test(clean);
+}
+
+function applyPriceQuestionGuard(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
+  if (!isPriceQuestionInbound(ctx.inboundText)) {
+    return { text, rewrote: false };
+  }
+
+  let result = text;
+  let rewrote = false;
+  const exactPriceSentence = 'Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.';
+
+  const priceSentencePattern = /Fiyat\s+bilgisi,[\s\S]{0,220}?buradan\s+net\s+(?:bir\s+)?(?:fiyat\s+)?paylaşamıyorum\./i;
+  if (priceSentencePattern.test(result)) {
+    result = result.replace(priceSentencePattern, exactPriceSentence);
+    rewrote = true;
+  }
+
+  const phoneCtaPatterns: RegExp[] = [
+    /\s*(?:İsterseniz|Dilerseniz)?[^.\n!?]*(?:telefon\s+görüşmesi|arama)[^.\n!?]*(?:planlayabiliriz|ayarlayabiliriz|yapabiliriz|oluşturabiliriz)[^.\n!?]*[.!?]?/gi,
+    /\s*(?:Bu\s+görüşmede|Görüşmede)[^.\n!?]*(?:daha\s+net|detaylı)[^.\n!?]*(?:bilgi|konuşabiliriz)[^.\n!?]*[.!?]?/gi,
+    /\s*(?:Öncelikle,?\s*)?(?:telefon\s+görüşmesi|arama)\s+için\s+size\s+uygun\s+gün\s+ve\s+saat\s+aralığı\s+nedir\??/gi,
+    /\s*Size\s+uygun\s+gün\s+ve\s+saat\s+aralığı\s+nedir\??/gi,
+    /\s*Hangi\s+gün\s+ve\s+saat\s+aralığı\s+sizin\s+için\s+uygun\s+olur\??/gi,
+  ];
+
+  for (const pattern of phoneCtaPatterns) {
+    const next = result.replace(pattern, '');
+    if (next !== result) {
+      result = next;
+      rewrote = true;
+    }
+  }
+
+  const onlyPrice = result.trim() === exactPriceSentence;
+  if (onlyPrice) {
+    result = `${exactPriceSentence}\n\nSüreçle ilgili merak ettiğiniz başlığı yazarsanız buradan yardımcı olayım.`;
+    rewrote = true;
+  }
+
+  result = result.replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
+  return { text: result, rewrote };
+}
+
 export class FinalOutboundBodyAuditor {
   /**
    * Apply mandatory last-mile chain to the final body before 360dialog send.
@@ -380,6 +429,12 @@ export class FinalOutboundBodyAuditor {
       const naturalTone = applyNaturalToneRewrites(result, ctx);
       if (naturalTone.rewrote) {
         result = naturalTone.text;
+        rewrote = true;
+      }
+
+      const priceGuard = applyPriceQuestionGuard(result, ctx);
+      if (priceGuard.rewrote) {
+        result = priceGuard.text;
         rewrote = true;
       }
 
