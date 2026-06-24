@@ -10,6 +10,8 @@
  * - Runs read-only on history (no side effects)
  */
 
+import { DepartmentAliasResolver } from './department-alias-resolver';
+
 export type ParticipantRelation = 'self' | 'mother' | 'father' | 'spouse' | 'child' | 'relative';
 
 export interface CallbackState {
@@ -197,6 +199,21 @@ export class ConsultantConversationStateResolver {
         if (complaint) break;
       }
       cp.pattern.lastIndex = 0;
+    }
+
+    // If no built-in complaint pattern matched, still preserve an explicit
+    // department signal from the conversation (Dermatoloji, Kadın Doğum, KBB...).
+    // This keeps short follow-ups like "bana isim söyle" tied to the last
+    // department the patient actually mentioned.
+    if (!department) {
+      for (const msg of [...relevantMessages].reverse()) {
+        const aliasResult = DepartmentAliasResolver.resolve(msg.content, null);
+        if (aliasResult) {
+          department = aliasResult.canonical;
+          complaint = aliasResult.displayLabel;
+          break;
+        }
+      }
     }
 
     // Location (only for self)

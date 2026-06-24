@@ -1808,7 +1808,7 @@ export class AIResponseOrchestrator {
             if (p.department && !depts.includes(p.department)) depts.push(p.department);
           }
           if (depts.length === 0 && resolvedActiveDepartment) depts.push(resolvedActiveDepartment);
-          const doctorPolicy = DoctorNamesPolicy.resolve(brain, depts, hasPreviousDoctorAsk);
+          const doctorPolicy = DoctorNamesPolicy.resolve(brain, depts, hasPreviousDoctorAsk, replyLanguage);
           fallbackResult = { text: doctorPolicy.text, finalPath: `doctor_names_policy_${doctorPolicy.mode}` };
           console.log(JSON.stringify({
             tag: 'LIVE_TEST_PARITY_PATH_SELECTED',

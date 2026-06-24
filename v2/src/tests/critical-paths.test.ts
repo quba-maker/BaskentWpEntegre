@@ -4940,6 +4940,51 @@ test("P0.16 - 13e: Doctor resolver Kadın Doğum aliasını doğrulanmış liste
   assert(docs.some(d => d.name === "Doç. Dr. Mehmet Ufuk CERAN"), "Mehmet Ufuk CERAN listede olmalı");
 });
 
+test("P0.16 - 13g: Doctor resolver bilgi bankası kurallar alanındaki Dermatoloji listesini okur", () => {
+  const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const knowledgeRules = `
+    --- VERIFIED BİLGİ ARŞİVİ ---
+    Deri ve Zührevi Hastalıkları / Dermatoloji:
+    - Öğr. Gör. Dr. Gülay ÖZEL ŞAHİN
+    - Uzm. Dr. Emre ZEKEY
+  `;
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", "Sen Rüya'sın.", { industry: "healthcare" }, null, { rules: knowledgeRules });
+
+  const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Dermatoloji");
+  assert(docs.length === 2, `Knowledge rules Dermatoloji için 2 doktor çözülmeli, gelen: ${docs.length}`);
+  assert(docs.some(d => d.name === "Uzm. Dr. Emre ZEKEY"), "Emre ZEKEY bilgi bankasından çekilmeli");
+});
+
+test("P0.16 - 13h: Dermatoloji bağlamı kısa doktor ismi takiplerinde korunur", () => {
+  const { ConsultantConversationStateResolver } = require("../lib/services/ai/consultant-conversation-state-resolver");
+  const { DoctorNamesPolicy } = require("../lib/services/ai/doctor-names-policy");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const knowledgeRules = `
+    Deri ve Zührevi Hastalıkları / Dermatoloji:
+    - Öğr. Gör. Dr. Gülay ÖZEL ŞAHİN
+    - Uzm. Dr. Emre ZEKEY
+  `;
+  const brain = createTenantBrain("t1", "whatsapp", "payload1", "Sen Rüya'sın.", { industry: "healthcare" }, null, { rules: knowledgeRules });
+  const history = [
+    { role: "user", content: "Randevu oluşturacam" },
+    { role: "user", content: "Dermatolojibölümünden" },
+    { role: "assistant", content: "Adınızı ve ülkenizi öğrenebilir miyim?" },
+    { role: "user", content: "Aysu Kazakistan" },
+    { role: "user", content: "Doktorların ismini öğrenebilir miyim" },
+    { role: "assistant", content: "Bu konuda isimleri yanlış vermek istemem." },
+    { role: "user", content: "Bana isim söyle" }
+  ];
+
+  const state = ConsultantConversationStateResolver.resolve(history as any);
+  assert(state.participants[0].department === "Dermatoloji", `Dermatoloji bağlamı korunmalı, gelen: ${state.participants[0].department}`);
+
+  const result = DoctorNamesPolicy.resolve(brain, [state.participants[0].department], true, "tr");
+  assert(result.mode === "verified_list", `Tekrar istekte doğrulanmış liste dönmeli, gelen: ${result.mode}`);
+  assert(result.text.includes("Uzm. Dr. Emre ZEKEY"), `Dermatoloji hekim adı dönmeli: ${result.text}`);
+  assert(!result.text.includes("isimleri yanlış vermek istemem"), `Verified list varken yuvarlak cevap dönmemeli: ${result.text}`);
+});
+
 test("P0.16 - 13f: Doctor profile question generic kaçışa düşmez", () => {
   const { DoctorNamesPolicy, isDoctorProfileQuestionText } = require("../lib/services/ai/doctor-names-policy");
   const { createTenantBrain } = require("../lib/brain/tenant-brain");

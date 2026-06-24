@@ -67,7 +67,9 @@ export class DoctorDirectoryResolver {
       }
     }
 
-    // Fallback: Parse from system prompt if DB config is empty
+    // Fallback: Parse from system prompt and knowledge base if DB config is empty.
+    // In the UI, tenants often keep the full verified doctor archive in
+    // "Bilgi Bankası / Kurallar" instead of the main system prompt.
     if (rawList.length === 0 && brain.prompts?.systemPrompt) {
       const promptText = brain.prompts.systemPrompt;
       const verifiedListIndex = promptText.indexOf('Verified Hekim Listesi:');
@@ -76,6 +78,21 @@ export class DoctorDirectoryResolver {
         rawList = this.extractDoctorEntries(block);
       } else {
         rawList = this.extractDoctorEntries(promptText);
+      }
+    }
+
+    if (rawList.length === 0) {
+      const knowledgeSources = [
+        brain.context.knowledge?.rules,
+        brain.context.knowledge?.prices,
+        brain.context.config?.knowledgeRules,
+        brain.context.config?.knowledge_rules,
+        brain.context.config?.verifiedInfoArchive,
+        brain.context.config?.verified_info_archive
+      ].filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+
+      for (const source of knowledgeSources) {
+        rawList.push(...this.extractDoctorEntries(source));
       }
     }
 
