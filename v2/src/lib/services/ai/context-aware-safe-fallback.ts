@@ -1,6 +1,7 @@
 import { TenantBrain } from '../../brain/tenant-brain';
 import { ConversationIntentRouter, ConversationIntent } from './conversation-intent-router';
 import { resolveActivePromptIdentityContext, isNameBypassAllowed } from './active-prompt-context';
+import { MedicalTermNormalizer } from './medical-term-normalizer';
 
 export interface DeterministicFallbackParams {
   inboundText: string;
@@ -81,13 +82,54 @@ export class ContextAwareSafeFallbackResolver {
 
   private static languagePreferenceOffer(country: string): string | null {
     const optionsByCountry: Record<string, string> = {
-      'Özbekistan': 'Türkçe devam edebiliriz; Özbekçe, Rusça veya İngilizce sizin için daha rahatsa o dilde de yardımcı olabilirim',
-      'Kazakistan': 'Türkçe devam edebiliriz; Kazakça, Rusça veya İngilizce sizin için daha rahatsa o dilde de yardımcı olabilirim',
-      'Kırgızistan': 'Türkçe devam edebiliriz; Kırgızca, Rusça veya İngilizce sizin için daha rahatsa o dilde de yardımcı olabilirim',
-      'Fransa': 'Türkçe devam edebiliriz; Fransızca veya İngilizce sizin için daha rahatsa o dilde de yardımcı olabilirim',
+      'Özbekistan': 'Özbekçe, Rusça veya İngilizce',
+      'Kazakistan': 'Kazakça, Rusça veya İngilizce',
+      'Kırgızistan': 'Kırgızca, Rusça veya İngilizce',
+      'Fransa': 'Fransızca veya İngilizce',
     };
     const options = optionsByCountry[country];
-    return options ? `${options}. Hangi dil sizin için daha rahat olur?` : null;
+    return options
+      ? `Benimle istediğiniz dilde konuşabilirsiniz. Türkçe dışında ${options} sizin için daha rahatsa o dilde de yardımcı olayım. Hangi dil daha rahat olur?`
+      : null;
+  }
+
+  private static weakLanguageSignalScore(inboundText: string, history: any[] = []): number {
+    const recent = [
+      ...history.filter(m => m?.role === 'user' && m?.content).slice(-4).map(m => String(m.content)),
+      inboundText || ''
+    ].join(' ');
+    const clean = this.normalizeLooseText(recent);
+    if (!clean) return 0;
+
+    const explicitSignals = [
+      /o'?zbekiston|ozbekiston|uzbekiston|uzbekistan|özbekistan|ozbekistan/i,
+      /psor(?:y|i)azi|psoriaz|psoryaz|psoriatik|psoriatic/i,
+      /\bhaman\b/i,
+      /\bhransa\b/i,
+    ];
+    let score = explicitSignals.reduce((acc, pattern) => acc + (pattern.test(clean) ? 1 : 0), 0);
+
+    const tokens = clean
+      .replace(/[^\p{L}'\s]/gu, ' ')
+      .split(/\s+/)
+      .filter(t => t.length >= 5);
+    const suspicious = tokens.filter(t =>
+      /[qwxy]/i.test(t) ||
+      /'{1}/.test(t) ||
+      /(skiy|skij|ovich|ovna|bek|stan)$/i.test(t)
+    );
+    if (suspicious.length >= 2) score += 1;
+    return score;
+  }
+
+  private static shouldOfferLanguagePreference(country: string, inboundText: string, history: any[] = []): boolean {
+    if (!this.languagePreferenceOffer(country)) return false;
+    const alreadyAsked = history.slice(-8).some(msg => {
+      if (msg?.role !== 'assistant') return false;
+      const clean = this.normalizeLooseText(String(msg.content || ''));
+      return /hangi\s+dil|dilde\s+devam|dil\s+daha\s+rahat|özbekçe|ozbekçe|rusça|rusca|fransızca|fransizca/i.test(clean);
+    });
+    return !alreadyAsked && this.weakLanguageSignalScore(inboundText, history) >= 2;
   }
 
   private static resolveArabic(params: DeterministicFallbackParams): DeterministicFallbackResult {
@@ -353,7 +395,9 @@ export class ContextAwareSafeFallbackResolver {
       let text = lastAskedTimezone
         ? `${countryOnlyAnswer}’da olduğunuzu not ediyorum. Arama için ${countryOnlyAnswer} saati mi, Türkiye saati mi esas alınsın?`
         : `${countryOnlyAnswer}’da olduğunuzu not ediyorum. Türkiye’ye/Konya’ya gelme ihtimaliniz olur mu?`;
-      const languageOffer = ContextAwareSafeFallbackResolver.languagePreferenceOffer(countryOnlyAnswer);
+      const languageOffer = ContextAwareSafeFallbackResolver.shouldOfferLanguagePreference(countryOnlyAnswer, inboundText, history)
+        ? ContextAwareSafeFallbackResolver.languagePreferenceOffer(countryOnlyAnswer)
+        : null;
       if (languageOffer) {
         text += `\n\n${languageOffer}`;
       }
@@ -364,6 +408,20 @@ export class ContextAwareSafeFallbackResolver {
         hasComplaint: false,
         finalPath: 'country_answer_continuation_fallback',
         detectedIntent
+      };
+    }
+
+    const medicalTermSuggestion = isHealthcare
+      ? MedicalTermNormalizer.suggest(inboundText)
+      : null;
+    if (medicalTermSuggestion?.shouldConfirm) {
+      return {
+        text: `${medicalTermSuggestion.canonicalTerm} demek istediniz, doğru mu? Kısaca teyit ederseniz ona göre yardımcı olayım.`,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: true,
+        finalPath: 'medical_term_confirmation_fallback',
+        detectedIntent: 'complaint_detail' as any
       };
     }
 

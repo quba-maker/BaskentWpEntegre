@@ -9,6 +9,7 @@ import { ConversationStateArbitrator } from './conversation-state-arbitrator';
 import { RepeatGuard } from './repeat-guard';
 import { LanguageResponsePolicy } from './language-response-policy';
 import { HumanTonePolicy } from './human-tone-policy';
+import { MedicalTermNormalizer } from './medical-term-normalizer';
 import { resolvePatientNameDetailed } from '@/lib/utils/patient-name-resolver';
 import { resolvePatientCountryDetailed } from '@/lib/utils/country-normalizer';
 import { buildObjectionPolicy } from './policies/objection-policy';
@@ -703,10 +704,10 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       }
       if (lp.needsLanguagePreferenceClarification) {
         const languageOptions = (lp.suggestedLanguageNames && lp.suggestedLanguageNames.length > 0)
-          ? lp.suggestedLanguageNames.join(', ')
+          ? lp.suggestedLanguageNames.filter(name => name !== 'Türkçe').join(', ')
           : 'Türkçe, İngilizce';
-        langContextText += `- DİL TERCİHİ NETLEŞTİRME: Hastanın bulunduğu ülke/dil ipucu ve yazım tarzı, Türkçe iletişimde zorlanabileceğini gösteriyor. Bu turda konuyu sıfırlamadan, kısa ve sıcak şekilde hangi dilde devam etmek istediğini sor.\n`;
-        langContextText += `- Kullanabileceğin doğal cümle: "İsterseniz Türkçe devam edebiliriz; ${languageOptions} dillerinden biri sizin için daha rahatsa o dilde de yardımcı olabilirim. Hangi dil sizin için daha rahat olur?"\n`;
+        langContextText += `- DİL TERCİHİ NETLEŞTİRME: Hastanın bulunduğu ülke/dil ipucu ve tekrarlayan yazım tarzı, Türkçe iletişimde zorlanabileceğini gösteriyor. Bu turda konuyu sıfırlamadan, kısa ve sıcak şekilde hangi dilde devam etmek istediğini sor.\n`;
+        langContextText += `- Kullanabileceğin doğal cümle: "Benimle istediğiniz dilde konuşabilirsiniz. Türkçe dışında ${languageOptions || 'İngilizce'} sizin için daha rahatsa o dilde de yardımcı olayım. Hangi dil daha rahat olur?"\n`;
         langContextText += `- Bu soruyu her mesajda tekrar etme; hasta dil seçerse sonraki cevapları o dilde sürdür.\n`;
       }
       langContextText += `- Form alan adları veya sistem verileri Türkçe olsa bile cevabını ${lp.replyLanguageName} dilinde ver.\n`;
@@ -1183,6 +1184,23 @@ YAPMA:
     ].join('\n');
 
     finalPrompt += `\n\n=== 🎯 SON MESAJ DAVRANIŞ KILAVUZU ===\n${intentGuide}\n${behavioralSummary}\n====================================\n`;
+
+    const medicalTermSuggestion = isHealthcare ? MedicalTermNormalizer.suggest(lastUserMessage) : null;
+    if (medicalTermSuggestion?.shouldConfirm) {
+      finalPrompt += `\n\n=== 🩺 HASTALIK ADI BELİRSİZLİĞİ — TEYİT ET ===
+Son kullanıcı mesajında hastalık/şikayet adı yazımı belirsiz olabilir: "${medicalTermSuggestion.rawText}".
+En yakın güvenli eşleşme: "${medicalTermSuggestion.canonicalTerm}".
+Bu eşleşmeyi kesin tanı veya kesin şikayet gibi kabul etme.
+Önce kısa ve doğal teyit sor:
+"${medicalTermSuggestion.canonicalTerm} demek istediniz, doğru mu?"
+Teyit gelmeden bölüm, süreç veya tedavi detayına geçme.
+===============================================\n`;
+    } else if (medicalTermSuggestion && !medicalTermSuggestion.shouldConfirm) {
+      finalPrompt += `\n\n=== 🩺 HASTALIK ADI YAZIM DÜZELTME ===
+Son kullanıcı mesajındaki yazım hatası yüksek güvenle "${medicalTermSuggestion.canonicalTerm}" olarak anlaşılabilir.
+Bunu dil tercihi problemi gibi yorumlama; Türkçe doğal cevap ver.
+=====================================\n`;
+    }
 
     if (unifiedContext?.dateAmbiguityClarification) {
       const rawAmbiguousDate = unifiedContext.dateAmbiguityClarification.raw || lastUserMessage;

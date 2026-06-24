@@ -13180,7 +13180,7 @@ test("Başkent v80 T78: O'zbekiston country answer is recognized and continues c
 
   assert(result.finalPath === "country_answer_continuation_fallback", `Expected country continuation, got ${result.finalPath}`);
   assert(result.text.includes("Özbekistan"), `Should acknowledge Özbekistan: ${result.text}`);
-  assert(result.text.includes("Hangi dil sizin için daha rahat olur"), `Should offer language preference for weak Turkish / Uzbekistan context: ${result.text}`);
+  assert(result.text.includes("Hangi dil daha rahat olur"), `Should offer language preference for weak Turkish / Uzbekistan context: ${result.text}`);
   assert(!result.text.includes("Hangi konuda bilgi almak istiyorsunuz"), `Must not reset after country answer: ${result.text}`);
 });
 
@@ -13227,6 +13227,81 @@ test("Başkent v80 T80: PromptBuilder injects language preference clarification 
   assert(prompt.includes("DİL TERCİHİ NETLEŞTİRME"), "Prompt should inject language preference directive");
   assert(prompt.includes("Özbekçe"), "Prompt should mention Uzbek option");
   assert(prompt.includes("konuyu sıfırlamadan"), "Prompt should avoid resetting the conversation");
+});
+
+test("Başkent v81 T81: single typo in Turkish complaint does not trigger language preference", () => {
+  const { LanguageResponsePolicy } = require("../lib/services/ai/language-response-policy");
+  const result = LanguageResponsePolicy.resolve("Bol fitiğim var", [
+    { role: "user", content: "Merhaba" },
+    { role: "assistant", content: "Merhaba, size nasıl yardımcı olabilirim?" }
+  ]);
+
+  assert(result.needsLanguagePreferenceClarification === false, "One Turkish typo must not trigger language preference clarification");
+  assert((result.languageWeakSignalScore || 0) < 2, `Weak signal score should stay below threshold, got: ${result.languageWeakSignalScore}`);
+});
+
+test("Başkent v81 T82: fuzzy medical term suggests confirmation for psoriatic arthritis", () => {
+  const { MedicalTermNormalizer } = require("../lib/services/ai/medical-term-normalizer");
+  const suggestion = MedicalTermNormalizer.suggest("Psoryaziçeskiy artrit");
+
+  assert(suggestion !== null, "Should produce a medical term suggestion");
+  assert(suggestion.canonicalTerm === "Psöriyatik artrit", `Expected Psöriyatik artrit, got: ${suggestion?.canonicalTerm}`);
+  assert(suggestion.shouldConfirm === true, "Medium-confidence medical term must be confirmed first");
+});
+
+test("Başkent v81 T83: PromptBuilder injects medical term confirmation directive", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v81-t83",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    currentMessageText: "Psoryaziçeskiy artrit",
+    history: []
+  });
+
+  assert(prompt.includes("HASTALIK ADI BELİRSİZLİĞİ"), "Prompt should include medical term ambiguity block");
+  assert(prompt.includes("Psöriyatik artrit demek istediniz, doğru mu?"), "Prompt should ask for natural confirmation");
+  assert(prompt.includes("kesin tanı veya kesin şikayet gibi kabul etme"), "Prompt must not treat fuzzy match as certain");
+});
+
+test("Başkent v81 T84: fallback confirms fuzzy medical term instead of resetting conversation", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v81-t84",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "Psoryaziçeskiy artrit",
+    brain,
+    identityConfig: {
+      personaName: "Rüya",
+      organizationName: "Başkent Üniversitesi Konya Hastanesi"
+    },
+    unifiedContext: { history: [] },
+    replyLanguage: "tr"
+  });
+
+  assert(result.finalPath === "medical_term_confirmation_fallback", `Expected medical term fallback, got: ${result.finalPath}`);
+  assert(result.text.includes("Psöriyatik artrit demek istediniz, doğru mu?"), `Should ask confirmation: ${result.text}`);
+});
+
+test("Başkent v81 T85: final Turkish normalizer fixes missing space after sentence punctuation", () => {
+  const { TurkishFinalQualityNormalizer } = require("../lib/services/ai/turkish-final-quality-normalizer");
+  const result = TurkishFinalQualityNormalizer.normalize("Geçmiş olsun.Bel fıtığı şikayetiniz olduğunu anlıyorum.");
+
+  assert(result.text.includes("Geçmiş olsun. Bel fıtığı"), `Should add missing space: ${result.text}`);
+  assert(result.appliedPatterns.includes("missing_space_after_sentence_punctuation"), "Should record punctuation rewrite");
 });
 
 

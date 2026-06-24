@@ -42,6 +42,12 @@ interface RewriteRule {
 }
 
 const REWRITE_RULES: RewriteRule[] = [
+  // "Geçmiş olsun.Bel..." → "Geçmiş olsun. Bel..."
+  {
+    id: 'missing_space_after_sentence_punctuation',
+    pattern: /([.!?])([A-ZÇĞİÖŞÜ])/g,
+    replacement: (_match: string, punctuation: string, nextChar: string) => `${punctuation} ${nextChar}`,
+  },
   // "mümkün değildir olmuyor" → "mümkün değildir"
   {
     id: 'mumkun_degil_olmuyor_fix',

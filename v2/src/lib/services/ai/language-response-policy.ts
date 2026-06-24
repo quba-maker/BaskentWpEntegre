@@ -36,6 +36,8 @@ export interface LanguagePolicyResult {
   languagePreferenceReason?: string;
   /** Suggested languages to mention naturally in the prompt */
   suggestedLanguageNames?: string[];
+  /** Weak-language/transliteration signal score; used to avoid asking too early */
+  languageWeakSignalScore?: number;
 }
 
 const ISO_TO_NAME: Record<string, string> = {
@@ -109,9 +111,9 @@ function detectForeignCountryHint(currentMessage: string, recentText: string): s
   return country || null;
 }
 
-function hasWeakTurkishOrTransliterationSignal(currentMessage: string, history: { role: string; content: string }[]): boolean {
+function getWeakTurkishOrTransliterationScore(currentMessage: string, history: { role: string; content: string }[]): number {
   const recent = normalizeLoose(getRecentUserText(currentMessage, history));
-  if (!recent) return false;
+  if (!recent) return 0;
 
   const explicitSignals = [
     /o'?zbekiston|ozbekiston|uzbekiston|uzbekistan|özbekistan|ozbekistan/i,
@@ -119,13 +121,13 @@ function hasWeakTurkishOrTransliterationSignal(currentMessage: string, history: 
     /\bhaman\b/i,
     /\bhransa\b/i,
   ];
-  if (explicitSignals.some(pattern => pattern.test(recent))) return true;
+  let score = explicitSignals.reduce((acc, pattern) => acc + (pattern.test(recent) ? 1 : 0), 0);
 
   const tokens = recent
     .replace(/[^\p{L}'\s]/gu, ' ')
     .split(/\s+/)
     .filter(t => t.length >= 5);
-  if (tokens.length < 3) return false;
+  if (tokens.length < 3) return score;
 
   const suspicious = tokens.filter(t =>
     /[qwxy]/i.test(t) ||
@@ -133,7 +135,8 @@ function hasWeakTurkishOrTransliterationSignal(currentMessage: string, history: 
     /(skiy|skij|ovich|ovna|bek|stan)$/i.test(t)
   );
 
-  return suspicious.length >= 2;
+  if (suspicious.length >= 2) score += 1;
+  return score;
 }
 
 export class LanguageResponsePolicy {
@@ -223,7 +226,8 @@ export class LanguageResponsePolicy {
     }
 
     const foreignCountryHint = detectForeignCountryHint(currentMessage, getRecentUserText(currentMessage, history));
-    const weakLanguageSignal = hasWeakTurkishOrTransliterationSignal(currentMessage, history);
+    const weakLanguageScore = getWeakTurkishOrTransliterationScore(currentMessage, history);
+    const weakLanguageSignal = weakLanguageScore >= 2;
     const alreadyAskedLanguage = hasLanguagePreferenceBeenAsked(history);
     const needsLanguagePreferenceClarification = !!foreignCountryHint
       && weakLanguageSignal
@@ -251,7 +255,8 @@ export class LanguageResponsePolicy {
       languagePreferenceReason: needsLanguagePreferenceClarification
         ? `foreign_country_with_weak_language_signal:${foreignCountryHint}`
         : undefined,
-      suggestedLanguageNames
+      suggestedLanguageNames,
+      languageWeakSignalScore: weakLanguageScore
     };
   }
 
