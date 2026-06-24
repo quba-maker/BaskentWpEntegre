@@ -32,6 +32,39 @@ function formatDeptsList(depts: string[], lang: string): string {
   return depts.slice(0, -1).join(', ') + conj + depts[depts.length - 1];
 }
 
+function normalizeDoctorAskText(text: string): string {
+  return (text || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/\u0307/g, '')
+    .replace(/ğ/g, 'g').replace(/ü/g, 'u')
+    .replace(/ş/g, 's').replace(/ı/g, 'i')
+    .replace(/ö/g, 'o').replace(/ç/g, 'c')
+    .replace(/[’`´]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function isDoctorNameRequestText(text: string, hasPriorDoctorAsk = false): boolean {
+  const clean = normalizeDoctorAskText(text);
+  if (!clean) return false;
+
+  const directPatterns = [
+    /\b(?:doktor|doktorunuz|doktorunun|doktorlar|hekim|hekimler|uzman|uzmanlar|hoca|hocanin|hocanın|kadro|kadronuz)\b.{0,50}\b(?:isim|ismi|ismini|isimleri|ad|adi|adini|adlari|kim|kimler|liste|listesi)\b/,
+    /\b(?:isim|ismi|ismini|isimleri|ad|adi|adini|adlari)\b.{0,50}\b(?:ogren|oren|arastir|bak|ver|paylas|soyle)\b/,
+    /\bhangi\s+(?:doktor|hekim|uzman|hoca)\b/,
+    /\b(?:doktor|hekim|uzman|hoca)\s+kadrosu\b/,
+    /\bkimler\s+var\b/,
+  ];
+
+  if (directPatterns.some(pattern => pattern.test(clean))) return true;
+
+  if (hasPriorDoctorAsk) {
+    return /\b(?:arastiracam|arastiracagim|bakacagim|isim|ad|liste|kadronuz|hocanin)\b/.test(clean);
+  }
+
+  return false;
+}
+
 export class DoctorNamesPolicy {
   /**
    * Generates a response for a doctor name request.

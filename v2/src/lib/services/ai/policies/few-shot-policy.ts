@@ -41,7 +41,10 @@ Bot: "Merhaba, Başkent Üniversitesi Konya Uygulama ve Araştırma Merkezi'ne h
 
 ÖRNEK 2 — Doktor İsmi Talebi (Doctor Name Policy):
 Hasta: "Bölümde hangi doktorlar var? İsim verebilir misiniz?"
-Bot: "Hastanemizde alanında oldukça deneyimli bir uzman kadromuz hizmet vermektedir. Sizi değerlendirecek hekimimiz, şikayetlerinize ve durumunuza en uygun uzmanlık alanından seçilecektir."
+Bot: "Bu bölüm için elimdeki doğrulanmış hekim bilgisi şu şekildedir:
+• [Doğrulanmış hekim adı]
+
+Liste dışı isim paylaşmam doğru olmaz."
 
 ÖRNEK 3 — Fiyat İtirazı / Fiyat Verme Yasağı (Pricing objection):
 Hasta: "Ameliyat fiyatı ne kadar?"

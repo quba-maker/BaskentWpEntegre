@@ -17,7 +17,7 @@ import { withTenantDB } from '@/lib/core/tenant-db';
 // P0.16-K: Consultant brain imports
 import { ConsultantConversationStateResolver } from './consultant-conversation-state-resolver';
 import { MultiIntentConsultantComposer } from './multi-intent-consultant-composer';
-import { DoctorNamesPolicy } from './doctor-names-policy';
+import { DoctorNamesPolicy, isDoctorNameRequestText } from './doctor-names-policy';
 import { ConversationIntentRouter } from './conversation-intent-router';
 // P0.16-L: Live/test parity pipeline imports
 import { ConversationFrameResolver } from './conversation-frame-resolver';
@@ -1652,11 +1652,11 @@ export class AIResponseOrchestrator {
       const isMultiIntentQuery = MultiIntentConsultantComposer.isMultiIntent(inboundText);
 
       // P0.16-K: Doctor names request detection (with repeat check)
-      const isDoctorNamesRequest = /doktor\s+isim|hekim\s+isim|doktor\s+isimleri|kimler\s+var|hangi\s+doktorlar|doktor\s+list/.test(cleanInbound);
       const hasPreviousDoctorAsk = history.some(m =>
         m.role === 'user' &&
-        /doktor\s+isim|hekim\s+isim|hangi\s+doktorlar/.test((m.content || '').toLowerCase())
+        isDoctorNameRequestText(String(m.content || ''), false)
       );
+      const isDoctorNamesRequest = isDoctorNameRequestText(inboundText, hasPreviousDoctorAsk);
 
       // P0.16-K: "başka bilgi" / open-ended continuation — kept for LLM hint injection only, NOT for bypass
       // P0.16-K: match both Turkish ş and ASCII s for real WhatsApp messages

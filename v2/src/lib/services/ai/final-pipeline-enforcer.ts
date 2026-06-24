@@ -118,7 +118,7 @@ export class FinalPipelineEnforcer {
         tag: 'LEGACY_PATH_BLOCKED',
         blockedPhrase: hit,
       }));
-      return 'Doktor kadromuza dair bilgiyi en doğru şekilde iletebilmek için hasta danışmanımız sizi bilgilendirecektir. Hangi gün ve saat aralığında ulaşılmasını istersiniz?';
+      return 'Bu konuda doğrulanmış hekim listesi varsa paylaşabilirim; liste dışı isim uydurmam doğru olmaz. Hangi bölüm için hekim bilgisini öğrenmek istiyorsunuz?';
     }
     return null;
   }

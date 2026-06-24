@@ -287,7 +287,9 @@ export class ConversationIntentRouter {
 
     // 13. Doctor Lookup
     const doctorKeywords = [
-      'doktor kim', 'doktorlar', 'hekim', 'cerrah', 'uzman', 'hangi doktor', 'beyin cerrahi kim', 'doktoru'
+      'doktor kim', 'doktorlar', 'hekim', 'cerrah', 'uzman', 'hangi doktor', 'beyin cerrahi kim', 'doktoru',
+      'doktorunun', 'doktorunuzun', 'doktor ismi', 'doktor isim', 'hekim ismi', 'hekim isim',
+      'hocanın', 'hocanin', 'hoca ismi', 'kadro', 'kadronuz', 'kimler var', 'isimleri öğren', 'ismini öğren'
     ];
     if (doctorKeywords.some(kw => clean.includes(kw))) {
       return 'doctor_lookup';
@@ -522,6 +524,8 @@ export class ConversationIntentRouter {
     const doctorKeywords = [
       'doktor kim', 'doktorlar', 'hekim', 'cerrah', 'uzman', 'hangi doktor', 'doktoru',
       'doktor isim', 'kimler var', 'doktor listesi',
+      'doktorunun', 'doktorunuzun', 'hekim ismi', 'hekim isim', 'hocanın', 'hocanin',
+      'hoca ismi', 'kadro', 'kadronuz', 'isimleri öğren', 'ismini öğren',
     ];
     if (doctorKeywords.some(kw => clean.includes(kw))) {
       intents.push('doctor_lookup');

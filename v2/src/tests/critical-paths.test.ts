@@ -4879,6 +4879,40 @@ test("P0.16 - 13: Doctor resolver system prompt listesinde tire (-) ve yıldız 
   assert(docs[1].name === "Doç. Dr. Caner Hırçın", "Second doctor parsed incorrectly");
 });
 
+test("P0.16 - 13b: Doctor resolver bilgi bankası bölüm başlığı altındaki Dermatoloji hekimlerini çeker", () => {
+  const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const systemPrompt = `
+    --- VERIFIED BİLGİ ARŞİVİ ---
+    Deri ve Zührevi Hastalıkları / Dermatoloji:
+    - Öğr. Gör. Dr. Gülay ÖZEL ŞAHİN
+    - Uzm. Dr. Emre ZEKEY
+
+    Diş Hekimliği / Ağız ve Diş Sağlığı:
+    - Dt. Hıfziye GÜLBAHÇE
+  `;
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", systemPrompt, {});
+
+  const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Dermatoloji");
+  assert(docs.length === 2, `Dermatoloji için 2 doktor çözülmeli, gelen: ${docs.length}`);
+  assert(docs.some(d => d.name === "Öğr. Gör. Dr. Gülay ÖZEL ŞAHİN"), "Gülay ÖZEL ŞAHİN listede olmalı");
+  assert(docs.some(d => d.name === "Uzm. Dr. Emre ZEKEY"), "Emre ZEKEY listede olmalı");
+});
+
+test("P0.16 - 13c: Doctor name request detector doğal doktor ismi varyasyonlarını yakalar", () => {
+  const { isDoctorNameRequestText } = require("../lib/services/ai/doctor-names-policy");
+  assert(isDoctorNameRequestText("Dermatoloji doktorunun ismini öğrenecem") === true, "doktorunun ismini öğrenecem yakalanmalı");
+  assert(isDoctorNameRequestText("Hocanın ismini araştıracağım") === true, "hocanın ismi yakalanmalı");
+  assert(isDoctorNameRequestText("Kadronuzda kimler var?") === true, "kadro/kimler var yakalanmalı");
+  assert(isDoctorNameRequestText("Araştıracam", true) === true, "önceki doktor sorusundan sonra araştıracam devam isteği sayılmalı");
+});
+
+test("P0.16 - 13d: Department alias saç egzaması için Dermatoloji çözer", () => {
+  const { DepartmentAliasResolver } = require("../lib/services/ai/department-alias-resolver");
+  const result = DepartmentAliasResolver.resolve("Saçımda egzama var hangi bölüm önerirsiniz");
+  assert(result?.canonical === "Dermatoloji", `Egzama Dermatoloji çözülmeli, gelen: ${result?.canonical}`);
+});
+
 test("P0.16 - 14: Hybrid lock — Redis aktifken Redis kilidi alınır ve serbest bırakılır", async () => {
   const { queueWorkerEngine } = require("../lib/queue/worker");
   const { setMockRedis, restoreRedis } = require("../lib/redis");
@@ -7681,7 +7715,7 @@ test("P0.26: Identity Sync & Autopilot Defaults & Form Gate Tooltips", async () 
     };
 
     // 1. Verify checkNameValidity placeholders
-    const invalidNames = ["İsimsiz", "Unknown", "null", "undefined", "+90 (554) 683 33 06", "123456", ""];
+    const invalidNames = ["İsimsiz", "Unknown", "null", "undefined", "+90 (554) 683 33 06", "123456", "", "Telefonla"];
     for (const name of invalidNames) {
       assert(checkNameValidity(name).isValid === false, `Name "${name}" should be invalid`);
     }
@@ -7703,6 +7737,13 @@ test("P0.26: Identity Sync & Autopilot Defaults & Form Gate Tooltips", async () 
       metadata: {}
     });
     assert(resolvedName2.displayName === "Mustafa Ercan", "Should fallback from placeholder to convPatientName");
+
+    const resolvedName3 = resolvePatientNameDetailed({
+      convPatientName: "Telefonla",
+      phoneFallback: "+905535874260",
+      metadata: {}
+    });
+    assert(resolvedName3.displayName !== "Telefonla", "Generic panel/contact label must not be used as patient name");
 
     // 3. Verify resolvePatientCountryDetailed priority chain
     const resolvedCountry1 = resolvePatientCountryDetailed({

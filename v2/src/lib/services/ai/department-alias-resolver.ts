@@ -42,6 +42,16 @@ const DEFAULT_ALIAS_MAP: { keywords: string[]; canonical: string; displayLabel: 
     ]
   },
   {
+    canonical: 'Dermatoloji',
+    displayLabel: 'dermatoloji',
+    keywords: [
+      'dermatoloji', 'cildiye', 'deri ve zührevi', 'deri ve zuhrevi',
+      'egzama', 'ekzama', 'sedef', 'psoriasis', 'psoriazis',
+      'saç egzaması', 'sac egzaması', 'sac egzamasi', 'saçımda egzama', 'sacimda egzama',
+      'cilt', 'deri hastalığı', 'deri hastaligi', 'kaşıntı', 'kasinti'
+    ]
+  },
+  {
     canonical: 'Kardiyoloji',
     displayLabel: 'kardiyoloji',
     keywords: [

@@ -46,13 +46,13 @@ export function checkNameValidity(name?: string | null): {
   const blacklist = [
     "konya", "konyaya", "konya'ya", "istanbul", "ankara", "izmir", "antalya", 
     "adana", "bursa", "samsun", "trabzon", "merhaba", "selam", "selamlar", 
-    "hayırlı", "isler", "gunler", "aksamlar", "sabahlar", "telefon", "randevu", 
+    "hayırlı", "isler", "gunler", "aksamlar", "sabahlar", "telefon", "telefonla", "telefonda", "arama", "aranacak", "randevu",
     "hastane", "doktor", "hemsire", "tedavi", "klinik", "baskent", "evet", "hayır", 
     "tabiki", "tamam", "ok", "yes", "no", "hello", "hi", "annem", "babam", 
     "kardesim", "esim", "kendisi", "turkiye", "türkiye", "almanya", "ingiltere", 
     "fransa", "belçika", "hollanda", "isimsiz", "none", "no name", "noname",
     "boş", "bos", "yok", "bilinmeyen", "adsız", "adsiz", "ad soyad", "adı soyadı",
-    "user", "test", "admin", "deneme", "guest", "unknown", "undefined", "null", "bot", "sistem",
+    "user", "test", "admin", "deneme", "guest", "unknown", "undefined", "null", "bot", "sistem", "lead", "yeni lead", "nitelikli", "manuel",
     "ülke", "sehir", "şehir", "departman", "country", "city", "department", "telefon numarası",
     "kiminle", "kimle", "kim", "ne", "neden", "niye", "nasil", "nasıl", "hangi", "kac", "kaç", "nerede", "nerde", "suan", "şuan", "simdi", "şimdi"
   ];

@@ -538,7 +538,7 @@ export class PromptBuilder {
 - KARARSIZ HASTA ESKALASYONu: Hasta fiziksel randevuya net cevap vermiyorsa baskı yapma. Telefon görüşmesini yalnızca hasta açıkça arama isterse, geliş dönemi makul ölçüde netleşirse veya süreç hakkında konuşmaya açık olduğunu söylerse seçenek olarak sun. "Daha belli değil", "kesin değil", "işlerimi ayarlıyorum" gibi cevaplarda önce belirsizliği kabul et ve tek doğal soru sor; hemen gün/saat isteme.
 - Fiyat Verme Yasağı: Ameliyat veya tedavi ücretlerine dair kesinlikle rakamsal bir fiyat (örn. 1000 Euro, 50000 TL) VERME. Fiyat sorulduğunda tam şu çerçevede kal: "Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum." Fiyat sorusunun hemen ardından telefon görüşmesi, arama, randevu, uygun gün veya uygun saat İSTEME. Hasta ayrıca açıkça arama/randevu isterse bunu ayrı niyet olarak ele al.
 - Teşhis Yasağı: Hastanın gönderdiği MR/tahlil/rapor veya şikayet beyanlarına göre kesinlikle tıbbi bir teşhis koyma, ilaç önerme veya tedavi süresi/günü vaat etme. Teşhis veya tıbbi değerlendirme taleplerinde tıbbi yorum yapmaktan kaçın. Kesinlikle "raporunuz inceleniyor", "uzmanlar değerlendiriyor", "hemen ilettik" gibi takip vaadi verme. Bunun yerine: "Kesin değerlendirme hastanede ilgili uzman hekim muayenesi sonrasında yapılır." de.
-- Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, hekim ismini teyit etme, talebini planlama için not aldığını söyle.
+- Doktor Görüşmesi Sözü: Hastaya kesin bir doktor görüşme saati sözü verme, doğrulanmış liste dışından hekim ismi teyit etme, talebini planlama için not aldığını söyle.
 - SGK VE TA12 ANLAŞMASI POLİTİKASI: Yurt dışından gelen hastalar için Almanya/yurt dışı SGK (TA12, T12 vb.) veya yurt dışı sigorta anlaşmaları hastanemizde GEÇERLİ DEĞİLDİR. SGK anlaşmamız yalnızca Türkiye'de ikamet eden/yaşayan vatandaşlarımız için geçerlidir. Yurt dışı hastaları özel hasta statüsünde hizmet almaktadır. Bu yöndeki sorulara net ve dürüst bir şekilde "yurt dışı/Almanya SGK/TA12 anlaşmamızın geçerli olmadığını, yurt dışından gelen misafirlerimizin özel hasta statüsünde olduğunu" söyle.
 =========================================================\n`;
     }
@@ -750,7 +750,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       if (lp.replyLanguage !== 'tr' && !isBaskent) {
         langContextText += `- UYARI: Hastaya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, Mr., Ms., Mrs., Dear vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla.\n`;
       }
-      langContextText += `- UYARI: Bu dil talimatı sadece yanıt dilini belirler. Fiyat verme yasağı, doktor ismi vermeme kuralı, doktor görüşmesi/randevu sözü vermeme kuralı, süre/gün belirtmeme kuralı ve diğer tüm güvenlik kuralları kesinlikle yürürlükte kalmalıdır.\n`;
+      langContextText += `- UYARI: Bu dil talimatı sadece yanıt dilini belirler. Fiyat verme yasağı, doğrulanmış liste dışından doktor ismi uydurmama kuralı, doktor görüşmesi/randevu sözü vermeme kuralı, süre/gün belirtmeme kuralı ve diğer tüm güvenlik kuralları kesinlikle yürürlükte kalmalıdır.\n`;
       langContextText += `==============================\n`;
     }
 
@@ -998,7 +998,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
     // 2. Knowledge Capability Directive
     const resolvedAddress = TenantConfigResolver.getAddress(brain);
     policyContext += `=== BİLGİ YETKİNLİK SINIRI ===\n`;
-    policyContext += `- Doktor directory/listesi mevcut değilse hekim ismi uydurma.\n`;
+    policyContext += `- Doktor directory/listesi mevcutsa hasta açıkça doktor adı sorduğunda paylaş; mevcut değilse hekim ismi uydurma.\n`;
     policyContext += `- Bölüm varsa yönlendir, yoksa "bu bilgiye şu an buradan erişemiyorum" de.\n`;
     policyContext += `- Fiyat bilinmiyorsa "kişiye özel değerlendirme sonrası netleşir" de.\n`;
     policyContext += `- Adres: ${resolvedAddress ? resolvedAddress : 'Temsilcimiz veya hasta danışmanımız tarafınıza iletecektir'}.\n`;
