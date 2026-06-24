@@ -699,11 +699,16 @@ export class ContextAwareSafeFallbackResolver {
       (unifiedContext?.settings?.angryPatientMode === true) ||
       (lowerInbound.includes('bot') || lowerInbound.includes('yapay zeka') || lowerInbound.includes('robot'));
 
+    const assistantHistory = (history || []).filter((m: any) => m.role === 'assistant' || m.direction === 'out');
+    const isOngoingConversation = assistantHistory.length > 0;
+
     const intro = isAngryOrChallenge
       ? '' // No hello/intro for angry/challenge path
-      : (identityConfig.personaName 
-          ? `Merhaba, ${identityConfig.personaName} ben.` 
-          : `Merhaba, ben ${isHealthcare ? 'hastane ' : ''}iletişim asistanıyım.`);
+      : (isOngoingConversation
+          ? 'Merhaba,'
+          : (identityConfig.personaName 
+              ? `Merhaba, ${identityConfig.personaName} ben.` 
+              : `Merhaba, ben ${isHealthcare ? 'hastane ' : ''}iletişim asistanıyım.`));
 
     // P0.11: Pre-process mother & complaint info for challenge/angry path
     const factsText = Array.isArray(unifiedContext?.patient_known_facts) ? unifiedContext.patient_known_facts.join(' ').toLowerCase() : '';
@@ -1717,10 +1722,8 @@ export function buildHistoryAwareRecoveryFallback(
   const hasPersona = !!pName && pName !== 'Asistan';
 
   // Check if identity was already introduced in history
-  const identityAlreadyIntroduced = hasPersona && hasHistory && history.some(m => {
-    const isAssistant = m.role === 'assistant' || m.direction === 'out';
-    return isAssistant && typeof m.content === 'string' && m.content.toLowerCase().includes(pName.toLowerCase());
-  });
+  const assistantHistory = (history || []).filter(m => m.role === 'assistant' || m.direction === 'out');
+  const identityAlreadyIntroduced = assistantHistory.length > 0;
 
   if (!hasHistory) {
     if (hasPersona) {

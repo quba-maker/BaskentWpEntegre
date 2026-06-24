@@ -150,6 +150,42 @@ export class PromptBuilder {
     const history = unifiedContext?.history || [];
     const assistantHistory = history.filter((m: any) => m.role === 'assistant');
     const isFirstAssistantTurn = assistantHistory.length === 0;
+
+    // Resolve patientCountry early
+    let patientCountry: string | null = unifiedContext?.opportunity?.country 
+      || unifiedContext?.profile?.country 
+      || null;
+    if (!patientCountry && unifiedContext?.latestForm?.data?.country) {
+      patientCountry = unifiedContext.latestForm.data.country;
+    }
+    if (!patientCountry && Array.isArray(unifiedContext?.patient_known_facts)) {
+      const countryFact = (unifiedContext.patient_known_facts as string[]).find((f: string) => f.includes('yaşadığı ülke') || f.includes('yaşadığı yer') || f.includes('ülke'));
+      if (countryFact) {
+        const match = countryFact.match(/:\s*(.+)\.?$/);
+        if (match) patientCountry = match[1].trim().replace(/\.$/, '');
+      }
+    }
+    if (!patientCountry) {
+      const countries = [
+        { name: 'Almanya', pattern: /almanya|germany|deutschland/i },
+        { name: 'Fransa', pattern: /fransa|france/i },
+        { name: 'Hollanda', pattern: /hollanda|netherlands/i },
+        { name: 'Özbekistan', pattern: /özbekistan|ozbekistan|özbek|ozbek/i },
+        { name: 'İngiltere', pattern: /ingiltere|england|united kingdom|uk/i },
+        { name: 'Belçika', pattern: /belçika|belgium/i },
+        { name: 'Avusturya', pattern: /avusturya|austria/i },
+        { name: 'İsviçre', pattern: /isviçre|switzerland/i }
+      ];
+      for (const c of countries) {
+        const matched = (unifiedContext?.currentMessageText && c.pattern.test(unifiedContext.currentMessageText)) || 
+          history.some((m: any) => m.role === 'user' && m.content && c.pattern.test(m.content));
+        if (matched) {
+          patientCountry = c.name;
+          break;
+        }
+      }
+    }
+
     const { PendingQuestionResolver } = require('./pending-question-resolver');
     const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
     
@@ -281,6 +317,21 @@ export class PromptBuilder {
         crmContext += `>> UYARI (KRİTİK): Hastaya/kullanıcıya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, M.r., M.s., M.r.s., D.e.a.r. vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla (Örn. Türkçe için sadece "Merhaba,", İngilizce için sadece "Hello,").\n`;
       }
       crmContext += `>> UYARI: Türkçe yanıt verirken kesinlikle samimi/senli dil kullanma. Her zaman kurumsal, nazik ve formal "sizli" tonu kullan (Örn. "yardımcı olabiliriz", "paylaşabilir misiniz", "düşünür müsünüz").\n`;
+      
+      if (patientCountry) {
+        crmContext += `- Hastanın Yaşadığı Ülke: ${patientCountry}\n`;
+      }
+      
+      const visitIntent = unifiedContext?.turkeyVisitIntent || 'turkey_visit_intent_unknown';
+      let visitIntentDesc = 'Bilinmiyor';
+      if (visitIntent === 'turkey_visit_intent_positive') visitIntentDesc = 'Olumlu / Türkiye\'ye/Konya\'ya gelmeyi planlıyor';
+      if (visitIntent === 'turkey_visit_intent_negative') visitIntentDesc = 'Olumsuz / Türkiye\'ye/Konya\'ya gelmeyi düşünmüyor veya gelemiyor';
+      if (visitIntent === 'turkey_visit_intent_uncertain') visitIntentDesc = 'Belirsiz / Henüz net değil, kararsız veya plan yapmamış';
+      
+      crmContext += `- Türkiye Geliş/Ziyaret Planı Durumu: ${visitIntentDesc}\n`;
+      if (visitIntent === 'turkey_visit_intent_negative' || visitIntent === 'turkey_visit_intent_uncertain') {
+        crmContext += `>> KURAL (GELİŞ PLANINA SAYGI): Hastanın Türkiye'ye geliş veya Konya ziyareti planı net değilse (veya belirsiz/olumsuz ise), kesinlikle tekrar "Türkiye'ye gelmeyi düşünüyor musunuz?", "Konya'ya gelecek misiniz?", "Geliş ihtimaliniz var mı?" gibi soruları sorma! Kararsızlığını kabul et, proaktif olarak randevu veya arama teklif etme, sadece sorduğu bilgi sorularına yazılı cevap ver.\n`;
+      }
       
       // Cleaned patient facts
       if (unifiedContext.patient_known_facts && unifiedContext.patient_known_facts.length > 0) {
@@ -554,25 +605,7 @@ MEDYA MESAJI KURALI:
     // ═══ PHASE 2J: Time Intelligence Context ═══
     let timeContext = '';
     try {
-      // P0.17-FP Madde 4: patientCountry SaaS-safe resolution.
-      // MUST use the sanitizeFormFacts/ConversationKnownFactsResolver chain — not raw form data.
-      // Each tenant may name their form fields differently; sanitizeFormFacts() normalizes them.
-      // resolvedFactsForPatientCountry is built from the already-sanitized safeLatestForm.
-      let patientCountry: string | null = unifiedContext?.opportunity?.country 
-        || unifiedContext?.profile?.country 
-        || null;
-      // Fallback to sanitized form country (tenant-agnostic, goes through sanitizeFormFacts() in IdentityEngine)
-      if (!patientCountry && unifiedContext?.latestForm?.data?.country) {
-        patientCountry = unifiedContext.latestForm.data.country;
-      }
-      // Final fallback: extract from patient_known_facts array ("Hastanın yaşadığı ülke/yer: X" pattern)
-      if (!patientCountry && Array.isArray(unifiedContext?.patient_known_facts)) {
-        const countryFact = (unifiedContext.patient_known_facts as string[]).find(f => f.includes('yaşadığı ülke'));
-        if (countryFact) {
-          const match = countryFact.match(/:\s*(.+)\.?$/);
-          if (match) patientCountry = match[1].trim().replace(/\.$/, '');
-        }
-      }
+      // P0.17-FP Madde 4: patientCountry SaaS-safe resolution (reusing early resolved country).
       const wh = brain.context.settings?.workingHours;
       const operatingHours = (wh && wh.enabled)
         ? { start: wh.start || '09:00', end: wh.end || '21:00', days: (wh as any).days }
@@ -711,6 +744,9 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
         langContextText += `- Bu soruyu her mesajda tekrar etme; hasta dil seçerse sonraki cevapları o dilde sürdür.\n`;
       }
       langContextText += `- Form alan adları veya sistem verileri Türkçe olsa bile cevabını ${lp.replyLanguageName} dilinde ver.\n`;
+      if (lp.replyLanguage !== 'tr') {
+        langContextText += `- UYARI: Cevap dilini ${lp.replyLanguageName} olarak seçtin. Kesinlikle yabancı dildeki kelimelere Türkçe morfolojik veya dilbilgisel ekler (Örn: -iniz, -ınız, -iz, -ız vb. Türkçe ekler) ekleme! Yabancı dildeki yanıtlar tamamen o dilin kendi dilbilgisine ve morfolojisine uygun olmalıdır (Örn: "un médeciniz" veya "déterminizés" gibi melez/uydurma kelimeler kesinlikle KULLANILMAMALIDIR).\n`;
+      }
       if (lp.replyLanguage !== 'tr' && !isBaskent) {
         langContextText += `- UYARI: Hastaya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, Mr., Ms., Mrs., Dear vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla.\n`;
       }
@@ -794,8 +830,19 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
           return countryKeywords.some(kw => lower.includes(kw));
         };
 
-        const patientGaveNameInLast3 = userMessages.some((m: any) => mentionsName(m.content));
-        const patientGaveCountryInLast3 = userMessages.some((m: any) => mentionsCountry(m.content));
+        const patientGaveNameInHistory = (r.history || [])
+          .filter((m: any) => m.role === 'user')
+          .some((m: any) => mentionsName(m.content));
+
+        const patientGaveCountryInHistory = (r.history || [])
+          .filter((m: any) => m.role === 'user')
+          .some((m: any) => mentionsCountry(m.content));
+
+        const hasCountryInFacts = Array.isArray(r.patient_known_facts) && 
+          r.patient_known_facts.some((f: string) => f.toLowerCase().includes('ülke') || f.toLowerCase().includes('ülkesi') || f.toLowerCase().includes('yer:'));
+
+        const hasNameInFacts = Array.isArray(r.patient_known_facts) && 
+          r.patient_known_facts.some((f: string) => f.toLowerCase().includes('ad:') || f.toLowerCase().includes('adı:') || f.toLowerCase().includes('isim:') || f.toLowerCase().includes('adı soyadı:'));
 
         const assistantMessages = (r.history || [])
           .filter((m: any) => m.role === 'assistant');
@@ -831,8 +878,8 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
           : countryConfidenceResult?.level === 'LOW'  ? true   // always ask
           : null;                                              // use existing logic
 
-        const shouldAskName = detailedName.nameConfirmationNeeded && !nameLocked && !patientGaveNameInLast3 && !askedNameRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
-        const shouldAskCountry = (countryConfidenceOverride !== null ? countryConfidenceOverride : detailedCountry.countryConfirmationNeeded) && !countryLocked && !patientGaveCountryInLast3 && !askedCountryRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
+        const shouldAskName = detailedName.nameConfirmationNeeded && !nameLocked && !patientGaveNameInHistory && !hasNameInFacts && !askedNameRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
+        const shouldAskCountry = (countryConfidenceOverride !== null ? countryConfidenceOverride : detailedCountry.countryConfirmationNeeded) && !countryLocked && !patientGaveCountryInHistory && !hasCountryInFacts && !askedCountryRecently && !isTerminalStage && !hasOptOutKeyword && !isHumanMode && !isCorrectionTurn;
 
         if (shouldAskName || shouldAskCountry) {
           confirmationDirective += `\n\n=== ⚠️ HASTA KİMLİK / ÜLKE BİLGİSİ DOĞRULAMA TALİMATI ===\n`;

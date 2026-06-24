@@ -496,7 +496,7 @@ export class ConversationStateArbitrator {
       }
 
       case 'confirmation_yes_no': {
-        const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'simdi degil', 'şimdi değil'];
+        const affirmatives = ['evet', 'olur', 'tamam', 'ok', 'okay', 'yes', 'uygun', 'uygundur', 'evet uygun', 'kabul', 'tamamdir', 'hay hay', 'tabii', 'onaylıyorum', 'arayabilirsiniz', 'simdi degil', 'şimdi değil', 'ja', 'confirmed', 'approved', 'نعم', 'موافق'];
         const negatives = ['hayır', 'hayir', 'yok', 'olmaz', 'istemem', 'istemiyorum', 'no', 'iptal'];
         const isAffirmative = affirmatives.some(kw => lower === kw || lower.startsWith(kw + ' ') || lower.endsWith(' ' + kw) || lower.includes(' ' + kw + ' '));
         const isNegative = negatives.some(kw => lower === kw || lower.startsWith(kw + ' ') || lower.endsWith(' ' + kw) || lower.includes(' ' + kw + ' '));

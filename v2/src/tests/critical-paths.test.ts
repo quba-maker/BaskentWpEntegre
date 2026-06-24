@@ -1931,7 +1931,7 @@ test("P0.12 REVİZYON: 5. e açık slot yoksa continuation sayılmaz", async () 
     }
   });
 
-  assert(res.text.includes("Hangi konuda bilgi almak istediğinizi yazabilirsiniz") || res.text.includes("yardımcı olmaya çalışıyorum") || res.text.includes("sizinle ilgileniyorum"), "Should return clarification fallback");
+  assert(res.text.includes("Hangi konuda bilgi almak istediğinizi yazabilirsiniz") || res.text.includes("yardımcı olmaya çalışıyorum") || res.text.includes("sizinle ilgileniyorum") || res.text.includes("yardımcı olayım") || res.text.includes("yardımcı olmak üzere buradayım"), "Should return clarification fallback");
 });
 
 test("P0.12 REVİZYON: 6. zamanınızı doğru bağlamda bozulmaz, sadece hatalı kalıp düzeltilir", () => {
@@ -13322,6 +13322,108 @@ test("Başkent v81 T86: typo affirmative after summarized callback slot confirms
 
   assert(result.effectiveIntent === "callback_confirmation", `Expected callback_confirmation, got: ${result.effectiveIntent}`);
   assert(result.suppressionReason === "callback_confirmed", `Expected callback_confirmed, got: ${result.suppressionReason}`);
+});
+
+test("Başkent v81 T87: langContextText bilingual suffix mutation guard in PromptBuilder", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v81-t87",
+    "Sen Rüya'sın.",
+    { fixedLanguage: 'fr' }
+  );
+
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    currentMessageText: "Je cherche un medecin",
+    history: [
+      { role: "user", content: "Je cherche un medecin" }
+    ]
+  });
+
+  assert(prompt.includes("Kesinlikle yabancı dildeki kelimelere Türkçe morfolojik veya dilbilgisel ekler"), "Prompt should include bilingual mutation warning");
+  assert(prompt.includes("un médeciniz"), "Prompt should mention médeciniz example");
+});
+
+test("Başkent v81 T88: ContextAwareSafeFallbackResolver avoids repeated introduction on ongoing conversation", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v81-t88",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  // 1. First turn: assistant speaks first time (or no history)
+  const firstTurnResult = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "Merhaba",
+    brain,
+    identityConfig: {
+      personaName: "Rüya",
+      organizationName: "Başkent Üniversitesi Konya Hastanesi"
+    },
+    unifiedContext: { history: [] },
+    replyLanguage: "tr"
+  });
+  assert(firstTurnResult.text.includes("Rüya ben"), `First turn should introduce identity: ${firstTurnResult.text}`);
+
+  // 2. Ongoing turn: assistant already spoke in history
+  const ongoingResult = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "Nasıl kalacağım",
+    brain,
+    identityConfig: {
+      personaName: "Rüya",
+      organizationName: "Başkent Üniversitesi Konya Hastanesi"
+    },
+    unifiedContext: {
+      history: [
+        { role: "user", content: "Merhaba" },
+        { role: "assistant", content: "Merhaba, Rüya ben, size yardımcı olayım." },
+        { role: "user", content: "Nasıl kalacağım" }
+      ]
+    },
+    replyLanguage: "tr"
+  });
+
+  assert(!ongoingResult.text.includes("Rüya ben"), `Ongoing turn must not introduce identity again: ${ongoingResult.text}`);
+  assert(ongoingResult.text.includes("Size sağlık talebinizle ilgili yardımcı olayım"), `Ongoing turn should return neutral help text: ${ongoingResult.text}`);
+});
+
+test("Başkent v81 T89: ConversationStateArbitrator confirmation_yes_no handles multilingual affirmatives", () => {
+  const { ConversationStateArbitrator } = require("../lib/services/ai/conversation-state-arbitrator");
+  
+  // Test "ja" in confirmation_yes_no
+  const resultGerman = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "ja",
+    rawPendingSlot: "confirmation_yes_no",
+    rawInterpretedIntent: "generic_short",
+    routerIntent: "generic_other",
+    history: [
+      { role: "user", content: "Rufen Sie mich an?" },
+      { role: "assistant", content: "Passt es um 10:00 Uhr? Bu şekilde teyit ediyor musunuz?" }
+    ],
+    convMeta: {}
+  });
+
+  assert(resultGerman.effectiveIntent === "callback_confirmation", `Expected callback_confirmation for ja, got: ${resultGerman.effectiveIntent}`);
+
+  // Test "نعم" in confirmation_yes_no
+  const resultArabic = ConversationStateArbitrator.arbitrate({
+    lastUserMessage: "نعم",
+    rawPendingSlot: "confirmation_yes_no",
+    rawInterpretedIntent: "generic_short",
+    routerIntent: "generic_other",
+    history: [
+      { role: "user", content: "هل تتصل بي؟" },
+      { role: "assistant", content: "هل يناسبك الساعة 10:00؟ teyit ediyor musunuz?" }
+    ],
+    convMeta: {}
+  });
+
+  assert(resultArabic.effectiveIntent === "callback_confirmation", `Expected callback_confirmation for نعم, got: ${resultArabic.effectiveIntent}`);
 });
 
 
