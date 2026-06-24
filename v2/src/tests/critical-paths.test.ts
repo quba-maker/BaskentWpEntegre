@@ -13180,7 +13180,53 @@ test("Başkent v80 T78: O'zbekiston country answer is recognized and continues c
 
   assert(result.finalPath === "country_answer_continuation_fallback", `Expected country continuation, got ${result.finalPath}`);
   assert(result.text.includes("Özbekistan"), `Should acknowledge Özbekistan: ${result.text}`);
+  assert(result.text.includes("Hangi dil sizin için daha rahat olur"), `Should offer language preference for weak Turkish / Uzbekistan context: ${result.text}`);
   assert(!result.text.includes("Hangi konuda bilgi almak istiyorsunuz"), `Must not reset after country answer: ${result.text}`);
+});
+
+test("Başkent v80 T79: weak Turkish plus foreign country triggers one-time language preference clarification", () => {
+  const { LanguageResponsePolicy } = require("../lib/services/ai/language-response-policy");
+  const history = [
+    { role: "user", content: "Psoryaziçeskiy artrit" },
+    { role: "assistant", content: "Hangi ülkede yaşadığınızı öğrenebilir miyim?" },
+    { role: "user", content: "Haman" }
+  ];
+  const result = LanguageResponsePolicy.resolve("O'zbekiston", history);
+
+  assert(result.needsLanguagePreferenceClarification === true, "Weak Turkish + foreign country should ask language preference");
+  assert(result.suggestedLanguageNames.includes("Özbekçe"), `Should suggest Uzbek, got: ${result.suggestedLanguageNames}`);
+  assert(result.suggestedLanguageNames.includes("Rusça"), `Should suggest Russian, got: ${result.suggestedLanguageNames}`);
+
+  const afterAsked = LanguageResponsePolicy.resolve("O'zbekiston", [
+    ...history,
+    { role: "assistant", content: "Hangi dil sizin için daha rahat olur?" }
+  ]);
+  assert(afterAsked.needsLanguagePreferenceClarification === false, "Language preference question should not repeat");
+});
+
+test("Başkent v80 T80: PromptBuilder injects language preference clarification without resetting context", () => {
+  const { PromptBuilder } = require("../lib/services/ai/prompt-builder");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v80-t80",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const prompt = PromptBuilder.buildSystemPrompt(brain, "lead", false, {
+    currentMessageText: "O'zbekiston",
+    history: [
+      { role: "user", content: "Psoryaziçeskiy artrit" },
+      { role: "assistant", content: "Hangi ülkede yaşadığınızı öğrenebilir miyim?" },
+      { role: "user", content: "Haman" }
+    ]
+  });
+
+  assert(prompt.includes("DİL TERCİHİ NETLEŞTİRME"), "Prompt should inject language preference directive");
+  assert(prompt.includes("Özbekçe"), "Prompt should mention Uzbek option");
+  assert(prompt.includes("konuyu sıfırlamadan"), "Prompt should avoid resetting the conversation");
 });
 
 

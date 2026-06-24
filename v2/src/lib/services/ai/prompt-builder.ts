@@ -701,6 +701,14 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       if (lp.languageSwitchDetected) {
         langContextText += `- ⚡ Dil değişikliği algılandı. Kullanıcı ${lp.replyLanguageName} dilinde cevap istiyor.\n`;
       }
+      if (lp.needsLanguagePreferenceClarification) {
+        const languageOptions = (lp.suggestedLanguageNames && lp.suggestedLanguageNames.length > 0)
+          ? lp.suggestedLanguageNames.join(', ')
+          : 'Türkçe, İngilizce';
+        langContextText += `- DİL TERCİHİ NETLEŞTİRME: Hastanın bulunduğu ülke/dil ipucu ve yazım tarzı, Türkçe iletişimde zorlanabileceğini gösteriyor. Bu turda konuyu sıfırlamadan, kısa ve sıcak şekilde hangi dilde devam etmek istediğini sor.\n`;
+        langContextText += `- Kullanabileceğin doğal cümle: "İsterseniz Türkçe devam edebiliriz; ${languageOptions} dillerinden biri sizin için daha rahatsa o dilde de yardımcı olabilirim. Hangi dil sizin için daha rahat olur?"\n`;
+        langContextText += `- Bu soruyu her mesajda tekrar etme; hasta dil seçerse sonraki cevapları o dilde sürdür.\n`;
+      }
       langContextText += `- Form alan adları veya sistem verileri Türkçe olsa bile cevabını ${lp.replyLanguageName} dilinde ver.\n`;
       if (lp.replyLanguage !== 'tr' && !isBaskent) {
         langContextText += `- UYARI: Hastaya ismiyle hitap etme, cinsiyetli veya resmi hitap sözcükleri (Bey, Hanım, Bay, Bayan, Sayın, Mr., Ms., Mrs., Dear vb.) KULLANMA. Mesajlarına isimsiz ve nötr bir selamlama ile başla.\n`;

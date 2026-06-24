@@ -9,6 +9,7 @@
  */
 
 import { LanguageContext, detectLanguage } from '../../utils/language-detector';
+import { normalizeCountry } from '../../utils/country-normalizer';
 
 export interface LanguagePolicyResult {
   /** ISO code of detected user language */
@@ -29,6 +30,12 @@ export interface LanguagePolicyResult {
   languageConfidence: 'high' | 'low' | 'unknown';
   /** Whether tenant default language was applied as fallback */
   tenantDefaultLanguageApplied: boolean;
+  /** Whether the bot should ask a one-time language preference question */
+  needsLanguagePreferenceClarification: boolean;
+  /** Human-readable reason for prompting language preference */
+  languagePreferenceReason?: string;
+  /** Suggested languages to mention naturally in the prompt */
+  suggestedLanguageNames?: string[];
 }
 
 const ISO_TO_NAME: Record<string, string> = {
@@ -54,6 +61,80 @@ const NAME_TO_ISO: Record<string, string> = {
   'ispanyolca': 'es', 'spanish': 'es', 'español': 'es',
   'hollandaca': 'nl', 'dutch': 'nl', 'nederlands': 'nl'
 };
+
+const COUNTRY_LANGUAGE_SUGGESTIONS: Record<string, string[]> = {
+  'Özbekistan': ['Türkçe', 'Özbekçe', 'Rusça', 'İngilizce'],
+  'Kazakistan': ['Türkçe', 'Kazakça', 'Rusça', 'İngilizce'],
+  'Kırgızistan': ['Türkçe', 'Kırgızca', 'Rusça', 'İngilizce'],
+  'Türkmenistan': ['Türkçe', 'Türkmence', 'Rusça', 'İngilizce'],
+  'Tacikistan': ['Türkçe', 'Tacikçe', 'Rusça', 'İngilizce'],
+  'Fransa': ['Türkçe', 'Fransızca', 'İngilizce'],
+  'Almanya': ['Türkçe', 'Almanca', 'İngilizce'],
+  'Hollanda': ['Türkçe', 'Hollandaca', 'İngilizce'],
+  'Belçika': ['Türkçe', 'Fransızca', 'Hollandaca', 'İngilizce'],
+  'Rusya': ['Türkçe', 'Rusça', 'İngilizce'],
+};
+
+function normalizeLoose(value: string): string {
+  return (value || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase()
+    .replace(/[’`´]/g, "'")
+    .trim();
+}
+
+function hasLanguagePreferenceBeenAsked(history: { role: string; content: string }[]): boolean {
+  return history.slice(-8).some(msg => {
+    if (msg.role !== 'assistant') return false;
+    const clean = normalizeLoose(msg.content || '');
+    return /hangi\s+dil|dilde\s+devam|dil\s+sizin\s+için|dil\s+sizin\s+icin|özbekçe|ozbekçe|rusça|rusca|ingilizce|almanca|fransızca|fransizca/i.test(clean);
+  });
+}
+
+function getRecentUserText(currentMessage: string, history: { role: string; content: string }[]): string {
+  const recent = history
+    .filter(m => m.role === 'user' && m.content)
+    .slice(-4)
+    .map(m => m.content);
+  recent.push(currentMessage || '');
+  return recent.join(' ');
+}
+
+function detectForeignCountryHint(currentMessage: string, recentText: string): string | null {
+  const candidates = [currentMessage, recentText]
+    .map(v => normalizeCountry(v, null, 'patient_statement').country)
+    .filter(Boolean) as string[];
+  const country = candidates.find(c => c && c !== 'Türkiye');
+  return country || null;
+}
+
+function hasWeakTurkishOrTransliterationSignal(currentMessage: string, history: { role: string; content: string }[]): boolean {
+  const recent = normalizeLoose(getRecentUserText(currentMessage, history));
+  if (!recent) return false;
+
+  const explicitSignals = [
+    /o'?zbekiston|ozbekiston|uzbekiston|uzbekistan|özbekistan|ozbekistan/i,
+    /psor(?:y|i)azi|psoriaz|psoryaz|psoriatik|psoriatic/i,
+    /\bhaman\b/i,
+    /\bhransa\b/i,
+  ];
+  if (explicitSignals.some(pattern => pattern.test(recent))) return true;
+
+  const tokens = recent
+    .replace(/[^\p{L}'\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 5);
+  if (tokens.length < 3) return false;
+
+  const suspicious = tokens.filter(t =>
+    /[qwxy]/i.test(t) ||
+    /'{1}/.test(t) ||
+    /(skiy|skij|ovich|ovna|bek|stan)$/i.test(t)
+  );
+
+  return suspicious.length >= 2;
+}
 
 export class LanguageResponsePolicy {
   /**
@@ -141,6 +222,18 @@ export class LanguageResponsePolicy {
       replyLanguage = 'ar';
     }
 
+    const foreignCountryHint = detectForeignCountryHint(currentMessage, getRecentUserText(currentMessage, history));
+    const weakLanguageSignal = hasWeakTurkishOrTransliterationSignal(currentMessage, history);
+    const alreadyAskedLanguage = hasLanguagePreferenceBeenAsked(history);
+    const needsLanguagePreferenceClarification = !!foreignCountryHint
+      && weakLanguageSignal
+      && !languageSwitchDetected
+      && !channelFixedLanguage
+      && !alreadyAskedLanguage;
+    const suggestedLanguageNames = foreignCountryHint
+      ? (COUNTRY_LANGUAGE_SUGGESTIONS[foreignCountryHint] || ['Türkçe', 'İngilizce'])
+      : undefined;
+
     // 6. Determine quality gate locale
     const qualityGateLocale = replyLanguage === 'tr' ? 'tr' : 'generic';
 
@@ -153,7 +246,12 @@ export class LanguageResponsePolicy {
       languageSwitchDetected,
       qualityGateLocale,
       languageConfidence: languageSwitchDetected ? 'high' : (currentIsArabic ? 'high' : detectionResult.language_confidence),
-      tenantDefaultLanguageApplied: tenantDefaultApplied
+      tenantDefaultLanguageApplied: tenantDefaultApplied,
+      needsLanguagePreferenceClarification,
+      languagePreferenceReason: needsLanguagePreferenceClarification
+        ? `foreign_country_with_weak_language_signal:${foreignCountryHint}`
+        : undefined,
+      suggestedLanguageNames
     };
   }
 

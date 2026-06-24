@@ -79,6 +79,17 @@ export class ContextAwareSafeFallbackResolver {
     return match?.[1] || null;
   }
 
+  private static languagePreferenceOffer(country: string): string | null {
+    const optionsByCountry: Record<string, string> = {
+      'Özbekistan': 'Türkçe devam edebiliriz; Özbekçe, Rusça veya İngilizce sizin için daha rahatsa o dilde de yardımcı olabilirim',
+      'Kazakistan': 'Türkçe devam edebiliriz; Kazakça, Rusça veya İngilizce sizin için daha rahatsa o dilde de yardımcı olabilirim',
+      'Kırgızistan': 'Türkçe devam edebiliriz; Kırgızca, Rusça veya İngilizce sizin için daha rahatsa o dilde de yardımcı olabilirim',
+      'Fransa': 'Türkçe devam edebiliriz; Fransızca veya İngilizce sizin için daha rahatsa o dilde de yardımcı olabilirim',
+    };
+    const options = optionsByCountry[country];
+    return options ? `${options}. Hangi dil sizin için daha rahat olur?` : null;
+  }
+
   private static resolveArabic(params: DeterministicFallbackParams): DeterministicFallbackResult {
     const { inboundText, brain, identityConfig, unifiedContext } = params;
     const orchestratorDept = params.resolvedActiveDepartment || null;
@@ -339,9 +350,13 @@ export class ContextAwareSafeFallbackResolver {
     const lastAskedCountryOrTimezone = /(hangi\s+ülkede|hangi\s+ulkede|nerede\s+yaşıyorsunuz|nerede\s+yasiyorsunuz|ülkede\s+yaşıyorsunuz|ulkede\s+yasiyorsunuz|saat\s+dilimi|hangi\s+ülke|hangi\s+ulke)/i.test(lastAssistantText);
     const lastAskedTimezone = /(saat\s+dilimi|hangi\s+ülke\s+veya\s+şehir|hangi\s+ulke\s+veya\s+sehir|saatine\s+göre|saatine\s+gore)/i.test(lastAssistantText);
     if (isHealthcare && countryOnlyAnswer && lastAskedCountryOrTimezone) {
-      const text = lastAskedTimezone
+      let text = lastAskedTimezone
         ? `${countryOnlyAnswer}’da olduğunuzu not ediyorum. Arama için ${countryOnlyAnswer} saati mi, Türkiye saati mi esas alınsın?`
         : `${countryOnlyAnswer}’da olduğunuzu not ediyorum. Türkiye’ye/Konya’ya gelme ihtimaliniz olur mu?`;
+      const languageOffer = ContextAwareSafeFallbackResolver.languagePreferenceOffer(countryOnlyAnswer);
+      if (languageOffer) {
+        text += `\n\n${languageOffer}`;
+      }
       return {
         text,
         sector: resolvedIndustry,
