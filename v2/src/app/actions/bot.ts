@@ -543,6 +543,9 @@ export async function testBotPrompt(
       const lastMessage = messages[messages.length - 1];
 
       const { BrainV2ShadowPlanner } = await import("@/lib/services/ai/brain-v2-shadow-planner");
+      const { QubaBrainCompiler } = await import("@/lib/brain/core");
+      const qubaBrainProfile = QubaBrainCompiler.compile(mockBrain as any);
+      const qubaBrainDirective = QubaBrainCompiler.buildDirective(qubaBrainProfile);
       const brainV2ShadowPlan = BrainV2ShadowPlanner.build({
         inboundText: lastMessage?.content || '',
         history: historyMessages,
@@ -551,7 +554,7 @@ export async function testBotPrompt(
         now: new Date()
       });
       const brainV2SandboxDirective = BrainV2ShadowPlanner.buildSandboxPromptDirective(brainV2ShadowPlan);
-      const sandboxSystemPrompt = `${rawSystemPrompt}${brainV2SandboxDirective}`;
+      const sandboxSystemPrompt = `${rawSystemPrompt}${qubaBrainDirective}${brainV2SandboxDirective}`;
       const sandboxPromptHash = crypto.createHash('sha256').update(sandboxSystemPrompt).digest('hex');
       const sandboxBrain = {
         ...mockBrain,
@@ -614,6 +617,8 @@ export async function testBotPrompt(
           responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
           responseStyle: profile?.response_style || 'balanced',
           maxResponseTokens: maxTokens,
+          qubaBrainCoreApplied: true,
+          qubaBrainProfile,
           brainV2ShadowPlanApplied: true,
           brainV2ShadowPlan
         }

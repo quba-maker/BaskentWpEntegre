@@ -287,7 +287,7 @@ async function main() {
   fs.writeFileSync(OUT_PATH, JSON.stringify(summary, null, 2));
   console.log(`\nRapor: ${OUT_PATH}`);
   console.log(`Özet: ${summary.passed}/${summary.total} geçti`);
-  if (summary.failed > 0) process.exitCode = 1;
+  process.exit(summary.failed > 0 ? 1 : 0);
 }
 
 main().catch((error) => {

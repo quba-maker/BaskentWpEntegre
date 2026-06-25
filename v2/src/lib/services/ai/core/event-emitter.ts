@@ -43,6 +43,7 @@ export type AIEventType =
   | 'stage_changed'
   | 'cancellation_stage_guard'
   | 'media_batch_skipped_already_processed'
+  | 'media_batch_skipped_human_or_abusive'
   | 'media_batch_processed'
   | 'media_batch_started';
 

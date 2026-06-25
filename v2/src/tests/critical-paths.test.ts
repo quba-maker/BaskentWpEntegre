@@ -4908,8 +4908,8 @@ test("P0.16 - 13b: Doctor resolver bilgi bankası bölüm başlığı altındaki
 
   const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Dermatoloji");
   assert(docs.length === 2, `Dermatoloji için 2 doktor çözülmeli, gelen: ${docs.length}`);
-  assert(docs.some(d => d.name === "Öğr. Gör. Dr. Gülay ÖZEL ŞAHİN"), "Gülay ÖZEL ŞAHİN listede olmalı");
-  assert(docs.some(d => d.name === "Uzm. Dr. Emre ZEKEY"), "Emre ZEKEY listede olmalı");
+  assert(docs.some((d: any) => d.name === "Öğr. Gör. Dr. Gülay ÖZEL ŞAHİN"), "Gülay ÖZEL ŞAHİN listede olmalı");
+  assert(docs.some((d: any) => d.name === "Uzm. Dr. Emre ZEKEY"), "Emre ZEKEY listede olmalı");
 });
 
 test("P0.16 - 13c: Doctor name request detector doğal doktor ismi varyasyonlarını yakalar", () => {
@@ -4941,7 +4941,7 @@ test("P0.16 - 13e: Doctor resolver Kadın Doğum aliasını doğrulanmış liste
 
   const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Kadın Doğum");
   assert(docs.length === 3, `Kadın Doğum için 3 doktor çözülmeli, gelen: ${docs.length}`);
-  assert(docs.some(d => d.name === "Doç. Dr. Mehmet Ufuk CERAN"), "Mehmet Ufuk CERAN listede olmalı");
+  assert(docs.some((d: any) => d.name === "Doç. Dr. Mehmet Ufuk CERAN"), "Mehmet Ufuk CERAN listede olmalı");
 });
 
 test("P0.16 - 13g: Doctor resolver bilgi bankası kurallar alanındaki Dermatoloji listesini okur", () => {
@@ -4957,7 +4957,7 @@ test("P0.16 - 13g: Doctor resolver bilgi bankası kurallar alanındaki Dermatolo
 
   const docs = DoctorDirectoryResolver.getDoctors(mockBrain, "Dermatoloji");
   assert(docs.length === 2, `Knowledge rules Dermatoloji için 2 doktor çözülmeli, gelen: ${docs.length}`);
-  assert(docs.some(d => d.name === "Uzm. Dr. Emre ZEKEY"), "Emre ZEKEY bilgi bankasından çekilmeli");
+  assert(docs.some((d: any) => d.name === "Uzm. Dr. Emre ZEKEY"), "Emre ZEKEY bilgi bankasından çekilmeli");
 });
 
 test("Başkent v85 T114: Doctor resolver küçük prompt bloğu bulunca geniş bilgi arşivini atlamaz", () => {
@@ -4985,8 +4985,8 @@ test("Başkent v85 T114: Doctor resolver küçük prompt bloğu bulunca geniş b
   const gynecologyDocs = DoctorDirectoryResolver.getDoctors(mockBrain, "Kadın Doğum");
 
   assert(allDocs.length === 5, `Prompt bloğu + bilgi arşivi birlikte 5 doktor çözülmeli, gelen: ${allDocs.length}`);
-  assert(dermatologyDocs.some(d => d.name === "Uzm. Dr. Emre ZEKEY"), `Dermatoloji arşivden gelmeli: ${JSON.stringify(dermatologyDocs)}`);
-  assert(gynecologyDocs.some(d => d.name === "Doç. Dr. Mehmet Ufuk CERAN"), `Kadın Doğum arşivden gelmeli: ${JSON.stringify(gynecologyDocs)}`);
+  assert(dermatologyDocs.some((d: any) => d.name === "Uzm. Dr. Emre ZEKEY"), `Dermatoloji arşivden gelmeli: ${JSON.stringify(dermatologyDocs)}`);
+  assert(gynecologyDocs.some((d: any) => d.name === "Doç. Dr. Mehmet Ufuk CERAN"), `Kadın Doğum arşivden gelmeli: ${JSON.stringify(gynecologyDocs)}`);
 });
 
 test("P0.16 - 13h: Dermatoloji bağlamı kısa doktor ismi takiplerinde korunur", () => {
@@ -14435,6 +14435,80 @@ test("Başkent v85 T122: fertility form final audit removes prompt leak tone and
   assert(result.text.includes("İlginiz için teşekkür ederiz"), result.text);
   assert(result.text.includes("Konya’ya gelemeyeceğinizi"), result.text);
   assert(!result.text.includes("hastanın hastanemizde ilgili uzman hekim tarafından muayene edilmeniz"), result.text);
+});
+
+test("Başkent v86 T123: Quba Brain Core compiles Başkent healthcare profile without changing live flow", () => {
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const { QubaBrainCompiler } = require("../lib/brain/core");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v86-t123",
+    [
+      "--- SYSTEM PROMPT ---",
+      "Sen Başkent Üniversitesi Konya Hastanesi adına çalışan profesyonel bir hasta danışmanısın. Adın Rüya'dır.",
+      "Check-up, Kardiyoloji, Dermatoloji, Kadın Doğum ve bel fıtığı süreçlerinde yardımcı ol.",
+    ].join("\n"),
+    {
+      industry: "healthcare",
+      timezone: "Europe/Istanbul",
+    },
+    null,
+    {
+      prices: "Fiyat bilgisi paylaşılmaz.",
+      rules: [
+        "--- VERIFIED BİLGİ ARŞİVİ ---",
+        "Dermatoloji:",
+        "- Uzm. Dr. Selin YILMAZ",
+        "Kadın Hastalıkları ve Doğum:",
+        "- Doç. Dr. Mehmet Ufuk CERAN",
+      ].join("\n"),
+    },
+    undefined,
+    "v2_channel_prompts"
+  );
+
+  const profile = QubaBrainCompiler.compile(brain);
+
+  assert(profile.version === "quba_brain_v1", profile.version);
+  assert(profile.source === "compiled_from_v2_channel_prompt", profile.source);
+  assert(profile.industry === "healthcare", profile.industry);
+  assert(profile.identity.organizationName.includes("Başkent"), JSON.stringify(profile.identity));
+  assert(profile.identity.assistantName === "Rüya", JSON.stringify(profile.identity));
+  assert(profile.policies.some((p: any) => p.id === "healthcare_price_policy"), JSON.stringify(profile.policies));
+  assert(profile.policies.some((p: any) => p.id === "healthcare_doctor_directory"), JSON.stringify(profile.policies));
+  assert(profile.actions.some((a: any) => a.id === "healthcare_callback"), JSON.stringify(profile.actions));
+  assert(profile.setupQuestions.some((q: any) => q.id === "doctor_directory"), JSON.stringify(profile.setupQuestions));
+  assert(profile.knowledge.doctorDirectoryAvailable === true, JSON.stringify(profile.knowledge));
+  assert(profile.diagnostics.capabilities.includes("doctor_directory"), JSON.stringify(profile.diagnostics));
+  assert(profile.serviceCatalog.some((s: any) => s.id === "check_up"), JSON.stringify(profile.serviceCatalog));
+});
+
+test("Başkent v86 T124: Quba Brain Core directive is sandbox-only and bot test exposes diagnostics", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const { QubaBrainCompiler } = require("../lib/brain/core");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v86-t124",
+    "Sen Başkent Üniversitesi Konya Hastanesi adına çalışan hasta danışmanısın. Adın Rüya'dır.",
+    { industry: "healthcare" }
+  );
+
+  const directive = QubaBrainCompiler.buildDirective(QubaBrainCompiler.compile(brain));
+  assert(directive.includes("[QUBA BRAIN CORE]"), directive);
+  assert(directive.includes("Sektör: healthcare"), directive);
+  assert(directive.includes("Sert politikalar"), directive);
+  assert(directive.includes("Bu blok cevap olarak yazılmayacak"), directive);
+
+  const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
+  const orchestratorCode = fs.readFileSync(path.resolve(__dirname, "../lib/services/ai/ai-response-orchestrator.ts"), "utf-8");
+
+  assert(botActionCode.includes("QubaBrainCompiler.compile"), "Bot test playground should compile Quba Brain Core profile");
+  assert(botActionCode.includes("qubaBrainCoreApplied: true"), "Bot test metadata should expose Quba Brain Core diagnostics");
+  assert(!orchestratorCode.includes("[QUBA BRAIN CORE]"), "Live orchestrator must not inject Quba Brain Core before rollout flag");
 });
 
 
