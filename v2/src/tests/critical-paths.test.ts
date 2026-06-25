@@ -13958,6 +13958,78 @@ test("Başkent v82 T107: known facts tolerate country typo and remember new depa
   assert(formatted.includes("Kadın Doğum"), formatted);
 });
 
+test("Başkent v83 T108: known doctor profile question searches whole verified directory, not stale department only", () => {
+  const { DoctorNamesPolicy } = require("../lib/services/ai/doctor-names-policy");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v83-t108",
+    "Sen Rüya'sın.",
+    {
+      industry: "healthcare",
+      doctors: `Dermatoloji:
+- Uzm. Dr. Emre ZEKEY
+
+Kadın Hastalıkları ve Doğum:
+- Doç. Dr. Mehmet Ufuk CERAN`
+    }
+  );
+
+  const result = DoctorNamesPolicy.resolveDoctorProfile(brain, "Ufuk hoca nasıl?", ["Dermatoloji"], "tr");
+  assert(result?.text.includes("Mehmet Ufuk CERAN"), result?.text || "no result");
+  assert(!result?.text.includes("Hangi konuda bilgi almak istiyorsunuz"), result?.text || "");
+});
+
+test("Başkent v83 T109: multi-intent doctor ask must not force doctor-only bypass", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const code = fs.readFileSync(path.join(process.cwd(), "src/lib/services/ai/ai-response-orchestrator.ts"), "utf8");
+  assert(code.includes("isDoctorNamesRequest && !isMultiIntentQuery"), "Doctor names bypass must be disabled for multi-intent turns");
+  assert(code.includes("Doğrulanmış hekim bilgisi"), "Multi-intent LLM guidance should include verified doctor hint when available");
+  assert(code.includes("collectDoctorPolicyDepartments"), "Doctor department collection should prioritize current resolved department");
+});
+
+test("Başkent v83 T110: multi-intent detects package price, dermatology doctor, and accommodation together", () => {
+  const { MultiIntentConsultantComposer } = require("../lib/services/ai/multi-intent-consultant-composer");
+  const msg = "paket fiyatını sordum check up birde dermatoloji doktorunuz kim birde kalacak yerim yok";
+  const intents = MultiIntentConsultantComposer.detectIntentList(msg);
+  assert(intents.includes("price_question"), JSON.stringify(intents));
+  assert(intents.includes("doctor_names"), JSON.stringify(intents));
+  assert(intents.includes("logistics_question") || intents.includes("concern_objection"), JSON.stringify(intents));
+});
+
+test("Başkent v83 T111: price final guard removes redundant service question when patient already asked package price", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "Fiyat bilgisi, hastanemizde yapılacak değerlendirme ve planlanacak sürece göre değiştiği için buradan net bir fiyat paylaşamıyorum. Hangi hizmet veya bölüm için fiyat bilgisi almak istiyorsunuz?",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v83-t111",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "paket fiyatını sordum check up"
+    }
+  );
+  assert(result.text.includes("Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum."), result.text);
+  assert(!result.text.includes("Hangi hizmet veya bölüm"), result.text);
+});
+
+test("Başkent v83 T112: Turkish normalizer fixes check-up package morphology regressions", () => {
+  const { TurkishFinalQualityNormalizer } = require("../lib/services/ai/turkish-final-quality-normalizer");
+  const bad = "Diyabet, kolesterol, böbrek ve karaciğer fonksiyonlarınınız incelenmesi. Kalp sağlığınınız değerlendirilmesi. Göz tansiyonuzu ölçümü. Bunlarınız yanı sıra tüm batınız ultrasonografisi, Burunuz, boğaz ve kulak muayenesi. Dermatoloji alanında çalışan hekimlerimiz var, ancak kiminiz size en uygun olduğunuz şu an buradan netleştiremiyorum.";
+  const result = TurkishFinalQualityNormalizer.normalize(bad);
+  assert(!result.text.includes("fonksiyonlarınınız"), result.text);
+  assert(!result.text.includes("sağlığınınız"), result.text);
+  assert(!result.text.includes("tansiyonuzu ölçümü"), result.text);
+  assert(!result.text.includes("Bunlarınız"), result.text);
+  assert(!result.text.includes("batınız ultrasonografisi"), result.text);
+  assert(!result.text.includes("Burunuz, boğaz"), result.text);
+  assert(!result.text.includes("kiminiz size en uygun olduğunuz"), result.text);
+  assert(result.text.includes("kimin size en uygun olduğunu"), result.text);
+});
+
 
 async function runAllTests() {
   try {

@@ -269,6 +269,46 @@ const REWRITE_RULES: RewriteRule[] = [
     replacement: (_match: string, prefix: string) => `${prefix}tetkiklerin yapılması`,
   },
   {
+    id: 'fonksiyonlariniz_suffix_fix',
+    pattern: /\bfonksiyonlar[ıi]n[ıi]n[ıi]z\b/gi,
+    replacement: 'fonksiyonlarınızın',
+  },
+  {
+    id: 'sagliginiz_suffix_fix',
+    pattern: /\bsa[ğg]l[ıi][ğg][ıi]n[ıi]n[ıi]z\b/gi,
+    replacement: 'sağlığınızın',
+  },
+  {
+    id: 'bunlariniz_yani_sira_fix',
+    pattern: /\bbunlar[ıi]n[ıi]z\s+yan[ıi]\s+s[ıi]ra\b/gi,
+    replacement: 'bunların yanı sıra',
+  },
+  {
+    id: 'tum_batin_ultrason_fix',
+    pattern: /\bt[üu]m\s+bat[ıi]n[ıi]z\s+ultrasonografisi\b/gi,
+    replacement: 'tüm batın ultrasonografisi',
+  },
+  {
+    id: 'goz_tansiyonu_olcumu_fix',
+    pattern: /g[öo]z\s+tansiyonuzu\s+[öo]l[çc][üu]m[üu]/gi,
+    replacement: 'göz tansiyonu ölçümü',
+  },
+  {
+    id: 'burunuz_bogaz_muayene_fix',
+    pattern: /\bburunuz,\s*bo[ğg]az\s+ve\s+kulak\s+muayenesi\b/gi,
+    replacement: 'burun, boğaz ve kulak muayenesi',
+  },
+  {
+    id: 'kiminiz_size_en_uygun_fix',
+    pattern: /\bkiminiz\s+size\s+en\s+uygun\s+oldu[ğg]unuz\b/gi,
+    replacement: 'kimin size en uygun olduğunu',
+  },
+  {
+    id: 'kimin_size_en_uygun_fix',
+    pattern: /\bkimin\s+size\s+en\s+uygun\s+oldu[ğg]unuz\b/gi,
+    replacement: 'kimin size en uygun olduğunu',
+  },
+  {
     id: 'sikayetiniz_oldugunuzu_fix',
     pattern: /([A-ZÇĞİÖŞÜa-zçğıöşü\s-]+?)\s+[şs]ikayetiniz\s+oldu[ğg]unuzu\b/gi,
     replacement: (_match: string, complaint: string) => `${complaint.trim()} şikayetiniz olduğunu`,

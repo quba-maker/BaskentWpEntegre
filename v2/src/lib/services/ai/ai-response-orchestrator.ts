@@ -1662,7 +1662,7 @@ export class AIResponseOrchestrator {
         isDoctorNameRequestText(String(m.content || ''), false)
       );
       const isDoctorNamesRequest = !isStructuredFormPayload && isDoctorNameRequestText(inboundText, hasPreviousDoctorAsk);
-      const doctorsForProfileQuestion = doctorsList.length > 0 ? doctorsList : DoctorDirectoryResolver.getDoctors(brain);
+      const doctorsForProfileQuestion = DoctorDirectoryResolver.getDoctors(brain);
       const isDoctorProfileQuestion = !isStructuredFormPayload && isDoctorProfileQuestionText(inboundText, doctorsForProfileQuestion);
 
       // P0.16-K: "başka bilgi" / open-ended continuation — kept for LLM hint injection only, NOT for bypass
@@ -1715,8 +1715,30 @@ export class AIResponseOrchestrator {
         ? MultiIntentConsultantComposer.buildPromptGuidance(inboundText)
         : '';
 
+      const collectDoctorPolicyDepartments = (consultantState?: any): string[] => {
+        const depts: string[] = [];
+        const addDept = (dept?: string | null) => {
+          const clean = String(dept || '').trim();
+          if (!clean) return;
+          if (depts.some(d => d.toLocaleLowerCase('tr-TR') === clean.toLocaleLowerCase('tr-TR'))) return;
+          depts.push(clean);
+        };
+
+        // The department resolved from the latest inbound text has priority.
+        // Conversation/CRM state may still carry older topics such as Check-up
+        // or Kardiyoloji while the patient is now asking Dermatoloji doctors.
+        addDept(resolvedActiveDepartment || null);
+        for (const p of consultantState?.participants || []) {
+          addDept(p?.department || null);
+        }
+        return depts;
+      };
+
       const isLlmBypassChallenge = isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge
-        || shouldBypassDoctorLookup || isRecallWithFacts || isDoctorNamesRequest || isDoctorProfileQuestion || isWhatTurkishBypass;
+        || shouldBypassDoctorLookup || isRecallWithFacts
+        || (isDoctorNamesRequest && !isMultiIntentQuery)
+        || (isDoctorProfileQuestion && !isMultiIntentQuery)
+        || isWhatTurkishBypass;
 
       let text = '';
       let bypassed = false;
@@ -1763,11 +1785,7 @@ export class AIResponseOrchestrator {
         let fallbackResult: any;
         // ── Doctor profile/trust question — grounded, no subjective ranking ─────────
         if (!fallbackResult && isDoctorProfileQuestion) {
-          const depts: string[] = [];
-          for (const p of consultantState.participants) {
-            if (p.department && !depts.includes(p.department)) depts.push(p.department);
-          }
-          if (depts.length === 0 && resolvedActiveDepartment) depts.push(resolvedActiveDepartment);
+          const depts = collectDoctorPolicyDepartments(consultantState);
           const profilePolicy = DoctorNamesPolicy.resolveDoctorProfile(brain, inboundText, depts, replyLanguage);
           if (profilePolicy) {
             fallbackResult = { text: profilePolicy.text, finalPath: `doctor_profile_policy_${profilePolicy.mode}` };
@@ -1784,11 +1802,7 @@ export class AIResponseOrchestrator {
         // ── P0.16-K: Doctor names request ────────────────────────────────────
         if (!fallbackResult && isDoctorNamesRequest) {
           // Collect departments from consultant state (multi-patient aware)
-          const depts: string[] = [];
-          for (const p of consultantState.participants) {
-            if (p.department && !depts.includes(p.department)) depts.push(p.department);
-          }
-          if (depts.length === 0 && resolvedActiveDepartment) depts.push(resolvedActiveDepartment);
+          const depts = collectDoctorPolicyDepartments(consultantState);
           const doctorPolicy = DoctorNamesPolicy.resolve(brain, depts, hasPreviousDoctorAsk, replyLanguage);
           fallbackResult = { text: doctorPolicy.text, finalPath: `doctor_names_policy_${doctorPolicy.mode}` };
           console.log(JSON.stringify({
@@ -1803,11 +1817,7 @@ export class AIResponseOrchestrator {
         // ── P0.16-M: Mixed doctor+process — DoctorNamesPolicy + inline process (legacy ContextAwareSafeFallbackResolver removed) ─
         if (!fallbackResult && isMixedDoctorProcess) {
           // Doctor part — use DoctorNamesPolicy (avoids legacy "bu ekrandan" text)
-          const mixedDepts: string[] = [];
-          for (const p of consultantState.participants) {
-            if (p.department && !mixedDepts.includes(p.department)) mixedDepts.push(p.department);
-          }
-          if (mixedDepts.length === 0 && resolvedActiveDepartment) mixedDepts.push(resolvedActiveDepartment);
+          const mixedDepts = collectDoctorPolicyDepartments(consultantState);
           const mixedDoctorPolicy = DoctorNamesPolicy.resolve(brain, mixedDepts, hasPreviousDoctorAsk);
 
           // Process part — inline consultant-owned response
@@ -1863,13 +1873,32 @@ export class AIResponseOrchestrator {
         // P0.16-K: "başka bilgi" open-continuation — ensure LLM doesn't close conversation
         let llmSystemPrompt = systemPromptText;
         if (multiIntentGuidance) {
-          llmSystemPrompt = llmSystemPrompt + `\n\n[ÇOKLU NİYET REHBERİ - HASTAYA AYNEN YAZMA]\n${multiIntentGuidance}\n[/ÇOKLU NİYET REHBERİ]`;
+          let enrichedMultiIntentGuidance = multiIntentGuidance;
+          const multiIntentList = MultiIntentConsultantComposer.detectIntentList(inboundText);
+          if (multiIntentList.includes('doctor_names')) {
+            const doctorDeptHints: string[] = [];
+            const addDeptHint = (dept?: string | null) => {
+              const clean = String(dept || '').trim();
+              if (!clean) return;
+              if (doctorDeptHints.some(d => d.toLocaleLowerCase('tr-TR') === clean.toLocaleLowerCase('tr-TR'))) return;
+              doctorDeptHints.push(clean);
+            };
+            addDeptHint(resolvedActiveDepartment || null);
+            for (const p of conversationFrame.participants || []) addDeptHint(p.department || null);
+            const verifiedDoctorHint = DoctorNamesPolicy.resolve(brain, doctorDeptHints, true, replyLanguage);
+            if (verifiedDoctorHint.mode === 'verified_list') {
+              enrichedMultiIntentGuidance += `\nDoğrulanmış hekim bilgisi (yalnızca hasta doktor adı sorusuna cevap verirken kullan):\n${verifiedDoctorHint.text}`;
+            } else {
+              enrichedMultiIntentGuidance += `\nDoktor adı sorusu var ama doğrulanmış liste çözülemediyse isim uydurma; kısa ve dürüst şekilde güncel hekim listesini netleştireceğini söyle.`;
+            }
+          }
+          llmSystemPrompt = llmSystemPrompt + `\n\n[ÇOKLU NİYET REHBERİ - HASTAYA AYNEN YAZMA]\n${enrichedMultiIntentGuidance}\n[/ÇOKLU NİYET REHBERİ]`;
           try {
             console.log(JSON.stringify({
               tag: 'MULTI_INTENT_LLM_GUIDANCE_INJECTED',
               tenantId,
               conversationId: conversationId || 'unknown',
-              intentList: MultiIntentConsultantComposer.detectIntentList(inboundText),
+              intentList: multiIntentList,
               workerPath
             }));
           } catch { /* non-fatal */ }

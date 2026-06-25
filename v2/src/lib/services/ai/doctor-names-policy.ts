@@ -96,9 +96,14 @@ export class DoctorNamesPolicy {
     const scopedDoctors = activeDepts.length > 0
       ? activeDepts.flatMap(dept => DoctorDirectoryResolver.getDoctors(brain, dept))
       : DoctorDirectoryResolver.getDoctors(brain);
-    const doctors = scopedDoctors.length > 0 ? scopedDoctors : DoctorDirectoryResolver.getDoctors(brain);
+    const allDoctors = DoctorDirectoryResolver.getDoctors(brain);
+    const doctors = scopedDoctors.length > 0 ? scopedDoctors : allDoctors;
     const clean = normalizeDoctorAskText(text);
-    const matched = doctors.find(doc => doctorSearchTokens(doc.name).some(token => clean.includes(token)));
+    // If the patient names a doctor ("Ufuk hoca nasıl?"), search the whole
+    // verified directory first. The active department can be stale or from a
+    // previous topic, and blocking the known-name lookup erodes trust.
+    const matched = (allDoctors.length > 0 ? allDoctors : doctors)
+      .find(doc => doctorSearchTokens(doc.name).some(token => clean.includes(token)));
     if (!matched && !isDoctorProfileQuestionText(text, doctors)) return null;
 
     const resolvedLang = (lang || 'tr').toLowerCase();

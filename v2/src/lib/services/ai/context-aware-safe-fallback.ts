@@ -1496,10 +1496,17 @@ export class ContextAwareSafeFallbackResolver {
     }
 
     if (detectedIntent === 'price_question') {
-      const institutionLabel = TenantConfigResolver.getInstitutionLabel(brain);
+      const contextText = [
+        inboundText,
+        ...(Array.isArray(history) ? history.slice(-8).map((m: any) => String(m?.content || '')) : [])
+      ].join(' ').toLocaleLowerCase('tr-TR');
+      const hasKnownServiceContext = /check[\s-]?up|çekap|paket|dermatoloji|kardiyoloji|ortopedi|kad[ıi]n\s+do[ğg]um|bel\s+f[ıi]t[ıi][ğg][ıi]|randevu|muayene/.test(contextText);
+      const safePriceSentence = `Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.`;
       const text = isHealthcare
-        ? `Ücret bilgisi, ${institutionLabel} yapılacak kişiye özel değerlendirme ve planlanacak hizmete göre netleşebilir. Hangi hizmet veya bölüm için fiyat bilgisi almak istiyorsunuz?`
-        : `Ücret bilgisi, seçilecek hizmete ve kişiye özel planlamaya göre netleşebilir. Hangi hizmet için fiyat bilgisi almak istiyorsunuz?`;
+        ? (hasKnownServiceContext
+          ? `${safePriceSentence} Süreç veya paket içeriğiyle ilgili merak ettiğiniz noktayı yazarsanız buradan yanıtlayabilirim.`
+          : `${safePriceSentence} Hangi hizmet veya bölüm için sorduğunuzu yazarsanız süreci o başlık üzerinden anlatayım.`)
+        : `Ücret bilgisi, seçilecek hizmete ve kişiye özel planlamaya göre netleşebilir. Hangi hizmet için sorduğunuzu yazarsanız yardımcı olayım.`;
       return {
         text,
         sector: resolvedIndustry,

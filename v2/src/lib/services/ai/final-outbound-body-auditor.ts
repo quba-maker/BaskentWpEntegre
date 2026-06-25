@@ -446,6 +446,8 @@ function applyPriceQuestionGuard(text: string, ctx: FinalOutboundAuditCtx): { te
     /\s*(?:Öncelikle,?\s*)?(?:telefon\s+görüşmesi|arama)\s+için\s+size\s+uygun\s+gün\s+ve\s+saat\s+aralığı\s+nedir\??/gi,
     /\s*Size\s+uygun\s+gün\s+ve\s+saat\s+aralığı\s+nedir\??/gi,
     /\s*Hangi\s+gün\s+ve\s+saat\s+aralığı\s+sizin\s+için\s+uygun\s+olur\??/gi,
+    /\s*Hangi\s+hizmet\s+veya\s+b[öo]l[üu]m\s+i[çc]in\s+fiyat\s+bilgisi\s+almak\s+istiyorsunuz\??/gi,
+    /\s*Hangi\s+hizmet\s+veya\s+b[öo]l[üu]m\s+i[çc]in\s+sordu[ğg]unuzu\s+yazarsan[ıi]z[^.\n!?]*[.!?]?/gi,
   ];
 
   for (const pattern of phoneCtaPatterns) {
