@@ -618,6 +618,18 @@ export async function testBotPrompt(
         });
         finalReply = auditResult.text;
       }
+      const { BrainV2ResponseEvaluator } = await import("@/lib/services/ai/brain-v2-response-evaluator");
+      const brainV2ResponseEvaluation = BrainV2ResponseEvaluator.evaluate(
+        finalReply,
+        brainV2ShadowPlan,
+        [
+          ...historyMessages
+            .slice(-6)
+            .filter(m => m.role === 'user')
+            .map(m => m.content || ''),
+          lastMessage?.content || ''
+        ].join('\n')
+      );
 
       return {
         success: true,
@@ -637,7 +649,8 @@ export async function testBotPrompt(
           qubaBrainRolloutMode,
           qubaBrainProfile,
           brainV2ShadowPlanApplied: true,
-          brainV2ShadowPlan
+          brainV2ShadowPlan,
+          brainV2ResponseEvaluation
         }
       };
     }

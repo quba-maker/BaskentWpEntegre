@@ -148,6 +148,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   };
 
   const brainPlan = debugMeta?.brainV2ShadowPlan;
+  const brainEvaluation = debugMeta?.brainV2ResponseEvaluation;
   const qubaBrainMeta = debugMeta?.qubaBrainProfile ? debugMeta : brainMeta;
   const qubaBrainProfile = qubaBrainMeta?.qubaBrainProfile;
   const qubaBrainDiagnostics = qubaBrainProfile?.diagnostics;
@@ -389,6 +390,70 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
           {testing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
         </button>
       </div>
+
+      {/* Brain v2 Response Evaluation */}
+      {brainEvaluation && (
+        <div className="px-5 py-3 bg-white border-t space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
+          <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
+            <ListChecks
+              className="w-4 h-4"
+              style={{
+                color: brainEvaluation.status === "pass"
+                  ? "var(--q-green, #22c55e)"
+                  : brainEvaluation.status === "warn"
+                    ? "var(--q-yellow, #f59e0b)"
+                    : "var(--q-red, #ef4444)",
+              }}
+            />
+            <span>Brain v2 Yanıt Kalitesi</span>
+            <span
+              className="px-1.5 py-0.5 rounded text-[9px] uppercase"
+              style={{
+                backgroundColor: brainEvaluation.status === "pass"
+                  ? "rgba(34,197,94,0.10)"
+                  : brainEvaluation.status === "warn"
+                    ? "rgba(245,158,11,0.12)"
+                    : "rgba(239,68,68,0.10)",
+                color: brainEvaluation.status === "pass"
+                  ? "var(--q-green, #22c55e)"
+                  : brainEvaluation.status === "warn"
+                    ? "var(--q-yellow, #f59e0b)"
+                    : "var(--q-red, #ef4444)",
+              }}
+            >
+              {brainEvaluation.status} · {brainEvaluation.score}/100
+            </span>
+          </div>
+          <p className="text-[11px] leading-relaxed text-gray-500">{brainEvaluation.summary}</p>
+          <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.max(0, Math.min(100, brainEvaluation.score || 0))}%`,
+                backgroundColor: brainEvaluation.status === "pass"
+                  ? "var(--q-green, #22c55e)"
+                  : brainEvaluation.status === "warn"
+                    ? "var(--q-yellow, #f59e0b)"
+                    : "var(--q-red, #ef4444)",
+              }}
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <div>
+              <div className="text-[9px] font-bold text-gray-400 mb-1">EKSİK CEVAP</div>
+              {renderCompactList(brainEvaluation.missingAnswers)}
+            </div>
+            <div>
+              <div className="text-[9px] font-bold text-gray-400 mb-1">YASAK/KRİTİK</div>
+              {renderCompactList(brainEvaluation.forbiddenHits)}
+            </div>
+            <div>
+              <div className="text-[9px] font-bold text-gray-400 mb-1">TON UYARISI</div>
+              {renderCompactList(brainEvaluation.qualityWarnings)}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Brain v2 Shadow Diagnostics */}
       {brainPlan && (

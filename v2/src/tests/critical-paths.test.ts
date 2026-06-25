@@ -14738,6 +14738,54 @@ test("Başkent v87 T132: Bot test panel exposes readiness score and live blocker
   assert(playgroundCode.includes("qubaBrainProfile?.readiness"), "Test panel should consume compiler readiness");
 });
 
+test("Başkent v88 T133: Brain v2 response evaluator catches doctor-name escape replies", () => {
+  const { BrainV2ResponseEvaluator } = require("../lib/services/ai/brain-v2-response-evaluator");
+
+  const plan = {
+    version: "brain_v2_shadow_v1",
+    mode: "shadow",
+    contactMode: "continuing_conversation",
+    detectedIntents: ["doctor_names"],
+    mustAnswer: ["doktor adı sorusunu doğrulanmış listeyle yanıtla"],
+    verifiedFacts: {
+      dateContext: "26 Haziran 2026 Cuma",
+      doctorDirectory: [
+        {
+          department: "Dermatoloji",
+          doctors: ["Uzm. Dr. Selin YILMAZ"],
+        },
+      ],
+    },
+    missingInformation: [],
+    forbiddenClaims: [],
+    riskFlags: [],
+    summary: "doktor adı sorusu",
+  };
+
+  const badReply = "Bu konuda isimleri yanlış vermek istemem. Dermatoloji alanında uzman hekimlerimiz bulunuyor; görüşme sırasında en uygun uzman bilgisi netleştirilecektir.";
+  const goodReply = "Dermatoloji bölümünde Uzm. Dr. Selin YILMAZ görev yapmaktadır. Hekimlerimiz hakkında kişisel yorum yapamam, ama randevu sürecini buradan netleştirebiliriz.";
+
+  const badEvaluation = BrainV2ResponseEvaluator.evaluate(badReply, plan, "Dermatoloji doktorunuzun adı ne?");
+  const goodEvaluation = BrainV2ResponseEvaluator.evaluate(goodReply, plan, "Dermatoloji doktorunuzun adı ne?");
+
+  assert(badEvaluation.status === "fail", JSON.stringify(badEvaluation));
+  assert(badEvaluation.missingAnswers.some((item: string) => item.includes("Doktor adı")), JSON.stringify(badEvaluation));
+  assert(badEvaluation.forbiddenHits.some((item: string) => item.includes("eski kaçış")), JSON.stringify(badEvaluation));
+  assert(goodEvaluation.status === "pass", JSON.stringify(goodEvaluation));
+});
+
+test("Başkent v88 T134: Bot test panel exposes Brain v2 response evaluation", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
+  const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
+
+  assert(botActionCode.includes("BrainV2ResponseEvaluator.evaluate"), "testBotPrompt should evaluate the final sandbox reply");
+  assert(botActionCode.includes("brainV2ResponseEvaluation"), "testBotPrompt metadata should expose Brain v2 response evaluation");
+  assert(playgroundCode.includes("Brain v2 Yanıt Kalitesi"), "Test panel should show response quality score");
+  assert(playgroundCode.includes("brainEvaluation.score"), "Test panel should render Brain v2 score");
+});
+
 
 async function runAllTests() {
   try {
