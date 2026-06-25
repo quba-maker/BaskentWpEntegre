@@ -300,13 +300,17 @@ export default function BotManagementPage() {
   }, [selectedBotId]);
 
   // ---- Handlers ----
-  async function handleSavePrompt(promptText: string, prices: string, rules: string) {
+  async function handleSavePrompt(promptText: string, prices: string, rules: string, qubaBrainSetup?: any) {
     if (!selectedBot) return;
-    await updateBot(selectedBot.id, {
+    const updates: any = {
       promptText,
       knowledgePrices: prices,
       knowledgeRules: rules,
-    });
+    };
+    if (qubaBrainSetup !== undefined) {
+      updates.qubaBrainSetup = qubaBrainSetup;
+    }
+    await updateBot(selectedBot.id, updates);
     await loadBots();
   }
 

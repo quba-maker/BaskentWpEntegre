@@ -192,6 +192,8 @@ export async function GET(req: NextRequest) {
     `;
     // Add prompt_key column if table already exists without it
     await sql`ALTER TABLE brain_versions ADD COLUMN IF NOT EXISTS prompt_key TEXT DEFAULT 'system_prompt_whatsapp'`;
+    await sql`ALTER TABLE channel_prompts ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb`;
+    results.push('channel_prompts.metadata: OK');
     // Backfill: extract prompt_key from change_summary for existing rows
     await sql`
       UPDATE brain_versions 

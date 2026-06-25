@@ -116,6 +116,7 @@ CREATE TABLE "channel_prompts" (
 	"prompt_type" text DEFAULT 'system' NOT NULL,
 	"prompt_text" text NOT NULL,
 	"version" integer DEFAULT 1,
+	"metadata" jsonb DEFAULT '{}'::jsonb,
 	"created_at" timestamp with time zone DEFAULT now(),
 	"updated_at" timestamp with time zone DEFAULT now()
 );

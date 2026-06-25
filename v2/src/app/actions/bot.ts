@@ -474,7 +474,8 @@ export async function testBotPrompt(
 
       // 3. Fetch active system prompt for this group
       const promptResult = await ctx.db.executeSafe({
-        text: `SELECT id, name, prompt_text, version, knowledge_prices, knowledge_rules
+        text: `SELECT id, name, prompt_text, version, knowledge_prices, knowledge_rules,
+                      to_jsonb(channel_prompts)->'metadata' as metadata
                FROM channel_prompts
                WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system'
                ORDER BY version DESC LIMIT 1`,
@@ -484,6 +485,9 @@ export async function testBotPrompt(
         return { success: false, reply: '⚠️ Bu bot grubuna bağlı aktif sistem promptu bulunamadı.', metadata: null };
       }
       const activePrompt = promptResult[0];
+      const promptMetadata = activePrompt.metadata && typeof activePrompt.metadata === 'object'
+        ? activePrompt.metadata
+        : {};
 
       // 4. Fetch AI Profile for this group
       const profileResult = await ctx.db.executeSafe({
@@ -502,12 +506,14 @@ export async function testBotPrompt(
       const crypto = require('crypto');
       const rawSystemPrompt = activePrompt.prompt_text || '';
       const promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
-      const industryHint = resolveBotIndustryHint(
-        botGroupResult[0]?.bot_type,
-        rawSystemPrompt,
-        activePrompt.knowledge_rules,
-        activePrompt.knowledge_prices
-      );
+      const industryHint = promptMetadata?.qubaBrain?.industry
+        || promptMetadata?.industry
+        || resolveBotIndustryHint(
+          botGroupResult[0]?.bot_type,
+          rawSystemPrompt,
+          activePrompt.knowledge_rules,
+          activePrompt.knowledge_prices
+        );
 
       const mockBrain = {
         id: `test-brain-${botGroupId}`,
@@ -515,6 +521,7 @@ export async function testBotPrompt(
           systemPrompt: rawSystemPrompt,
           promptHash,
           metadata: {
+            ...promptMetadata,
             industry: industryHint
           }
         },
@@ -523,7 +530,8 @@ export async function testBotPrompt(
           channel: 'whatsapp',
           config: {
             industry: industryHint,
-            timezone: 'Europe/Istanbul'
+            timezone: 'Europe/Istanbul',
+            qubaBrain: promptMetadata?.qubaBrain
           },
           knowledge: {
             prices: activePrompt.knowledge_prices || '',
@@ -660,7 +668,8 @@ export async function getBotBrainDiagnostics(
       }
 
       const promptResult = await ctx.db.executeSafe({
-        text: `SELECT id, name, prompt_text, version, knowledge_prices, knowledge_rules
+        text: `SELECT id, name, prompt_text, version, knowledge_prices, knowledge_rules,
+                      to_jsonb(channel_prompts)->'metadata' as metadata
                FROM channel_prompts
                WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system'
                ORDER BY version DESC LIMIT 1`,
@@ -671,6 +680,9 @@ export async function getBotBrainDiagnostics(
       }
 
       const activePrompt = promptResult[0];
+      const promptMetadata = activePrompt.metadata && typeof activePrompt.metadata === 'object'
+        ? activePrompt.metadata
+        : {};
       const profileResult = await ctx.db.executeSafe({
         text: `SELECT cap.ai_model, cap.max_response_tokens, cap.business_hours_json, cap.aggression_level, cap.response_delay_seconds, cap.response_style
                FROM channel_ai_profiles cap
@@ -685,12 +697,14 @@ export async function getBotBrainDiagnostics(
       const promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
       const aiModel = profile?.ai_model || 'gemini-2.5-flash';
       const maxTokens = profile?.max_response_tokens || 1000;
-      const industryHint = resolveBotIndustryHint(
-        botGroupResult[0]?.bot_type,
-        rawSystemPrompt,
-        activePrompt.knowledge_rules,
-        activePrompt.knowledge_prices
-      );
+      const industryHint = promptMetadata?.qubaBrain?.industry
+        || promptMetadata?.industry
+        || resolveBotIndustryHint(
+          botGroupResult[0]?.bot_type,
+          rawSystemPrompt,
+          activePrompt.knowledge_rules,
+          activePrompt.knowledge_prices
+        );
 
       const mockBrain = {
         id: `diagnostic-brain-${botGroupId}`,
@@ -698,6 +712,7 @@ export async function getBotBrainDiagnostics(
           systemPrompt: rawSystemPrompt,
           promptHash,
           metadata: {
+            ...promptMetadata,
             industry: industryHint
           }
         },
@@ -706,7 +721,8 @@ export async function getBotBrainDiagnostics(
           channel: 'whatsapp',
           config: {
             industry: industryHint,
-            timezone: 'Europe/Istanbul'
+            timezone: 'Europe/Istanbul',
+            qubaBrain: promptMetadata?.qubaBrain
           },
           knowledge: {
             prices: activePrompt.knowledge_prices || '',
@@ -915,6 +931,7 @@ export interface BotData {
     version: number;
     knowledgePrices: string;
     knowledgeRules: string;
+    metadata?: any;
   } | null;
   profile: {
     aiModel: string;
@@ -960,7 +977,8 @@ export async function getBots(): Promise<{ success: boolean; bots?: BotData[]; e
       for (const g of groups) {
         // 2. Fetch prompt for this group
         const prompts = await ctx.db.executeSafe({
-          text: `SELECT id, name, prompt_text, version, knowledge_prices, knowledge_rules
+          text: `SELECT id, name, prompt_text, version, knowledge_prices, knowledge_rules,
+                        to_jsonb(channel_prompts)->'metadata' as metadata
                  FROM channel_prompts 
                  WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system'
                  ORDER BY version DESC LIMIT 1`,
@@ -973,6 +991,7 @@ export async function getBots(): Promise<{ success: boolean; bots?: BotData[]; e
           version: prompts[0].version || 1,
           knowledgePrices: prompts[0].knowledge_prices || '',
           knowledgeRules: prompts[0].knowledge_rules || '',
+          metadata: prompts[0].metadata || {},
         } : null;
 
         // 3. Fetch AI profile for this group
@@ -1118,6 +1137,7 @@ export async function updateBot(
     promptText?: string;
     knowledgePrices?: string;
     knowledgeRules?: string;
+    qubaBrainSetup?: any;
     aiModel?: string;
     maxMessages?: number;
     maxResponseTokens?: number;
@@ -1159,13 +1179,18 @@ export async function updateBot(
       }
 
       // Update prompt
-      if (updates.promptText !== undefined || updates.knowledgePrices !== undefined || updates.knowledgeRules !== undefined) {
+      if (updates.promptText !== undefined || updates.knowledgePrices !== undefined || updates.knowledgeRules !== undefined || updates.qubaBrainSetup !== undefined) {
         const setClauses: string[] = ['updated_at = NOW()'];
         const vals: any[] = [];
         let idx = 1;
         if (updates.promptText !== undefined) { setClauses.push(`prompt_text = $${idx}`); vals.push(updates.promptText); idx++; }
         if (updates.knowledgePrices !== undefined) { setClauses.push(`knowledge_prices = $${idx}`); vals.push(updates.knowledgePrices); idx++; }
         if (updates.knowledgeRules !== undefined) { setClauses.push(`knowledge_rules = $${idx}`); vals.push(updates.knowledgeRules); idx++; }
+        if (updates.qubaBrainSetup !== undefined) {
+          setClauses.push(`metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{qubaBrain}', $${idx}::jsonb, true)`);
+          vals.push(JSON.stringify(updates.qubaBrainSetup || {}));
+          idx++;
+        }
         setClauses.push(`version = version + 1`);
         vals.push(botId, ctx.tenantId);
         await ctx.db.executeSafe({

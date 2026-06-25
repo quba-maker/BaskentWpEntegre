@@ -14632,6 +14632,34 @@ test("Başkent v86 T128: Brain diagnostics do not hardcode every tenant as healt
   assert(!botActionCode.includes("Default mock industry context"), "Healthcare-only mock industry comment should not remain");
 });
 
+test("Başkent v87 T129: Bot setup wizard stores tenant Brain config separately from prompt text", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
+  const promptTabCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-prompt-tab.tsx"), "utf-8");
+  const pageCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/page.tsx"), "utf-8");
+  const migrateCode = fs.readFileSync(path.resolve(__dirname, "../app/api/migrate/route.ts"), "utf-8");
+
+  assert(botActionCode.includes("qubaBrainSetup"), "updateBot should accept Quba Brain setup payload");
+  assert(botActionCode.includes("jsonb_set(COALESCE(metadata"), "Quba Brain setup should be stored in channel_prompts.metadata");
+  assert(botActionCode.includes("promptMetadata?.qubaBrain?.industry"), "Compiled sandbox diagnostics should prefer setup industry");
+  assert(pageCode.includes("qubaBrainSetup"), "Bot page should pass setup payload to updateBot");
+  assert(promptTabCode.includes("Bot Kurulum Sihirbazı"), "Prompt tab should expose setup wizard");
+  assert(promptTabCode.includes("rolloutMode"), "Setup wizard should expose rollout mode");
+  assert(promptTabCode.includes("parseServiceCatalog"), "Setup wizard should support service catalog input");
+  assert(migrateCode.includes("channel_prompts ADD COLUMN IF NOT EXISTS metadata"), "Migration should ensure prompt metadata column");
+});
+
+test("Başkent v87 T130: Bot setup wizard keeps Brain live rollout explicit", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const promptTabCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-prompt-tab.tsx"), "utf-8");
+
+  assert(promptTabCode.includes('useState(existingSetup.rolloutMode || "sandbox")'), "Setup wizard should default rollout to sandbox");
+  assert(promptTabCode.includes('<option value="active">Canlı aktif</option>'), "Active rollout should be explicit and visible");
+  assert(promptTabCode.includes("revealBotIdentity: false"), "Setup wizard should keep bot identity hidden by default");
+});
+
 
 async function runAllTests() {
   try {

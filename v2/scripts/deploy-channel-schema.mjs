@@ -89,10 +89,12 @@ async function deployChannelSchema() {
         prompt_type TEXT NOT NULL DEFAULT 'system',
         prompt_text TEXT NOT NULL,
         version INT DEFAULT 1,
+        metadata JSONB DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `;
+    await sql`ALTER TABLE channel_prompts ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb`;
     console.log("✅ Created channel_prompts table");
 
     // 6. channel_prompt_bindings
