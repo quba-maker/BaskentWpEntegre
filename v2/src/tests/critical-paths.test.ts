@@ -600,6 +600,7 @@ test("BOT TEST: Doğru tenant botGroupId ile doğru prompt çözmeli ve db mutat
   assert(res.metadata.sandboxMode === true, "Should be sandboxMode");
   assert(res.metadata.toolExecution === 'sandbox', "Tool execution mode mismatch");
   assert(res.metadata.brainV2ShadowPlan?.mode === 'shadow', "Brain v2 shadow plan should be returned in sandbox metadata");
+  assert(res.metadata.brainV2ShadowPlanApplied === true, "Brain v2 plan should be applied to sandbox prompt");
 });
 
 
@@ -14109,7 +14110,43 @@ test("Başkent v84 T115: Bot test UI exposes Brain v2 shadow diagnostics", () =>
   const code = fs.readFileSync(path.join(process.cwd(), "src/app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf8");
   assert(code.includes("brainV2ShadowPlan"), "Bot test playground should read brainV2ShadowPlan metadata");
   assert(code.includes("Brain v2 Gölge Planı"), "Bot test playground should show shadow plan section");
-  assert(code.includes("Hasta yanıtını değiştirmez"), "UI should clearly say the plan is non-patient-facing");
+  assert(code.includes("Sadece test cevabına uygulanır"), "UI should clearly say the plan is sandbox-only");
+});
+
+test("Başkent v84 T116: Brain v2 sandbox directive injects must-answer topics without touching live worker", () => {
+  const { BrainV2ShadowPlanner } = require("../lib/services/ai/brain-v2-shadow-planner");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const fs = require("fs");
+  const path = require("path");
+  const botActionCode = fs.readFileSync(path.join(process.cwd(), "src/app/actions/bot.ts"), "utf8");
+  const orchestratorCode = fs.readFileSync(path.join(process.cwd(), "src/lib/services/ai/ai-response-orchestrator.ts"), "utf8");
+
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v84-t116",
+    "Sen Rüya'sın.",
+    {
+      industry: "healthcare",
+      doctors: `Dermatoloji:
+- Uzm. Dr. Selin YILMAZ`
+    }
+  );
+  const plan = BrainV2ShadowPlanner.build({
+    inboundText: "check up paket fiyatı nedir, dermatoloji doktorunuz kim, kalacak yerim yok",
+    history: [],
+    brain
+  });
+  const directive = BrainV2ShadowPlanner.buildSandboxPromptDirective(plan);
+
+  assert(directive.includes("[BRAIN V2 TEST REHBERI - SADECE SANDBOX]"), directive);
+  assert(directive.includes("fiyat politikasını"), directive);
+  assert(directive.includes("doktor adı"), directive);
+  assert(directive.includes("konaklama"), directive);
+  assert(directive.includes("Hangi konuda bilgi almak istiyorsunuz?"), directive);
+  assert(botActionCode.includes("buildSandboxPromptDirective"), "testBotPrompt should apply the sandbox directive");
+  assert(botActionCode.includes("brainV2ShadowPlanApplied: true"), "metadata should expose applied flag");
+  assert(!orchestratorCode.includes("BRAIN V2 TEST REHBERI"), "live orchestrator must not contain sandbox-only Brain v2 prompt injection");
 });
 
 

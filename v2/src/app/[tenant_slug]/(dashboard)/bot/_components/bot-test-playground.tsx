@@ -238,7 +238,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
             <ListChecks className="w-4 h-4" style={{ color: "var(--q-blue, #007aff)" }} />
             <span>Brain v2 Gölge Planı</span>
             <span className="px-1.5 py-0.5 rounded bg-blue-50 text-[9px]" style={{ color: "var(--q-blue, #007aff)" }}>
-              Hasta yanıtını değiştirmez
+              Sadece test cevabına uygulanır
             </span>
           </div>
           <p className="text-[11px] leading-relaxed text-gray-500">{brainPlan.summary}</p>

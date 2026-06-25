@@ -172,6 +172,58 @@ function buildSummary(contactMode: BrainV2ContactMode, flags: string[], mustAnsw
 }
 
 export class BrainV2ShadowPlanner {
+  public static buildSandboxPromptDirective(plan: BrainV2ShadowPlan): string {
+    const lines: string[] = [
+      '',
+      '[BRAIN V2 TEST REHBERI - SADECE SANDBOX]',
+      'Bu blok canlı hastalara gönderilmez; test alanında cevabı daha doğru üretmek için kullanılır.',
+      `Konuşma modu: ${plan.contactMode}.`,
+    ];
+
+    if (plan.detectedIntents.length > 0) {
+      lines.push(`Algılanan başlıklar: ${plan.detectedIntents.slice(0, 8).join(', ')}.`);
+    }
+    if (plan.mustAnswer.length > 0) {
+      lines.push(`Cevapta mutlaka ele al: ${plan.mustAnswer.join(' | ')}.`);
+    }
+    if (plan.missingInformation.length > 0) {
+      lines.push(`Eksikse tek kısa soruyla netleştir: ${plan.missingInformation.join(', ')}.`);
+    }
+    if (plan.verifiedFacts.pricePolicy) {
+      lines.push(`Fiyat politikası: ${plan.verifiedFacts.pricePolicy}`);
+    }
+    if (plan.verifiedFacts.accommodationPolicy) {
+      lines.push(`Konaklama politikası: ${plan.verifiedFacts.accommodationPolicy}`);
+    }
+    if (plan.verifiedFacts.doctorDirectory && plan.verifiedFacts.doctorDirectory.length > 0) {
+      const doctorLines = plan.verifiedFacts.doctorDirectory
+        .slice(0, 3)
+        .map(block => `${block.department}: ${block.doctors.slice(0, 6).join(', ')}`);
+      lines.push(`Doğrulanmış doktor bilgisi: ${doctorLines.join(' | ')}`);
+    }
+    if (plan.verifiedFacts.knownFacts && plan.verifiedFacts.knownFacts.length > 0) {
+      lines.push(`Bilinen konuşma gerçekleri: ${plan.verifiedFacts.knownFacts.slice(0, 5).join(' | ')}`);
+    }
+    if (plan.recommendedFollowUp) {
+      lines.push(`Önerilen yön: ${plan.recommendedFollowUp}`);
+    }
+    if (plan.forbiddenClaims.length > 0) {
+      lines.push(`Kesin yasaklar: ${plan.forbiddenClaims.join(' | ')}.`);
+    }
+    if (plan.riskFlags.length > 0) {
+      lines.push(`Risk işaretleri: ${plan.riskFlags.join(', ')}.`);
+    }
+
+    lines.push(
+      'Cevabı hazır kalıp gibi değil, doğal hasta danışmanı diliyle yaz.',
+      'Kullanıcı birden fazla soru sorduysa hiçbirini atlama.',
+      'Eski/generic kaçış cümlelerine dönme: "Hangi konuda bilgi almak istiyorsunuz?" gibi cevap verme.',
+      '[/BRAIN V2 TEST REHBERI]'
+    );
+
+    return lines.join('\n');
+  }
+
   public static build(params: BuildParams): BrainV2ShadowPlan {
     const inboundText = params.inboundText || '';
     const history = params.history || [];

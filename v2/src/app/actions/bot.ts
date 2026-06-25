@@ -542,17 +542,6 @@ export async function testBotPrompt(
       }));
       const lastMessage = messages[messages.length - 1];
 
-      const response = await AIResponseOrchestrator.run({
-        tenantId: ctx.tenantId,
-        phoneNumber: 'sandbox_test_user',
-        inboundText: lastMessage?.content || '',
-        brain: mockBrain as any,
-        channel: 'whatsapp',
-        channelId,
-        sandbox: true,
-        history: historyMessages
-      });
-
       const { BrainV2ShadowPlanner } = await import("@/lib/services/ai/brain-v2-shadow-planner");
       const brainV2ShadowPlan = BrainV2ShadowPlanner.build({
         inboundText: lastMessage?.content || '',
@@ -560,6 +549,28 @@ export async function testBotPrompt(
         brain: mockBrain as any,
         channel: 'whatsapp',
         now: new Date()
+      });
+      const brainV2SandboxDirective = BrainV2ShadowPlanner.buildSandboxPromptDirective(brainV2ShadowPlan);
+      const sandboxSystemPrompt = `${rawSystemPrompt}${brainV2SandboxDirective}`;
+      const sandboxPromptHash = crypto.createHash('sha256').update(sandboxSystemPrompt).digest('hex');
+      const sandboxBrain = {
+        ...mockBrain,
+        prompts: {
+          ...mockBrain.prompts,
+          systemPrompt: sandboxSystemPrompt,
+          promptHash: sandboxPromptHash
+        }
+      };
+
+      const response = await AIResponseOrchestrator.run({
+        tenantId: ctx.tenantId,
+        phoneNumber: 'sandbox_test_user',
+        inboundText: lastMessage?.content || '',
+        brain: sandboxBrain as any,
+        channel: 'whatsapp',
+        channelId,
+        sandbox: true,
+        history: historyMessages
       });
 
       return {
@@ -576,6 +587,7 @@ export async function testBotPrompt(
           responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
           responseStyle: profile?.response_style || 'balanced',
           maxResponseTokens: maxTokens,
+          brainV2ShadowPlanApplied: true,
           brainV2ShadowPlan
         }
       };
