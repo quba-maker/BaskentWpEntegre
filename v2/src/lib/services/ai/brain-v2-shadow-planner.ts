@@ -310,6 +310,7 @@ export class BrainV2ShadowPlanner {
     if (flags.includes('appointment_or_call_request')) mustAnswer.push('randevu/arama isteğini gün-saat-saat dilimi netliğiyle ele al');
     if (flags.includes('visit_intent')) mustAnswer.push('geliş bilgisini tekrar sormadan mevcut planı kullan');
     if (flags.includes('address_question')) mustAnswer.push('adres/konum talebini teşekkür kapanışı yapmadan yanıtla');
+    if (flags.includes('language_or_country_signal')) mustAnswer.push('ülke/dil bilgisini kabul et; aynı bilgiyi tekrar sorma');
 
     const missingInformation: string[] = [];
     if (flags.includes('doctor_names') && departments.length === 0) missingInformation.push('doktor adı için bölüm');
@@ -347,6 +348,8 @@ export class BrainV2ShadowPlanner {
       recommendedFollowUp = 'Randevu/arama için eksik olan gün, saat veya saat dilimini tek kısa soruyla netleştir.';
     } else if (flags.includes('price_question')) {
       recommendedFollowUp = 'Fiyatı güvenli cümleyle yanıtla; hasta başka başlık da sorduysa onları aynı cevapta kaçırma.';
+    } else if (flags.includes('language_or_country_signal')) {
+      recommendedFollowUp = 'Ülke veya tercih edilen dil bilgisini kabul et; konuşmayı önceki sağlık talebi üzerinden sürdür.';
     }
 
     return {

@@ -49,9 +49,13 @@ export function isDoctorNameRequestText(text: string, hasPriorDoctorAsk = false)
   if (!clean) return false;
 
   const directPatterns = [
-    /\b(?:doktor|doktorunuz|doktorunun|doktorlar|hekim|hekimler|uzman|uzmanlar|hoca|hocanin|hocanın|kadro|kadronuz)\b.{0,50}\b(?:isim|ismi|ismini|isimleri|ad|adi|adini|adlari|kim|kimler|liste|listesi)\b/,
+    /\b(?:doktor|doktorunuz|doktorunuzun|doktorunun|doktorlar|doktorlariniz|doktorlarinizin|doktorlarınız|doktorlarınızın|hekim|hekiminiz|hekiminizin|hekimler|hekimleriniz|hekimlerinizin|uzman|uzmaniniz|uzmaninizin|uzmanınız|uzmanınızın|uzmanlar|hoca|hocanin|hocanın|hocaniz|hocanız|hocanizin|hocanızın|kadro|kadronuz|kadronuzun)\b.{0,70}\b(?:isim|ismi|ismini|isimleri|ad|adi|adini|adlari|kim|kimler|liste|listesi)\b/,
+    /\b(?:isim|ismi|ismini|isimleri|ad|adi|adini|adlari)\b.{0,70}\b(?:doktor|doktorunuz|doktorunuzun|doktorlar|hekim|hekimler|uzman|uzmanlar|hoca|hocalar)\b/,
+    /\b(?:doktor|hekim|uzman|hoca)\w*\s+(?:ad[ıi]|adi|ismi)\s+(?:ne|nedir|kim)\b/,
+    /\b(?:ad[ıi]|adi|ismi)\s+ne\s+(?:doktorun|doktorunuzun|hocan[ıi]n|hocanizin|hocanızın)?\b/,
     /\b(?:doktor|doktorlar|hekim|hekimler|uzman|uzmanlar|hoca|hocalar)\b.{0,50}\b(?:var|vardir|vardır|bulunuyor|calisiyor|çalışıyor)\b/,
-    /\b(?:isim|ismi|ismini|isimleri|ad|adi|adini|adlari)\b.{0,50}\b(?:ogren|oren|arastir|bak|ver|paylas|soyle)\b/,
+    /\b(?:isim|ismi|ismini|isimleri|ad|adi|adini|adlari)\b.{0,70}\b(?:ogren|oren|arastir|bak|ver|paylas|soyle|istiyorum)\b/,
+    /\b(?:isim|ad|adi|ad[ıi])\s+(?:soyle|söyle|ver|paylas|paylaş)\b/,
     /\bhangi\s+(?:doktor|hekim|uzman|hoca)\b/,
     /\b(?:doktor|hekim|uzman|hoca)\s+kadrosu\b/,
     /\bkimler\s+var\b/,

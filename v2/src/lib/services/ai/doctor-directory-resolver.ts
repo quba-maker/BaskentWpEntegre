@@ -115,6 +115,11 @@ export class DoctorDirectoryResolver {
         continue;
       }
 
+      if (this.isUnsafeInstructionHeading(withoutBullet)) {
+        if (!isBullet) currentDepartment = null;
+        continue;
+      }
+
       if (!this.isDoctorLine(withoutBullet)) {
         if (!isBullet && currentDepartment && !/:$/.test(line)) {
           currentDepartment = null;
@@ -132,6 +137,18 @@ export class DoctorDirectoryResolver {
     }
 
     return entries;
+  }
+
+  private static pushUniqueEntries(target: string[], entries: string[]): void {
+    const seen = new Set(target.map(item => this.normalizeSearchText(item)));
+    for (const entry of entries) {
+      const clean = entry.trim();
+      if (!clean) continue;
+      const key = this.normalizeSearchText(clean);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      target.push(clean);
+    }
   }
 
   /**
@@ -160,32 +177,37 @@ export class DoctorDirectoryResolver {
         .flatMap(block => this.extractDoctorEntries(block));
     }
 
-    if (rawList.length === 0) {
-      const knowledgeSources = [
-        brain.context.knowledge?.rules,
-        brain.context.knowledge?.prices,
-        brain.context.config?.knowledgeRules,
-        brain.context.config?.knowledge_rules,
-        brain.context.config?.verifiedInfoArchive,
-        brain.context.config?.verified_info_archive
-      ].filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+    const knowledgeSources = [
+      brain.context.knowledge?.rules,
+      brain.context.knowledge?.prices,
+      brain.context.config?.knowledgeRules,
+      brain.context.config?.knowledge_rules,
+      brain.context.config?.verifiedInfoArchive,
+      brain.context.config?.verified_info_archive
+    ].filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
 
-      for (const source of knowledgeSources) {
-        const explicitBlocks = this.extractExplicitDoctorDirectoryBlocks(source);
-        if (explicitBlocks.length > 0) {
-          rawList.push(...explicitBlocks.flatMap(block => this.extractDoctorEntries(block)));
-        } else {
-          rawList.push(...this.extractDoctorEntries(source));
-        }
-      }
+    // Knowledge archive is the tenant-verified source of truth. Parse it even
+    // when a smaller prompt-local doctor block was already found; otherwise a
+    // narrow service-specific block (e.g. only spine doctors) hides the full
+    // verified directory (e.g. Dermatology, Gynecology).
+    for (const source of knowledgeSources) {
+      const explicitBlocks = this.extractExplicitDoctorDirectoryBlocks(source);
+      const parsed = explicitBlocks.length > 0
+        ? explicitBlocks.flatMap(block => this.extractDoctorEntries(block))
+        : this.extractDoctorEntries(source);
+      this.pushUniqueEntries(rawList, parsed);
     }
 
     const doctors: Doctor[] = [];
+    const seenDoctors = new Set<string>();
     for (const line of rawList) {
       // Parse doctor entry, e.g. "Prof. Dr. Aytekin GÜVEN - Kardiyoloji" or just "Prof. Dr. Aytekin GÜVEN"
       const parts = line.split('-').map(p => p.trim());
       const name = parts[0];
       const dept = parts[1] || 'Genel';
+      const key = this.normalizeSearchText(`${name} - ${dept}`);
+      if (seenDoctors.has(key)) continue;
+      seenDoctors.add(key);
       doctors.push({ name, department: dept });
     }
 

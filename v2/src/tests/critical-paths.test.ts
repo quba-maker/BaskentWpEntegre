@@ -4960,6 +4960,35 @@ test("P0.16 - 13g: Doctor resolver bilgi bankası kurallar alanındaki Dermatolo
   assert(docs.some(d => d.name === "Uzm. Dr. Emre ZEKEY"), "Emre ZEKEY bilgi bankasından çekilmeli");
 });
 
+test("Başkent v85 T114: Doctor resolver küçük prompt bloğu bulunca geniş bilgi arşivini atlamaz", () => {
+  const { DoctorDirectoryResolver } = require("../lib/services/ai/doctor-directory-resolver");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const systemPrompt = `
+    Verified Hekim Listesi:
+    Beyin ve Sinir Cerrahisi:
+    - Doç. Dr. Mustafa Kemal İLİK
+  `;
+  const knowledgeRules = `
+    --- VERIFIED BİLGİ ARŞİVİ ---
+    Deri ve Zührevi Hastalıkları / Dermatoloji:
+    - Öğr. Gör. Dr. Gülay ÖZEL ŞAHİN
+    - Uzm. Dr. Emre ZEKEY
+
+    Kadın Hastalıkları ve Doğum:
+    - Prof. Dr. Emel Ebru ÖZÇİMEN
+    - Doç. Dr. Mehmet Ufuk CERAN
+  `;
+  const mockBrain = createTenantBrain("t1", "whatsapp", "payload1", systemPrompt, { industry: "healthcare" }, null, { rules: knowledgeRules });
+
+  const allDocs = DoctorDirectoryResolver.getDoctors(mockBrain);
+  const dermatologyDocs = DoctorDirectoryResolver.getDoctors(mockBrain, "Dermatoloji");
+  const gynecologyDocs = DoctorDirectoryResolver.getDoctors(mockBrain, "Kadın Doğum");
+
+  assert(allDocs.length === 5, `Prompt bloğu + bilgi arşivi birlikte 5 doktor çözülmeli, gelen: ${allDocs.length}`);
+  assert(dermatologyDocs.some(d => d.name === "Uzm. Dr. Emre ZEKEY"), `Dermatoloji arşivden gelmeli: ${JSON.stringify(dermatologyDocs)}`);
+  assert(gynecologyDocs.some(d => d.name === "Doç. Dr. Mehmet Ufuk CERAN"), `Kadın Doğum arşivden gelmeli: ${JSON.stringify(gynecologyDocs)}`);
+});
+
 test("P0.16 - 13h: Dermatoloji bağlamı kısa doktor ismi takiplerinde korunur", () => {
   const { ConsultantConversationStateResolver } = require("../lib/services/ai/consultant-conversation-state-resolver");
   const { DoctorNamesPolicy } = require("../lib/services/ai/doctor-names-policy");
@@ -13944,6 +13973,70 @@ test("Başkent v82 T106: final auditor recovers generic escape for doctor/accomm
   });
   assert(!accommodation.text.includes("Hangi konuda bilgi almak istiyorsunuz"), accommodation.text);
   assert(accommodation.text.includes("Hastaneye yakın konaklama seçenekleri"), accommodation.text);
+});
+
+test("Başkent v85 T115: final auditor explicit country and accommodation coverage", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+
+  const country = FinalOutboundBodyAuditor.audit(
+    "Özbekistan'dan yazdığınızı anladım Haman.\n\nSize daha doğru yardımcı olabilmem için adınızı öğrenebilir miyim?",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v85-t115-country",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "O'zbekiston"
+    }
+  );
+  assert(country.text.includes("Özbekistan'da yaşadığınızı not aldım"), country.text);
+  assert(!country.text.includes("Haman"), country.text);
+  assert(!country.text.includes("adınızı öğrenebilir miyim"), country.text);
+
+  const languagePrompt = FinalOutboundBodyAuditor.audit(
+    "Benimle istediğiniz dilde konuşabilirsiniz. Türkçe dışında Özbekçe, Rusça, İngilizce sizin için daha rahatsa o dilde de yardımcı olayım. Hangi dil daha rahat olur?",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v85-t115-language",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "O'zbekiston"
+    }
+  );
+  assert(languagePrompt.text.includes("Özbekistan'da yaşadığınızı not aldım"), languagePrompt.text);
+  assert(languagePrompt.text.includes("Hangi dil daha rahat olur"), languagePrompt.text);
+
+  const accommodation = FinalOutboundBodyAuditor.audit(
+    "Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.\n\nDermatoloji bölümü için doğrulanmış hekimlerimiz: Uzm. Dr. Emre ZEKEY.",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v85-t115-accommodation",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "paket fiyatı nedir birde dermatoloji doktorunuz kim birde kalacak yerim yok"
+    }
+  );
+  assert(accommodation.text.includes("Hastaneye yakın konaklama seçenekleri"), accommodation.text);
+  assert(accommodation.text.includes("garanti veya rezervasyon sözü veremem"), accommodation.text);
+});
+
+test("Başkent v85 T123: final auditor address answer does not append name request", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "Adresimiz: Hocacihan Mahallesi, Saray Caddesi No:1, Selçuklu/KONYA.\n\nSize daha doğru yardımcı olabilmem için adınızı öğrenebilir miyim?",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v85-t116-address",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "Adres gönderi bir zahmet.. Teşekkürler.."
+    }
+  );
+  assert(result.text.includes("Hocacihan Mahallesi"), result.text);
+  assert(!result.text.includes("adınızı öğrenebilir miyim"), result.text);
 });
 
 test("Başkent v82 T107: known facts tolerate country typo and remember new departments", () => {

@@ -353,6 +353,8 @@ function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { t
 
   const morphologyRewrites: Array<[RegExp, string]> = [
     [/form\s+başvurunuz\s+bize\s+ulaştı\.,/gi, 'form başvurunuz bize ulaştı.'],
+    [/\b([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:'d[ae]n|'da|'de)\s+yazd[ıi][ğg][ıi]n[ıi]z[ıi]?\s+anlad[ıi]m)\s+(?:Haman|Hemen)\b[.,]?/g, '$1.'],
+    [/\b(?:Haman|Hemen),\s+/g, ''],
     [/boyunuz\s+f[ıi]t[ıi][ğg][ıi]/gi, 'boyun fıtığı'],
     [/baban[ıi]z[ıi]n\s+([^.\n,]+?)\s+şikayeti\s+oldu[ğg]unuzu/gi, 'babanızın $1 şikayeti olduğunu'],
     [/annenizin\s+([^.\n,]+?)\s+şikayeti\s+oldu[ğg]unuzu/gi, 'annenizin $1 şikayeti olduğunu'],
@@ -579,6 +581,100 @@ function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): {
   };
 }
 
+function applyExplicitQuestionCoverageGuard(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
+  const inbound = (ctx.inboundText || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase();
+  let result = text;
+  let rewrote = false;
+
+  const asksAddress = /\b(?:adres|konum|harita|nerede|neredesiniz|location|address)\b/i.test(inbound);
+  if (asksAddress) {
+    const next = result
+      .replace(/\s*Size\s+daha\s+do[ğg]ru\s+yard[ıi]mc[ıi]\s+olabilmem\s+i[çc]in\s+ad[ıi]n[ıi]z[ıi]?\s+[öo][ğg]renebilir\s+miyim\??/gi, '')
+      .replace(/\s*Ad[ıi]n[ıi]z[ıi]?\s+[öo][ğg]renebilir\s+miyim\??/gi, '')
+      .trim();
+    if (next !== result) {
+      result = next;
+      rewrote = true;
+    }
+  }
+
+  const asksAccommodation = /\b(?:konaklama|kalacak\s+yer\w*|otel|misafirhane|nerede\s+kal|accommodation|stay|unterkunft)\b/i.test(inbound);
+  const answeredAccommodation = /\b(?:konaklama|kalacak\s+yer|otel|anla[şs]mal[ıi]|hastaneye\s+yak[ıi]n|rezervasyon|garanti)\b/i.test(result);
+  if (asksAccommodation && !answeredAccommodation) {
+    result = [
+      result.trim(),
+      'Konaklama tarafı için de şunu net söyleyebilirim: Hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda ekibimiz danışmanlık yapabilir; garanti veya rezervasyon sözü veremem.'
+    ].filter(Boolean).join('\n\n');
+    rewrote = true;
+  }
+
+  const asksPrice = /\b(?:fiyat|[üu]cret|tutar|[öo]deme|ne\s+kadar|ta\s*12|ta12)\b/i.test(inbound);
+  const answeredPrice = /Fiyat\s+bilgisi,\s+hastanedeki\s+de[ğg]erlendirme\s+ve\s+planlanacak\s+s[üu]rece\s+g[öo]re\s+de[ğg]i[şs]ti[ğg]i\s+i[çc]in\s+buradan\s+net\s+fiyat\s+payla[şs]am[ıi]yorum\./i.test(result);
+  if (asksPrice && !answeredPrice) {
+    result = [
+      'Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.',
+      result.trim()
+    ].filter(Boolean).join('\n\n');
+    rewrote = true;
+  }
+
+  result = result.replace(/\n{3,}/g, '\n\n').trim();
+  return { text: result, rewrote };
+}
+
+function extractCountryMention(text?: string): string | null {
+  const clean = (text || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase();
+  const countryPatterns: Array<[RegExp, string]> = [
+    [/\bo['’`]?zbekiston\b|\b[öo]zbekistan\b|\bozbekiston\b/i, 'Özbekistan'],
+    [/\bkazakistan\b/i, 'Kazakistan'],
+    [/\balmanya\b|\bgermany\b|\bdeutschland\b/i, 'Almanya'],
+    [/\bfransa\b|\bfrance\b/i, 'Fransa'],
+    [/\bkanada\b|\bcanada\b/i, 'Kanada'],
+    [/\bhollanda\b|\bnetherlands\b|\bnederland\b/i, 'Hollanda'],
+    [/\bbel[çc]ika\b|\bbelgium\b/i, 'Belçika'],
+    [/\birak\b|\biraq\b/i, 'Irak'],
+    [/\b[üu]rd[üu]n\b|\bjordan\b/i, 'Ürdün'],
+    [/\bt[üu]rkiye\b|\bturkey\b/i, 'Türkiye'],
+    [/\bazerbaycan\b|\bazerbaijan\b/i, 'Azerbaycan'],
+    [/\brusya\b|\brussia\b/i, 'Rusya'],
+    [/\bingiltere\b|\bunited kingdom\b|\buk\b/i, 'İngiltere'],
+  ];
+  for (const [pattern, label] of countryPatterns) {
+    if (pattern.test(clean)) return label;
+  }
+  return null;
+}
+
+function applyCountryAcknowledgementGuard(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
+  const country = extractCountryMention(ctx.inboundText);
+  if (!country) return { text, rewrote: false };
+
+  const asksForNameOnly = /ad[ıi]n[ıi]z[ıi]?\s+(?:[öo][ğg]renebilir|payla[şs][ıi]r|yazar)|ad[ıi]n[ıi]z\s+nedir/i.test(text);
+  const generic = /hangi\s+bilgiyi\s+netle[şs]tireyim|hangi\s+konuda\s+bilgi\s+almak/i.test(text);
+  const languagePreferencePrompt = /istedi[ğg]iniz\s+dilde|hangi\s+dil\s+(?:sizin\s+i[çc]in\s+)?(?:daha\s+)?rahat|[öo]zbek[çc]e|rus[çc]a|ingilizce/i.test(text);
+  if (!asksForNameOnly && !generic && !languagePreferencePrompt && new RegExp(country.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text)) {
+    return { text, rewrote: false };
+  }
+  if (languagePreferencePrompt && !new RegExp(country.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text)) {
+    return {
+      text: `${country}'da yaşadığınızı not aldım. İsterseniz Türkçe devam edebiliriz; Özbekçe, Rusça veya İngilizce sizin için daha rahatsa o dilde de yardımcı olayım. Hangi dil daha rahat olur?`,
+      rewrote: true,
+    };
+  }
+  if (!asksForNameOnly && !generic) return { text, rewrote: false };
+
+  return {
+    text: `${country}'da yaşadığınızı not aldım. Aynı yerden devam edelim; süreç, geliş planı veya randevu tarafında hangi bilgiyi netleştirelim?`,
+    rewrote: true,
+  };
+}
+
 export class FinalOutboundBodyAuditor {
   /**
    * Apply mandatory last-mile chain to the final body before 360dialog send.
@@ -670,6 +766,18 @@ export class FinalOutboundBodyAuditor {
       const priceGuard = applyPriceQuestionGuard(result, ctx);
       if (priceGuard.rewrote) {
         result = priceGuard.text;
+        rewrote = true;
+      }
+
+      const coverageGuard = applyExplicitQuestionCoverageGuard(result, ctx);
+      if (coverageGuard.rewrote) {
+        result = coverageGuard.text;
+        rewrote = true;
+      }
+
+      const countryGuard = applyCountryAcknowledgementGuard(result, ctx);
+      if (countryGuard.rewrote) {
+        result = countryGuard.text;
         rewrote = true;
       }
 
