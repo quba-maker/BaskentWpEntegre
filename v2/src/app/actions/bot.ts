@@ -573,9 +573,24 @@ export async function testBotPrompt(
         history: historyMessages
       });
 
+      let finalReply = response.text || '⚠️ Model yanıt üretmedi.';
+      if (response.text) {
+        const { FinalOutboundBodyAuditor } = await import("@/lib/services/ai/final-outbound-body-auditor");
+        const auditResult = FinalOutboundBodyAuditor.audit(response.text, {
+          tenantId: ctx.tenantId,
+          conversationId: `sandbox-${botGroupId}`,
+          workerPath: 'bot_test_playground',
+          responseSource: response.modelUsed || aiModel,
+          channel: 'whatsapp',
+          replyLanguage: response.replyLanguage,
+          inboundText: lastMessage?.content || '',
+        });
+        finalReply = auditResult.text;
+      }
+
       return {
         success: true,
-        reply: response.text || '⚠️ Model yanıt üretmedi.',
+        reply: finalReply,
         metadata: {
           model: response.modelUsed || aiModel,
           promptVersion: activePrompt.version,

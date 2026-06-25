@@ -217,6 +217,10 @@ export class BrainV2ShadowPlanner {
     lines.push(
       'Cevabı hazır kalıp gibi değil, doğal hasta danışmanı diliyle yaz.',
       'Kullanıcı birden fazla soru sorduysa hiçbirini atlama.',
+      'Hastaya ismiyle hitap etme; Bey, Hanım, Sayın, Bay, Bayan kullanma.',
+      'Devam eden konuşmada kendini veya kurumu tekrar tanıtma; doğrudan son soruya cevap ver.',
+      'Kullanıcı sadece adını yazdıysa kısa kabul et ve akışın eksik bilgisini tek doğal soruyla sor.',
+      'Kullanıcı "olur", "evet", "gelebilirim" gibi olumlu yanıt verdiyse konuşmayı kapatma; eksikse ülke veya yaklaşık geliş dönemini netleştir.',
       'Eski/generic kaçış cümlelerine dönme: "Hangi konuda bilgi almak istiyorsunuz?" gibi cevap verme.',
       '[/BRAIN V2 TEST REHBERI]'
     );

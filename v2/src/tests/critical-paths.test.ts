@@ -6628,13 +6628,13 @@ test("P0.16-N: 11. FinalOutboundBodyAuditor — empty text returns empty result 
   assert(result.bodyLength === 0, "Empty input bodyLength should be 0");
 });
 
-test("P0.16-N: 12. Test bot path (sandbox=true) returns orchestratorResult.text directly (no extra post-process)", async () => {
+test("P0.16-N: 12. Test bot path (sandbox=true) mirrors live final body audit", async () => {
   // Verify test bot action calls AIResponseOrchestrator with sandbox:true
-  // and returns response.text without any additional sanitizer/formatter
-  // This test confirms the path — actual text quality tested by orchestrator tests
+  // and then applies the same final body auditor used by live WhatsApp sends.
   const botActionCode = require("fs").readFileSync("src/app/actions/bot.ts", "utf8");
   assert(botActionCode.includes("sandbox: true"), "Test bot should use sandbox:true");
-  assert(botActionCode.includes("reply: response.text"), "Test bot should return response.text directly");
+  assert(botActionCode.includes("FinalOutboundBodyAuditor.audit"), "Test bot should apply final outbound body audit");
+  assert(botActionCode.includes("reply: finalReply"), "Test bot should return audited final reply");
 });
 
 test("P0.16-N: 13. Live worker immediate path uses FinalOutboundBodyAuditor (not just formatForWhatsApp)", () => {
@@ -14143,10 +14143,47 @@ test("Başkent v84 T116: Brain v2 sandbox directive injects must-answer topics w
   assert(directive.includes("fiyat politikasını"), directive);
   assert(directive.includes("doktor adı"), directive);
   assert(directive.includes("konaklama"), directive);
+  assert(directive.includes("Bey, Hanım"), directive);
+  assert(directive.includes("kendini veya kurumu tekrar tanıtma"), directive);
+  assert(directive.includes('"olur", "evet"'), directive);
   assert(directive.includes("Hangi konuda bilgi almak istiyorsunuz?"), directive);
   assert(botActionCode.includes("buildSandboxPromptDirective"), "testBotPrompt should apply the sandbox directive");
   assert(botActionCode.includes("brainV2ShadowPlanApplied: true"), "metadata should expose applied flag");
   assert(!orchestratorCode.includes("BRAIN V2 TEST REHBERI"), "live orchestrator must not contain sandbox-only Brain v2 prompt injection");
+});
+
+test("Başkent v84 T117: bot test and final auditor remove honorifics and ongoing identity repeats", async () => {
+  const { FinalOutboundBodyAuditor } = await import("../lib/services/ai/final-outbound-body-auditor");
+  const fs = require("fs");
+  const path = require("path");
+  const botActionCode = fs.readFileSync(path.join(process.cwd(), "src/app/actions/bot.ts"), "utf8");
+
+  const nameResult = FinalOutboundBodyAuditor.audit(
+    "Memnun oldum Mehmet Bey.\n\nGeliş planınız netleştiğinde birlikte ilerleyebiliriz.",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "mehmet"
+    }
+  );
+  assert(!nameResult.text.includes("Mehmet Bey"), nameResult.text);
+  assert(!nameResult.text.includes("Memnun oldum Mehmet"), nameResult.text);
+  assert(nameResult.text.includes("Memnun oldum."), nameResult.text);
+
+  const processResult = FinalOutboundBodyAuditor.audit(
+    "Başkent Üniversitesi Konya Hastanesi’nden ben Rüya.\n\nSüreç, hastanemize geldiğinizde ilgili uzman hekim tarafından yapılacak muayene ile başlar.",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "peki süreç nasıl oluyor"
+    }
+  );
+  assert(!processResult.text.includes("Başkent Üniversitesi Konya Hastanesi"), processResult.text);
+  assert(!processResult.text.includes("ben Rüya"), processResult.text);
+  assert(processResult.text.startsWith("Süreç"), processResult.text);
+  assert(botActionCode.includes("FinalOutboundBodyAuditor.audit"), "Bot test playground should run the same final body audit as live WhatsApp");
 });
 
 

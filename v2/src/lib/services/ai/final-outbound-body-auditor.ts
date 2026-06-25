@@ -230,6 +230,15 @@ function isShortGreetingInbound(inboundText?: string): boolean {
   return clean.length <= 30 && /\b(merhaba|selam|iyi günler|iyi aksamlar|iyi akşamlar|günaydın|gunaydin)\b/i.test(clean);
 }
 
+function isIdentityQuestionInbound(inboundText?: string): boolean {
+  const clean = (inboundText || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase()
+    .trim();
+  return /\b(kimle\s+g[öo]r[üu][şs][üu]yorum|ad[ıi]n[ıi]z\s+ne|kimsiniz|sen\s+kimsin|r[üu]ya\s+m[ıi]s[ıi]n|bot\s+musun|yapay\s+zeka\s+m[ıi]s[ıi]n)\b/i.test(clean);
+}
+
 function formatTurkishDateFromIso(dateIso?: string | null): string | null {
   if (!dateIso) return null;
   const match = String(dateIso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -294,14 +303,25 @@ function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { t
   let result = text;
   let rewrote = false;
 
-  const honorificCleaned = result.replace(/\b([A-ZÇĞİÖŞÜ][a-zçğıöşü]+)\s+(?:Bey|Hanım|Hanim|Sayın|Sayin|Bay|Bayan)\b/g, '$1');
+  const nameOnlyGreetingCleaned = result.replace(
+    /\bMemnun\s+oldum\s+[A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü'’-]{1,40}(?:\s+(?:Bey|Hanım|Hanim|Sayın|Sayin|Bay|Bayan))?[,.]?/g,
+    'Memnun oldum.'
+  );
+  if (nameOnlyGreetingCleaned !== result) {
+    result = nameOnlyGreetingCleaned;
+    rewrote = true;
+  }
+
+  const honorificCleaned = result.replace(/\b([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü'’-]{1,40})\s+(?:Bey|Hanım|Hanim|Sayın|Sayin|Bay|Bayan)(?=\b|[.,!?;:])/g, '$1');
   if (honorificCleaned !== result) {
     result = honorificCleaned;
     rewrote = true;
   }
 
-  if (!isShortGreetingInbound(ctx.inboundText)) {
+  if (!isShortGreetingInbound(ctx.inboundText) && !isIdentityQuestionInbound(ctx.inboundText)) {
     const identityPatterns = [
+      /^\s*(?:Merhaba,\s*)?Başkent\s+Üniversitesi\s+Konya\s+Hastanesi['’`]nden\s+R[üu]ya\s+ben[.,]?\s*/i,
+      /^\s*(?:Merhaba,\s*)?Başkent\s+Üniversitesi\s+Konya\s+Hastanesi['’`]nden\s+ben\s+R[üu]ya[.,]?\s*/i,
       /^\s*Başkent\s+Üniversitesi\s+Konya\s+Hastanesi['’`]nden\s+R[üu]ya\s+ben[.,]?\s*/i,
       /^\s*Başkent\s+Üniversitesi\s+Konya\s+Hastanesi['’`]nden\s+ben\s+R[üu]ya[.,]?\s*/i,
       /^\s*(?:Merhaba,\s*)?R[üu]ya\s+ben[.,]?\s*(?:Başkent\s+Üniversitesi\s+Konya\s+(?:Hastanesi|Uygulama\s+ve\s+Araştırma\s+Merkezi)['’`]nden\s+(?:yazıyorum|sizinle\s+ilgileniyorum)[.,]?)?\s*/i,
