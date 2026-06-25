@@ -12,6 +12,12 @@ export type QubaBrainSource =
   | 'manual_setup'
   | 'sector_default';
 
+export type QubaBrainRolloutMode =
+  | 'disabled'
+  | 'sandbox'
+  | 'shadow'
+  | 'active';
+
 export type QubaTonePreset =
   | 'warm_corporate'
   | 'calm_professional'
@@ -121,10 +127,30 @@ export interface QubaRuntimeProfile {
   };
 }
 
+export interface QubaBrainRolloutProfile {
+  mode: QubaBrainRolloutMode;
+  sandboxDirectiveEnabled: boolean;
+  liveDirectiveEnabled: boolean;
+}
+
 export interface QubaBrainDiagnostics {
   warnings: string[];
   missingSetup: string[];
   capabilities: string[];
+}
+
+export interface QubaBrainProfileOverride {
+  industry?: QubaIndustry;
+  identity?: Partial<QubaIdentityProfile>;
+  tone?: Partial<QubaToneProfile>;
+  goals?: QubaGoal[];
+  serviceCatalog?: QubaServiceCatalogItem[];
+  policies?: QubaPolicyRule[];
+  actions?: QubaActionPolicy[];
+  knowledge?: Partial<QubaKnowledgeProfile>;
+  setupQuestions?: QubaSetupQuestion[];
+  runtime?: Partial<QubaRuntimeProfile>;
+  rolloutMode?: QubaBrainRolloutMode;
 }
 
 export interface QubaBrainProfile {
@@ -142,5 +168,6 @@ export interface QubaBrainProfile {
   knowledge: QubaKnowledgeProfile;
   setupQuestions: QubaSetupQuestion[];
   runtime: QubaRuntimeProfile;
+  rollout: QubaBrainRolloutProfile;
   diagnostics: QubaBrainDiagnostics;
 }

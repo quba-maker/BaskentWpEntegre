@@ -1,6 +1,7 @@
 import type { TenantBrain } from '../tenant-brain';
 import type {
   QubaBrainDiagnostics,
+  QubaBrainProfileOverride,
   QubaBrainProfile,
   QubaBrainSource,
   QubaIndustry,
@@ -9,6 +10,11 @@ import type {
   QubaServiceCatalogItem,
 } from './schema';
 import { getSectorPack } from './sector-packs';
+import {
+  resolveQubaBrainRolloutMode,
+  shouldApplyQubaBrainLiveDirective,
+  shouldApplyQubaBrainSandboxDirective,
+} from './rollout';
 import { DoctorDirectoryResolver } from '../../services/ai/doctor-directory-resolver';
 
 function normalizeIndustry(value: unknown): QubaIndustry {
@@ -46,9 +52,31 @@ function extractServiceCatalogFromText(text: string): QubaServiceCatalogItem[] {
   return services;
 }
 
-function resolveIdentity(brain: TenantBrain): QubaBrainProfile['identity'] {
+function uniqueStrings(items: string[]): string[] {
+  return Array.from(new Set(items.filter(Boolean)));
+}
+
+function mergeById<T extends { id: string }>(base: T[], overrides?: T[]): T[] {
+  if (!overrides || overrides.length === 0) return base;
+  const map = new Map<string, T>();
+  for (const item of base) map.set(item.id, item);
+  for (const item of overrides) map.set(item.id, { ...(map.get(item.id) || {} as T), ...item });
+  return Array.from(map.values());
+}
+
+function getQubaBrainOverride(brain: TenantBrain): QubaBrainProfileOverride {
+  const configOverride = brain.context.config?.qubaBrain;
+  const metadataOverride = (brain.prompts.metadata as any)?.qubaBrain;
+  return {
+    ...(configOverride && typeof configOverride === 'object' ? configOverride : {}),
+    ...(metadataOverride && typeof metadataOverride === 'object' ? metadataOverride : {}),
+  };
+}
+
+function resolveIdentity(brain: TenantBrain, override?: QubaBrainProfileOverride): QubaBrainProfile['identity'] {
   const metadataIdentity = (brain.prompts.metadata as any)?.identity || {};
   const configIdentity = brain.context.config?.identity || {};
+  const brainIdentity = override?.identity || {};
   const tenantConfig = brain.context.config || {};
   const prompt = brain.prompts.systemPrompt || '';
 
@@ -58,13 +86,15 @@ function resolveIdentity(brain: TenantBrain): QubaBrainProfile['identity'] {
     ?.replace(/d[ıi]r$/i, '')
     ?.replace(/[.,;:!?]+$/g, '')
     ?.trim();
-  const assistantName = metadataIdentity.personaName
+  const assistantName = brainIdentity.assistantName
+    || metadataIdentity.personaName
     || configIdentity.personaName
     || tenantConfig.assistantName
     || promptAssistantName
     || '';
 
-  const organizationName = metadataIdentity.organizationName
+  const organizationName = brainIdentity.organizationName
+    || metadataIdentity.organizationName
     || configIdentity.organizationName
     || tenantConfig.organizationName
     || tenantConfig.name
@@ -72,15 +102,15 @@ function resolveIdentity(brain: TenantBrain): QubaBrainProfile['identity'] {
 
   return {
     organizationName,
-    organizationShortName: metadataIdentity.organizationShortName || configIdentity.organizationShortName || tenantConfig.organizationShortName || organizationName,
+    organizationShortName: brainIdentity.organizationShortName || metadataIdentity.organizationShortName || configIdentity.organizationShortName || tenantConfig.organizationShortName || organizationName,
     assistantName,
-    revealBotIdentity: false,
-    defaultLanguage: 'tr',
-    supportedLanguages: ['tr', 'en', 'de', 'ru', 'uz', 'ar'],
+    revealBotIdentity: brainIdentity.revealBotIdentity ?? false,
+    defaultLanguage: brainIdentity.defaultLanguage || 'tr',
+    supportedLanguages: brainIdentity.supportedLanguages || ['tr', 'en', 'de', 'ru', 'uz', 'ar'],
   };
 }
 
-function resolveKnowledge(brain: TenantBrain): QubaKnowledgeProfile {
+function resolveKnowledge(brain: TenantBrain, override?: QubaBrainProfileOverride): QubaKnowledgeProfile {
   const doctors = DoctorDirectoryResolver.getDoctors(brain);
   const rules = brain.context.knowledge?.rules || '';
   const prices = brain.context.knowledge?.prices || '';
@@ -91,15 +121,16 @@ function resolveKnowledge(brain: TenantBrain): QubaKnowledgeProfile {
     verifiedArchive: rules,
     doctorDirectoryAvailable: doctors.length > 0,
     serviceCatalogAvailable: /check|kardiyoloji|dermatoloji|kadın|ortopedi|fıtık/i.test(`${rules}\n${brain.prompts.systemPrompt || ''}`),
+    ...(override?.knowledge || {}),
   };
 }
 
-function resolveRuntime(brain: TenantBrain): QubaRuntimeProfile {
+function resolveRuntime(brain: TenantBrain, override?: QubaBrainProfileOverride): QubaRuntimeProfile {
   const settings = brain.context.settings;
   const config = brain.context.config || {};
   const hours = settings.workingHours || { enabled: false };
 
-  return {
+  const runtime = {
     model: settings.aiModel || config.aiModel || 'gemini-2.5-flash',
     responseStyle: settings.responseStyle || 'balanced',
     responseDelaySeconds: settings.responseDelaySeconds ?? 5,
@@ -110,6 +141,15 @@ function resolveRuntime(brain: TenantBrain): QubaRuntimeProfile {
       start: hours.start,
       end: hours.end,
       days: (hours as any).days,
+    },
+  };
+
+  return {
+    ...runtime,
+    ...(override?.runtime || {}),
+    workingHours: {
+      ...runtime.workingHours,
+      ...(override?.runtime?.workingHours || {}),
     },
   };
 }
@@ -141,14 +181,32 @@ function resolveSource(brain: TenantBrain): QubaBrainSource {
 
 export class QubaBrainCompiler {
   public static compile(brain: TenantBrain): QubaBrainProfile {
+    const override = getQubaBrainOverride(brain);
     const configIndustry = brain.context.config?.industry;
     const metadataIndustry = (brain.prompts.metadata as any)?.industry;
-    const industry = normalizeIndustry(configIndustry || metadataIndustry);
+    const industry = normalizeIndustry(override.industry || configIndustry || metadataIndustry);
     const sector = getSectorPack(industry);
-    const identity = resolveIdentity(brain);
-    const knowledge = resolveKnowledge(brain);
+    const identity = resolveIdentity(brain, override);
+    const knowledge = resolveKnowledge(brain, override);
     const textSource = `${brain.prompts.systemPrompt || ''}\n${knowledge.rules || ''}\n${knowledge.prices || ''}`;
-    const serviceCatalog = extractServiceCatalogFromText(textSource);
+    const serviceCatalog = override.serviceCatalog && override.serviceCatalog.length > 0
+      ? override.serviceCatalog
+      : extractServiceCatalogFromText(textSource);
+    const rolloutMode = resolveQubaBrainRolloutMode(brain);
+    const tone = override.tone
+      ? {
+          ...sector.defaultTone,
+          ...override.tone,
+          avoidPhrases: uniqueStrings([
+            ...sector.defaultTone.avoidPhrases,
+            ...(override.tone.avoidPhrases || []),
+          ]),
+          preferredClosers: uniqueStrings([
+            ...sector.defaultTone.preferredClosers,
+            ...(override.tone.preferredClosers || []),
+          ]),
+        }
+      : sector.defaultTone;
 
     const partial = {
       identity,
@@ -163,14 +221,19 @@ export class QubaBrainCompiler {
       channel: brain.context.channel,
       industry,
       identity,
-      tone: sector.defaultTone,
-      goals: sector.goals,
+      tone,
+      goals: override.goals && override.goals.length > 0 ? override.goals : sector.goals,
       serviceCatalog,
-      policies: sector.policies,
-      actions: sector.actions,
+      policies: mergeById(sector.policies, override.policies),
+      actions: mergeById(sector.actions, override.actions),
       knowledge,
-      setupQuestions: sector.setupQuestions,
-      runtime: resolveRuntime(brain),
+      setupQuestions: mergeById(sector.setupQuestions, override.setupQuestions),
+      runtime: resolveRuntime(brain, override),
+      rollout: {
+        mode: rolloutMode,
+        sandboxDirectiveEnabled: shouldApplyQubaBrainSandboxDirective(rolloutMode),
+        liveDirectiveEnabled: shouldApplyQubaBrainLiveDirective(rolloutMode),
+      },
       diagnostics: resolveDiagnostics(partial),
     };
   }

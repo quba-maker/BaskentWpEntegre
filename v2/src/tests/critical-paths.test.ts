@@ -14507,8 +14507,101 @@ test("Başkent v86 T124: Quba Brain Core directive is sandbox-only and bot test 
   const orchestratorCode = fs.readFileSync(path.resolve(__dirname, "../lib/services/ai/ai-response-orchestrator.ts"), "utf-8");
 
   assert(botActionCode.includes("QubaBrainCompiler.compile"), "Bot test playground should compile Quba Brain Core profile");
-  assert(botActionCode.includes("qubaBrainCoreApplied: true"), "Bot test metadata should expose Quba Brain Core diagnostics");
+  assert(botActionCode.includes("qubaBrainCoreApplied"), "Bot test metadata should expose Quba Brain Core diagnostics");
+  assert(botActionCode.includes("shouldApplyQubaBrainSandboxDirective"), "Bot test playground should respect Quba Brain rollout mode");
   assert(!orchestratorCode.includes("[QUBA BRAIN CORE]"), "Live orchestrator must not inject Quba Brain Core before rollout flag");
+});
+
+test("Başkent v86 T125: Quba Brain Core supports tenant setup override without prompt bloat", () => {
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const { QubaBrainCompiler } = require("../lib/brain/core");
+  const brain = createTenantBrain(
+    "tenant-fitness-demo",
+    "instagram",
+    "payload-v86-t125",
+    "Sen yardımcı bir asistansın.",
+    {
+      industry: "general",
+      qubaBrain: {
+        industry: "fitness",
+        rolloutMode: "disabled",
+        identity: {
+          organizationName: "Olimpik Yaşam Merkezi",
+          assistantName: "Maya",
+          supportedLanguages: ["tr"],
+        },
+        serviceCatalog: [
+          {
+            id: "child_swimming_course",
+            name: "Çocuk yüzme kursu",
+            aliases: ["çocuk yüzme", "yüzme kursu"],
+            category: "course",
+            verifiedFacts: ["Kayıt için tesis ziyareti gerekir."],
+            requiredInfo: ["yaş grubu"],
+            safeAnswerHints: ["Fiyat bilgisi doğrulanmış paket bilgisinden verilir."],
+          },
+        ],
+        tone: {
+          avoidPhrases: ["web sitesinden bakın"],
+          preferredClosers: ["Hangi yaş grubu için bilgi istersiniz?"],
+        },
+      },
+    },
+    null,
+    {},
+    undefined,
+    "v2_channel_prompts"
+  );
+
+  const profile = QubaBrainCompiler.compile(brain);
+
+  assert(profile.industry === "fitness", profile.industry);
+  assert(profile.identity.organizationName === "Olimpik Yaşam Merkezi", JSON.stringify(profile.identity));
+  assert(profile.identity.assistantName === "Maya", JSON.stringify(profile.identity));
+  assert(profile.serviceCatalog.length === 1, JSON.stringify(profile.serviceCatalog));
+  assert(profile.serviceCatalog[0].id === "child_swimming_course", JSON.stringify(profile.serviceCatalog));
+  assert(profile.tone.avoidPhrases.includes("web sitesinden bakın"), JSON.stringify(profile.tone));
+  assert(profile.rollout.mode === "disabled", JSON.stringify(profile.rollout));
+  assert(profile.rollout.sandboxDirectiveEnabled === false, JSON.stringify(profile.rollout));
+  assert(profile.rollout.liveDirectiveEnabled === false, JSON.stringify(profile.rollout));
+});
+
+test("Başkent v86 T126: Quba Brain Core rollout is explicit and live activation requires active mode", () => {
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const {
+    normalizeQubaBrainRolloutMode,
+    resolveQubaBrainRolloutMode,
+    shouldApplyQubaBrainSandboxDirective,
+    shouldApplyQubaBrainLiveDirective,
+  } = require("../lib/brain/core");
+
+  assert(normalizeQubaBrainRolloutMode("active") === "active", "active mode should normalize");
+  assert(normalizeQubaBrainRolloutMode("bad-value") === "sandbox", "invalid mode should default to sandbox");
+
+  const disabledBrain = createTenantBrain(
+    "tenant-disabled",
+    "whatsapp",
+    "payload-v86-t126a",
+    "Sen asistansın.",
+    { qubaBrain: { rolloutMode: "disabled" } }
+  );
+  const activeBrain = createTenantBrain(
+    "tenant-active",
+    "whatsapp",
+    "payload-v86-t126b",
+    "Sen asistansın.",
+    { qubaBrain: { rolloutMode: "active" } }
+  );
+
+  const disabledMode = resolveQubaBrainRolloutMode(disabledBrain);
+  const activeMode = resolveQubaBrainRolloutMode(activeBrain);
+
+  assert(disabledMode === "disabled", disabledMode);
+  assert(activeMode === "active", activeMode);
+  assert(shouldApplyQubaBrainSandboxDirective(disabledMode) === false, "disabled must not apply sandbox directive");
+  assert(shouldApplyQubaBrainLiveDirective(disabledMode) === false, "disabled must not apply live directive");
+  assert(shouldApplyQubaBrainSandboxDirective(activeMode) === true, "active applies sandbox directive");
+  assert(shouldApplyQubaBrainLiveDirective(activeMode) === true, "only active applies live directive");
 });
 
 

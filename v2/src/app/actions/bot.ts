@@ -543,9 +543,11 @@ export async function testBotPrompt(
       const lastMessage = messages[messages.length - 1];
 
       const { BrainV2ShadowPlanner } = await import("@/lib/services/ai/brain-v2-shadow-planner");
-      const { QubaBrainCompiler } = await import("@/lib/brain/core");
+      const { QubaBrainCompiler, resolveQubaBrainRolloutMode, shouldApplyQubaBrainSandboxDirective } = await import("@/lib/brain/core");
       const qubaBrainProfile = QubaBrainCompiler.compile(mockBrain as any);
-      const qubaBrainDirective = QubaBrainCompiler.buildDirective(qubaBrainProfile);
+      const qubaBrainRolloutMode = resolveQubaBrainRolloutMode(mockBrain as any);
+      const qubaBrainCoreApplied = shouldApplyQubaBrainSandboxDirective(qubaBrainRolloutMode);
+      const qubaBrainDirective = qubaBrainCoreApplied ? QubaBrainCompiler.buildDirective(qubaBrainProfile) : '';
       const brainV2ShadowPlan = BrainV2ShadowPlanner.build({
         inboundText: lastMessage?.content || '',
         history: historyMessages,
@@ -617,7 +619,8 @@ export async function testBotPrompt(
           responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
           responseStyle: profile?.response_style || 'balanced',
           maxResponseTokens: maxTokens,
-          qubaBrainCoreApplied: true,
+          qubaBrainCoreApplied,
+          qubaBrainRolloutMode,
           qubaBrainProfile,
           brainV2ShadowPlanApplied: true,
           brainV2ShadowPlan
