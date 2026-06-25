@@ -156,6 +156,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const qubaCapabilities: string[] = Array.isArray(qubaBrainDiagnostics?.capabilities) ? qubaBrainDiagnostics.capabilities : [];
   const qubaWarnings: string[] = Array.isArray(qubaBrainDiagnostics?.warnings) ? qubaBrainDiagnostics.warnings : [];
   const qubaMissingSetup: string[] = Array.isArray(qubaBrainDiagnostics?.missingSetup) ? qubaBrainDiagnostics.missingSetup : [];
+  const qubaPromptBudget = qubaBrainDiagnostics?.promptBudget;
   const qubaReadiness = qubaBrainProfile?.readiness;
   const qubaBlockers: string[] = Array.isArray(qubaReadiness?.blockers) ? qubaReadiness.blockers : [];
   const qubaRecommendations: string[] = Array.isArray(qubaReadiness?.recommendations) ? qubaReadiness.recommendations : [];
@@ -267,6 +268,12 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
               <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
                 <div className="font-bold text-gray-400 mb-0.5">CANLI DİREKTİF</div>
                 <div className="font-semibold text-gray-700">{qubaBrainProfile.rollout?.liveDirectiveEnabled ? "Açık" : "Kapalı"}</div>
+              </div>
+              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+                <div className="font-bold text-gray-400 mb-0.5">PROMPT SAĞLIĞI</div>
+                <div className="font-semibold text-gray-700">
+                  {qubaPromptBudget?.status ? `${qubaPromptBudget.status} · ${Number(qubaPromptBudget.totalStaticChars || 0).toLocaleString()} krk.` : "Ölçülmedi"}
+                </div>
               </div>
             </div>
             {qubaReadiness && (

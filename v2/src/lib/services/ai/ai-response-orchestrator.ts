@@ -1872,6 +1872,40 @@ export class AIResponseOrchestrator {
       } else {
         // P0.16-K: "başka bilgi" open-continuation — ensure LLM doesn't close conversation
         let llmSystemPrompt = systemPromptText;
+
+        try {
+          if (!sandbox) {
+            const { QubaBrainCompiler } = await import('@/lib/brain/core');
+            const qubaBrainProfile = QubaBrainCompiler.compile(brain);
+            if (qubaBrainProfile.rollout.liveDirectiveEnabled) {
+              llmSystemPrompt += QubaBrainCompiler.buildDirective(qubaBrainProfile);
+              console.log(JSON.stringify({
+                tag: 'QUBA_BRAIN_CORE_LIVE_DIRECTIVE_APPLIED',
+                tenantId,
+                conversationId: conversationId || 'unknown',
+                industry: qubaBrainProfile.industry,
+                readinessStatus: qubaBrainProfile.readiness.status,
+                readinessScore: qubaBrainProfile.readiness.score,
+                rolloutMode: qubaBrainProfile.rollout.mode,
+                promptBudgetStatus: qubaBrainProfile.diagnostics.promptBudget?.status || 'unknown',
+                workerPath
+              }));
+            } else if (qubaBrainProfile.rollout.mode === 'active') {
+              console.log(JSON.stringify({
+                tag: 'QUBA_BRAIN_CORE_LIVE_DIRECTIVE_BLOCKED',
+                tenantId,
+                conversationId: conversationId || 'unknown',
+                readinessStatus: qubaBrainProfile.readiness.status,
+                readinessScore: qubaBrainProfile.readiness.score,
+                blockers: qubaBrainProfile.readiness.blockers.slice(0, 8),
+                rolloutMode: qubaBrainProfile.rollout.mode,
+                workerPath
+              }));
+            }
+          }
+        } catch (qubaBrainLiveErr) {
+          console.error('[AIResponseOrchestrator] Quba Brain live directive failed:', qubaBrainLiveErr);
+        }
         if (multiIntentGuidance) {
           let enrichedMultiIntentGuidance = multiIntentGuidance;
           const multiIntentList = MultiIntentConsultantComposer.detectIntentList(inboundText);

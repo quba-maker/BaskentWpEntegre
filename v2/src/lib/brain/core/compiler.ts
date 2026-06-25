@@ -19,6 +19,8 @@ import {
 } from './rollout';
 import { DoctorDirectoryResolver } from '../../services/ai/doctor-directory-resolver';
 
+type PromptBudgetStatus = NonNullable<QubaBrainDiagnostics['promptBudget']>['status'];
+
 function normalizeIndustry(value: unknown): QubaIndustry {
   const normalized = String(value || '').toLowerCase();
   if (normalized === 'healthcare' || normalized === 'health' || normalized === 'hospital') return 'healthcare';
@@ -156,7 +158,38 @@ function resolveRuntime(brain: TenantBrain, override?: QubaBrainProfileOverride)
   };
 }
 
-function resolveDiagnostics(profile: Pick<QubaBrainProfile, 'identity' | 'knowledge' | 'serviceCatalog'>): QubaBrainDiagnostics {
+function resolvePromptBudget(brain: TenantBrain, knowledge: QubaKnowledgeProfile): NonNullable<QubaBrainDiagnostics['promptBudget']> {
+  const systemPromptChars = (brain.prompts.systemPrompt || '').length;
+  const knowledgeChars = uniqueStrings([
+    knowledge.prices || '',
+    knowledge.rules || '',
+    knowledge.verifiedArchive || '',
+  ]).join('\n').length;
+  const totalStaticChars = systemPromptChars + knowledgeChars;
+
+  let status: PromptBudgetStatus = 'healthy';
+  let recommendation: string | undefined;
+  if (totalStaticChars > 50000) {
+    status = 'oversized';
+    recommendation = 'Sistem promptu ve bilgi bankası çok büyük. Statik arşivi hizmet kataloğu, doktor listesi ve politika alanlarına bölerek Brain Core üzerinden çalıştırın.';
+  } else if (totalStaticChars > 24000) {
+    status = 'large';
+    recommendation = 'Prompt büyümeye başlamış. Yeni müşteri kurulumlarında uzun arşivleri düz metin prompt yerine yapılandırılmış Brain alanlarına taşıyın.';
+  }
+
+  return {
+    systemPromptChars,
+    knowledgeChars,
+    totalStaticChars,
+    status,
+    recommendation,
+  };
+}
+
+function resolveDiagnostics(
+  profile: Pick<QubaBrainProfile, 'identity' | 'knowledge' | 'serviceCatalog'>,
+  promptBudget: NonNullable<QubaBrainDiagnostics['promptBudget']>
+): QubaBrainDiagnostics {
   const warnings: string[] = [];
   const missingSetup: string[] = [];
   const capabilities: string[] = [];
@@ -171,8 +204,9 @@ function resolveDiagnostics(profile: Pick<QubaBrainProfile, 'identity' | 'knowle
   if (profile.knowledge.prices) capabilities.push('price_policy');
   if (profile.knowledge.rules) capabilities.push('verified_rules');
   if (profile.serviceCatalog.length > 0) capabilities.push('service_catalog');
+  if (promptBudget.status !== 'healthy' && promptBudget.recommendation) warnings.push(promptBudget.recommendation);
 
-  return { warnings, missingSetup, capabilities };
+  return { warnings, missingSetup, capabilities, promptBudget };
 }
 
 function resolveReadiness(input: {
@@ -182,6 +216,7 @@ function resolveReadiness(input: {
   serviceCatalog: QubaServiceCatalogItem[];
   policies: QubaPolicyRule[];
   actions: QubaActionPolicy[];
+  promptBudget?: NonNullable<QubaBrainDiagnostics['promptBudget']>;
 }): QubaBrainProfile['readiness'] {
   let score = 100;
   const blockers: string[] = [];
@@ -224,6 +259,12 @@ function resolveReadiness(input: {
     addRecommendation('Asistan adı tanımlı değil', 5);
   }
 
+  if (input.promptBudget?.status === 'oversized') {
+    addRecommendation('Prompt/bilgi bankası çok uzun; statik arşivi yapılandırılmış Brain alanlarına taşıyın', 8);
+  } else if (input.promptBudget?.status === 'large') {
+    addRecommendation('Prompt büyüyor; yeni müşteri kurulumlarında bilgileri Brain alanlarına bölün', 4);
+  }
+
   score = Math.max(0, Math.min(100, score));
   const status = blockers.length > 0
     ? (score >= 60 ? 'needs_review' : 'blocked')
@@ -253,6 +294,7 @@ export class QubaBrainCompiler {
     const sector = getSectorPack(industry);
     const identity = resolveIdentity(brain, override);
     const knowledge = resolveKnowledge(brain, override);
+    const promptBudget = resolvePromptBudget(brain, knowledge);
     const textSource = `${brain.prompts.systemPrompt || ''}\n${knowledge.rules || ''}\n${knowledge.prices || ''}`;
     const serviceCatalog = override.serviceCatalog && override.serviceCatalog.length > 0
       ? override.serviceCatalog
@@ -276,11 +318,6 @@ export class QubaBrainCompiler {
     const actions = mergeById(sector.actions, override.actions);
     const setupQuestions = mergeById(sector.setupQuestions, override.setupQuestions);
 
-    const partial = {
-      identity,
-      knowledge,
-      serviceCatalog,
-    };
     const readiness = resolveReadiness({
       industry,
       identity,
@@ -288,9 +325,11 @@ export class QubaBrainCompiler {
       serviceCatalog,
       policies,
       actions,
+      promptBudget,
     });
     const liveDirectiveEnabled = shouldApplyQubaBrainLiveDirective(rolloutMode)
       && readiness.status === 'ready';
+    const diagnostics = resolveDiagnostics({ identity, knowledge, serviceCatalog }, promptBudget);
 
     return {
       version: 'quba_brain_v1',
@@ -313,7 +352,7 @@ export class QubaBrainCompiler {
         liveDirectiveEnabled,
       },
       readiness,
-      diagnostics: resolveDiagnostics(partial),
+      diagnostics,
     };
   }
 
@@ -329,8 +368,14 @@ export class QubaBrainCompiler {
       `Kurulum durumu: ${profile.readiness.status}, skor: ${profile.readiness.score}/100`,
     ];
 
+    const promptBudget = profile.diagnostics.promptBudget;
+    if (promptBudget) {
+      lines.push(`Prompt sağlığı: ${promptBudget.status} (${promptBudget.totalStaticChars} statik karakter).`);
+    }
+
     if (profile.goals.length > 0) {
       lines.push(`Öncelikler: ${profile.goals
+        .slice()
         .sort((a, b) => b.priority - a.priority)
         .slice(0, 5)
         .map(goal => goal.description)
@@ -342,12 +387,30 @@ export class QubaBrainCompiler {
         .filter(policy => policy.severity === 'hard')
         .map(policy => `${policy.title}: ${policy.instruction}`)
         .join(' | ')}`);
+      const safeResponses = profile.policies
+        .filter(policy => policy.safeResponse)
+        .map(policy => `${policy.title}: ${policy.safeResponse}`)
+        .slice(0, 4);
+      if (safeResponses.length > 0) {
+        lines.push(`Güvenli cevaplar: ${safeResponses.join(' | ')}`);
+      }
     }
 
     if (profile.actions.length > 0) {
       lines.push(`Aksiyon kuralları: ${profile.actions
         .map(action => `${action.action}: ${action.humanFacingInstruction}`)
         .join(' | ')}`);
+    }
+
+    if (profile.serviceCatalog.length > 0) {
+      lines.push(`Doğrulanmış hizmet kataloğu: ${profile.serviceCatalog
+        .slice(0, 10)
+        .map(service => `${service.name}${service.routeTo ? ` → ${service.routeTo}` : ''}`)
+        .join(' | ')}`);
+    }
+
+    if (profile.diagnostics.capabilities.length > 0) {
+      lines.push(`Aktif yetenekler: ${profile.diagnostics.capabilities.join(', ')}`);
     }
 
     if (profile.tone.avoidPhrases.length > 0) {

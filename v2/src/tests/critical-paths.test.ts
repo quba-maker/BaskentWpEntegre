@@ -14484,7 +14484,7 @@ test("Başkent v86 T123: Quba Brain Core compiles Başkent healthcare profile wi
   assert(profile.serviceCatalog.some((s: any) => s.id === "check_up"), JSON.stringify(profile.serviceCatalog));
 });
 
-test("Başkent v86 T124: Quba Brain Core directive is sandbox-only and bot test exposes diagnostics", () => {
+test("Başkent v86 T124: Quba Brain Core directive is rollout-gated and bot test exposes diagnostics", () => {
   const fs = require("fs");
   const path = require("path");
   const { createTenantBrain } = require("../lib/brain/tenant-brain");
@@ -14494,13 +14494,27 @@ test("Başkent v86 T124: Quba Brain Core directive is sandbox-only and bot test 
     "whatsapp",
     "payload-v86-t124",
     "Sen Başkent Üniversitesi Konya Hastanesi adına çalışan hasta danışmanısın. Adın Rüya'dır.",
-    { industry: "healthcare" }
+    { industry: "healthcare" },
+    null,
+    {
+      prices: "Fiyat bilgisi paylaşılmaz.",
+      rules: [
+        "--- VERIFIED BİLGİ ARŞİVİ ---",
+        "Dermatoloji:",
+        "- Uzm. Dr. Selin YILMAZ",
+      ].join("\n"),
+    },
+    undefined,
+    "v2_channel_prompts"
   );
 
   const directive = QubaBrainCompiler.buildDirective(QubaBrainCompiler.compile(brain));
   assert(directive.includes("[QUBA BRAIN CORE]"), directive);
   assert(directive.includes("Sektör: healthcare"), directive);
   assert(directive.includes("Sert politikalar"), directive);
+  assert(directive.includes("Prompt sağlığı"), directive);
+  assert(directive.includes("Güvenli cevaplar"), directive);
+  assert(directive.includes("Aktif yetenekler"), directive);
   assert(directive.includes("Bu blok cevap olarak yazılmayacak"), directive);
 
   const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
@@ -14509,7 +14523,10 @@ test("Başkent v86 T124: Quba Brain Core directive is sandbox-only and bot test 
   assert(botActionCode.includes("QubaBrainCompiler.compile"), "Bot test playground should compile Quba Brain Core profile");
   assert(botActionCode.includes("qubaBrainCoreApplied"), "Bot test metadata should expose Quba Brain Core diagnostics");
   assert(botActionCode.includes("shouldApplyQubaBrainSandboxDirective"), "Bot test playground should respect Quba Brain rollout mode");
-  assert(!orchestratorCode.includes("[QUBA BRAIN CORE]"), "Live orchestrator must not inject Quba Brain Core before rollout flag");
+  assert(orchestratorCode.includes("QubaBrainCompiler.compile"), "Live orchestrator should compile Brain Core for controlled rollout checks");
+  assert(orchestratorCode.includes("qubaBrainProfile.rollout.liveDirectiveEnabled"), "Live directive must be gated by compiler readiness and active rollout");
+  assert(orchestratorCode.includes("QUBA_BRAIN_CORE_LIVE_DIRECTIVE_APPLIED"), "Live rollout should be auditable when applied");
+  assert(orchestratorCode.includes("QUBA_BRAIN_CORE_LIVE_DIRECTIVE_BLOCKED"), "Active but not-ready rollout should be blocked and logged");
 });
 
 test("Başkent v86 T125: Quba Brain Core supports tenant setup override without prompt bloat", () => {
@@ -14617,7 +14634,45 @@ test("Başkent v86 T127: Bot test panel exposes Brain setup health before live r
   assert(playgroundCode.includes("Brain Kurulum Sağlığı"), "Test panel should show setup health");
   assert(playgroundCode.includes("DOKTOR LİSTESİ"), "Test panel should surface doctor directory detection");
   assert(playgroundCode.includes("CANLI DİREKTİF"), "Test panel should show whether Brain Core is live-active");
+  assert(playgroundCode.includes("PROMPT SAĞLIĞI"), "Test panel should show prompt budget health before live rollout");
+  assert(playgroundCode.includes("qubaBrainDiagnostics?.promptBudget"), "Test panel should consume prompt budget diagnostics");
   assert(playgroundCode.includes("qubaBrainProfile"), "Test panel should use compiled Quba Brain profile metadata");
+});
+
+test("Başkent v86 T127b: Brain Core reports prompt budget without double-counting mirrored archive", () => {
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const { QubaBrainCompiler } = require("../lib/brain/core");
+  const repeatedKnowledge = "Dermatoloji: Uzm. Dr. Selin YILMAZ";
+  const brain = createTenantBrain(
+    "tenant-prompt-budget",
+    "whatsapp",
+    "payload-v86-t127b",
+    "Sen yardımcı bir asistansın.",
+    {
+      qubaBrain: {
+        industry: "healthcare",
+        identity: {
+          organizationName: "Başkent Üniversitesi Konya Hastanesi",
+          assistantName: "Rüya",
+        },
+      },
+    },
+    null,
+    {
+      prices: "Fiyat bilgisi paylaşılmaz.",
+      rules: repeatedKnowledge,
+    },
+    undefined,
+    "v2_channel_prompts"
+  );
+
+  const profile = QubaBrainCompiler.compile(brain);
+  const promptBudget = profile.diagnostics.promptBudget;
+
+  assert(promptBudget !== undefined, "Prompt budget should be present in diagnostics");
+  assert(promptBudget.status === "healthy", JSON.stringify(promptBudget));
+  assert(promptBudget.knowledgeChars < repeatedKnowledge.length * 2 + 80, JSON.stringify(promptBudget));
+  assert(QubaBrainCompiler.buildDirective(profile).includes("Prompt sağlığı: healthy"), "Directive should expose prompt health summary");
 });
 
 test("Başkent v86 T128: Brain diagnostics do not hardcode every tenant as healthcare", () => {

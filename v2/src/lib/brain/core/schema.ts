@@ -143,6 +143,13 @@ export interface QubaBrainDiagnostics {
   warnings: string[];
   missingSetup: string[];
   capabilities: string[];
+  promptBudget?: {
+    systemPromptChars: number;
+    knowledgeChars: number;
+    totalStaticChars: number;
+    status: 'healthy' | 'large' | 'oversized';
+    recommendation?: string;
+  };
 }
 
 export interface QubaBrainReadinessProfile {
