@@ -190,7 +190,8 @@ CREATE TABLE IF NOT EXISTS ai_audit_logs (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   customer_id UUID REFERENCES customer_profiles(id) ON DELETE SET NULL,
   conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
-  tool_name TEXT NOT NULL,
+  tool_name TEXT,
+  action TEXT,
   tool_arguments JSONB,
   validation_passed BOOLEAN DEFAULT true,
   execution_mode TEXT DEFAULT 'production', -- 'sandbox' or 'production'
@@ -297,4 +298,3 @@ CREATE TABLE IF NOT EXISTS tenant_integrations (
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON audit_logs(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_integrations_tenant ON tenant_integrations(tenant_id);
-

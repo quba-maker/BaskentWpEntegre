@@ -72,7 +72,10 @@ export class BrainV2ResponseEvaluator {
       if (!answeredPriceSafely) {
         missingAnswers.push('Fiyat sorusu güvenli fiyat politikasıyla yanıtlanmadı');
       }
-      if (/\b\d{2,}[\s.]*(tl|₺|euro|eur|€|usd|\$)\b/i.test(reply)) {
+      if (
+        /\b\d{2,}[\s.]*(tl|₺|euro|eur|€|usd|\$)\b/i.test(reply)
+        || /\b\d{1,3}\s*(?:bin|milyon)\s*(?:tl|₺|euro|eur|€|usd|\$)?\b/i.test(reply)
+      ) {
         forbiddenHits.push('Fiyat sorusunda doğrulanmamış rakam/paylaşım riski');
       }
     }

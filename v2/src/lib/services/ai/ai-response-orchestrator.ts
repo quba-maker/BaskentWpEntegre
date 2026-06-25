@@ -2227,9 +2227,18 @@ export class AIResponseOrchestrator {
             brainV2ShadowPlan,
             inboundText
           );
+          const hasHighValueLearningSignal = brainV2ShadowPlan.riskFlags.length > 0
+            || brainV2ShadowPlan.mustAnswer.length > 1
+            || brainV2ShadowPlan.detectedIntents.some((intent: string) => [
+              'price_question',
+              'doctor_names',
+              'doctor_profile',
+              'accommodation_question',
+              'address_question',
+              'concern_objection',
+            ].includes(intent));
           const shouldLogBrainV2Shadow = brainV2ResponseEvaluation.status !== 'pass'
-            || brainV2ShadowPlan.detectedIntents.length > 0
-            || brainV2ShadowPlan.riskFlags.length > 0;
+            || hasHighValueLearningSignal;
 
           if (shouldLogBrainV2Shadow) {
             await settingsDb.executeSafe({

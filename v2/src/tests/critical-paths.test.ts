@@ -14774,6 +14774,35 @@ test("Başkent v88 T133: Brain v2 response evaluator catches doctor-name escape 
   assert(goodEvaluation.status === "pass", JSON.stringify(goodEvaluation));
 });
 
+test("Başkent v88 T133b: Brain v2 response evaluator flags numeric price leakage", () => {
+  const { BrainV2ResponseEvaluator } = require("../lib/services/ai/brain-v2-response-evaluator");
+
+  const plan = {
+    version: "brain_v2_shadow_v1",
+    mode: "shadow",
+    contactMode: "continuing_conversation",
+    detectedIntents: ["price_question"],
+    mustAnswer: ["fiyat politikasını güvenli cümleyle yanıtla"],
+    verifiedFacts: {
+      dateContext: "26 Haziran 2026 Cuma",
+      pricePolicy: "Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.",
+    },
+    missingInformation: [],
+    forbiddenClaims: [],
+    riskFlags: ["price_amount_forbidden"],
+    summary: "fiyat sorusu",
+  };
+
+  const evaluation = BrainV2ResponseEvaluator.evaluate(
+    "Check-up paketi 10 bin TL civarında olabilir.",
+    plan,
+    "Paket fiyatı ne kadar?"
+  );
+
+  assert(evaluation.status === "fail", JSON.stringify(evaluation));
+  assert(evaluation.forbiddenHits.some((item: string) => item.includes("rakam")), JSON.stringify(evaluation));
+});
+
 test("Başkent v88 T134: Bot test panel exposes Brain v2 response evaluation", () => {
   const fs = require("fs");
   const path = require("path");
@@ -14797,6 +14826,23 @@ test("Başkent v88 T135: Live orchestrator writes Brain v2 shadow evaluation as 
   assert(orchestratorCode.includes("if (!sandbox && conversationId && text)"), "Shadow audit should be live-only and not alter sandbox/test behavior");
   assert(orchestratorCode.includes("catch (brainV2ShadowErr)"), "Shadow audit errors must be non-blocking");
   assert(!orchestratorCode.includes("rawReply"), "Shadow audit must not log raw reply text");
+  assert(orchestratorCode.includes("hasHighValueLearningSignal"), "Shadow audit should avoid logging every low-value pass response");
+  assert(!orchestratorCode.includes("|| brainV2ShadowPlan.detectedIntents.length > 0"), "Shadow audit should not log solely because any intent was detected");
+});
+
+test("Başkent v88 T136: AI audit schema supports action-based logs without requiring tool_name", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const migrateCode = fs.readFileSync(path.resolve(__dirname, "../app/api/migrate/route.ts"), "utf-8");
+  const schemaCode = fs.readFileSync(path.resolve(__dirname, "../lib/db/schema.sql"), "utf-8");
+  const drizzleCode = fs.readFileSync(path.resolve(__dirname, "../../drizzle/0007_align_ai_audit_logs_action.sql"), "utf-8");
+
+  assert(migrateCode.includes("action TEXT"), "Migration should add action column for current audit writers");
+  assert(migrateCode.includes("ALTER COLUMN tool_name DROP NOT NULL"), "Migration should not require tool_name for action-only audit logs");
+  assert(schemaCode.includes("action TEXT"), "Base schema should include action column");
+  assert(!schemaCode.includes("tool_name TEXT NOT NULL"), "Base schema should not force tool_name when action is used");
+  assert(drizzleCode.includes("ADD COLUMN IF NOT EXISTS action TEXT"), "Drizzle migration should add action column");
+  assert(drizzleCode.includes("ALTER COLUMN tool_name DROP NOT NULL"), "Drizzle migration should relax legacy tool_name requirement");
 });
 
 

@@ -273,7 +273,8 @@ export async function GET(req: NextRequest) {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID NOT NULL,
         conversation_id UUID,
-        tool_name TEXT NOT NULL,
+        tool_name TEXT,
+        action TEXT,
         tool_arguments JSONB DEFAULT '{}'::jsonb,
         validation_passed BOOLEAN DEFAULT true,
         execution_mode TEXT DEFAULT 'auto',
@@ -287,11 +288,15 @@ export async function GET(req: NextRequest) {
     // Patch missing columns
     await sql`
       ALTER TABLE ai_audit_logs 
+      ADD COLUMN IF NOT EXISTS tool_name TEXT,
+      ADD COLUMN IF NOT EXISTS action TEXT,
       ADD COLUMN IF NOT EXISTS input_tokens INTEGER DEFAULT 0,
       ADD COLUMN IF NOT EXISTS output_tokens INTEGER DEFAULT 0,
       ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(10,6) DEFAULT 0,
       ADD COLUMN IF NOT EXISTS reasoning_summary TEXT
     `.catch(e => console.error("ai_audit_logs alter table warning:", e));
+    await sql`ALTER TABLE ai_audit_logs ALTER COLUMN tool_name DROP NOT NULL`
+      .catch(e => console.error("ai_audit_logs tool_name nullable warning:", e));
 
     await sql`CREATE INDEX IF NOT EXISTS idx_ai_audit_logs_tenant ON ai_audit_logs(tenant_id, created_at DESC)`;
     results.push('ai_audit_logs: OK');
