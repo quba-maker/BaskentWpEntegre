@@ -14186,6 +14186,164 @@ test("Başkent v84 T117: bot test and final auditor remove honorifics and ongoin
   assert(botActionCode.includes("FinalOutboundBodyAuditor.audit"), "Bot test playground should run the same final body audit as live WhatsApp");
 });
 
+test("Başkent v85 T118: Brain v2 uses consecutive user burst as one intent window", () => {
+  const { BrainV2ShadowPlanner } = require("../lib/services/ai/brain-v2-shadow-planner");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v85-t118",
+    "Sen Rüya'sın.",
+    {
+      industry: "healthcare",
+      doctors: `Dermatoloji:
+- Uzm. Dr. Selin YILMAZ
+- Uzm. Dr. Burak DEMİR`
+    },
+    null,
+    {
+      prices: "Hasta fiyat sorarsa: Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.",
+      rules: "Konaklama için garanti veya rezervasyon sözü verme."
+    }
+  );
+
+  const plan = BrainV2ShadowPlanner.build({
+    inboundText: "birde kalacak yerim yok",
+    history: [
+      { role: "assistant", content: "Paket içeriğini paylaşabilirim." },
+      { role: "user", content: "paket ücreti ne kadar peki, 10 ağustosta geleceğim konyaya" },
+      { role: "user", content: "birde dermatoloji doktorunuz kim" },
+    ],
+    brain,
+    now: new Date("2026-06-25T10:00:00+03:00")
+  });
+
+  assert(plan.detectedIntents.includes("price_question"), JSON.stringify(plan.detectedIntents));
+  assert(plan.detectedIntents.includes("doctor_names"), JSON.stringify(plan.detectedIntents));
+  assert(plan.detectedIntents.includes("accommodation_question"), JSON.stringify(plan.detectedIntents));
+  assert(plan.mustAnswer.some((item: string) => item.includes("fiyat")), JSON.stringify(plan.mustAnswer));
+  assert(plan.mustAnswer.some((item: string) => item.includes("doktor")), JSON.stringify(plan.mustAnswer));
+  assert(plan.mustAnswer.some((item: string) => item.includes("konaklama")), JSON.stringify(plan.mustAnswer));
+});
+
+test("Başkent v85 T119: doctor fallback remembers department from recent history and shares verified names", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v85-t119",
+    "Sen Rüya'sın.",
+    {
+      industry: "healthcare",
+      doctors: `Dermatoloji:
+- Uzm. Dr. Selin YILMAZ
+- Uzm. Dr. Burak DEMİR`
+    }
+  );
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "İsim söyle bana araştıracam",
+    brain,
+    identityConfig: {
+      personaName: "Rüya",
+      organizationName: "Başkent Üniversitesi Konya Hastanesi"
+    },
+    unifiedContext: {
+      history: [
+        { role: "user", content: "Dermatolojibölümünden randevu oluşturacam" },
+        { role: "assistant", content: "Hangi konuda netleştirelim?" },
+        { role: "user", content: "Doktorların ismini öğrenebilir miyim" },
+        { role: "assistant", content: "Bu konuda isimleri yanlış vermek istemem." },
+      ]
+    },
+    replyLanguage: "tr"
+  });
+
+  assert(result.text.includes("Selin YILMAZ") || result.text.includes("Burak DEMİR"), result.text);
+  assert(!result.text.includes("isimleri yanlış vermek istemem"), result.text);
+  assert(
+    result.finalPath === "doctor_name_request" || result.finalPath === "doctor_names_fallback_verified_list",
+    result.finalPath
+  );
+});
+
+test("Başkent v85 T120: final auditor recovers generic escape for price doctor accommodation burst", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "Devam edelim; son mesajınızdaki talebi tam yakalayamadım. Hekim bilgisi, randevu planı veya süreçten hangisini netleştirelim?",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v85-t120",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "paket fiyatını sordum check up\nbirde dermatoloji doktorunuz kim\nbirde kalacak yerim yok"
+    }
+  );
+
+  assert(!/son mesajınızdaki talebi|tam yakalayamadım/i.test(result.text), result.text);
+  assert(result.text.includes("net fiyat paylaşamıyorum"), result.text);
+  assert(result.text.includes("Doktor isimlerini"), result.text);
+  assert(result.text.includes("Konaklama"), result.text);
+});
+
+test("Başkent v85 T121: country-only fallback notes Uzbekistan without resetting conversation", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v85-t121",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "O'zbekiston",
+    brain,
+    identityConfig: {
+      personaName: "Rüya",
+      organizationName: "Başkent Üniversitesi Konya Hastanesi"
+    },
+    unifiedContext: {
+      history: [
+        { role: "user", content: "Psoryaziçeskiy artrit" },
+        { role: "assistant", content: "Hangi ülkede yaşadığınızı öğrenebilir miyim?" },
+      ]
+    },
+    replyLanguage: "tr"
+  });
+
+  assert(/Özbekistan|O'zbekiston|Ozbekistan/i.test(result.text), result.text);
+  assert(!result.text.includes("Hangi konuda bilgi almak istiyorsunuz"), result.text);
+  assert(
+    result.finalPath === "country_answer_context_update_fallback" || result.finalPath === "country_answer_continuation_fallback",
+    result.finalPath
+  );
+});
+
+test("Başkent v85 T122: fertility form final audit removes prompt leak tone and owns cannot-travel context", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "form başvurunuz bize ulaştı.\n\nTekrar anne olmak istediğinizi belirtmişsiniz. Öncelikle geçmiş olsun.\n\nBu tarz durumlarda, uzaktan ve yalnızca mevcut bilgilerle net bir değerlendirme yapmak mümkün değildir.\n\nKesin değerlendirme için hastanın hastanemizde ilgili uzman hekim tarafından muayene edilmeniz gerekir.\n\nFormunuzda şu anda yurt dışına çıkamayacağınızı belirtmişsiniz.",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v85-t122",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "Şikayetiniz Nedir?: 39 yaşindayim ikki çocuğum var tekrar anne olmak istiyorum\nTürkiye'ye (Konya'ya) tedavi için gelme planınız nedir?: Malesef Yurdışına çıkamam ve Konya'ya gelemem."
+    }
+  );
+
+  assert(result.text.startsWith("Form başvurunuz"), result.text);
+  assert(!result.text.includes("geçmiş olsun"), result.text);
+  assert(result.text.includes("İlginiz için teşekkür ederiz"), result.text);
+  assert(result.text.includes("Konya’ya gelemeyeceğinizi"), result.text);
+  assert(!result.text.includes("hastanın hastanemizde ilgili uzman hekim tarafından muayene edilmeniz"), result.text);
+});
+
 
 async function runAllTests() {
   try {

@@ -73,6 +73,19 @@ function normalizeText(text: string): string {
     .trim();
 }
 
+function buildRecentUserWindow(inboundText: string, history: { role: string; content: string }[] = []): string {
+  const tail: string[] = [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    if (msg?.role === 'assistant') break;
+    if (msg?.role === 'user' && msg.content) {
+      tail.unshift(msg.content);
+    }
+  }
+  const parts = [...tail, inboundText].map(t => String(t || '').trim()).filter(Boolean);
+  return Array.from(new Set(parts)).join('\n');
+}
+
 function unique<T>(items: T[]): T[] {
   return Array.from(new Set(items));
 }
@@ -231,7 +244,8 @@ export class BrainV2ShadowPlanner {
   public static build(params: BuildParams): BrainV2ShadowPlan {
     const inboundText = params.inboundText || '';
     const history = params.history || [];
-    const clean = normalizeText(inboundText);
+    const analysisText = buildRecentUserWindow(inboundText, history);
+    const clean = normalizeText(analysisText);
     const hasCurrentFormPayload = hasStructuredFormPayload(inboundText);
     const hasAnyFormPayload = hasCurrentFormPayload || history.some(m => hasStructuredFormPayload(m.content || '')) || !!params.latestForm;
 
@@ -243,16 +257,16 @@ export class BrainV2ShadowPlanner {
           ? 'continuing_conversation'
           : 'direct_inbound';
 
-    const routerIntents = ConversationIntentRouter.routeAll(inboundText);
-    const multiIntents = MultiIntentConsultantComposer.detectIntentList(inboundText);
+    const routerIntents = ConversationIntentRouter.routeAll(analysisText);
+    const multiIntents = MultiIntentConsultantComposer.detectIntentList(analysisText);
     const flags: IntentFlag[] = [];
     const pushFlag = (flag: IntentFlag, condition: boolean) => {
       if (condition && !flags.includes(flag)) flags.push(flag);
     };
 
     const allDoctors = DoctorDirectoryResolver.getDoctors(params.brain);
-    const doctorNameAsk = isDoctorNameRequestText(inboundText, history.some(m => m.role === 'user' && isDoctorNameRequestText(m.content || '', false)));
-    const doctorProfileAsk = isDoctorProfileQuestionText(inboundText, allDoctors);
+    const doctorNameAsk = isDoctorNameRequestText(analysisText, history.some(m => m.role === 'user' && isDoctorNameRequestText(m.content || '', false)));
+    const doctorProfileAsk = isDoctorProfileQuestionText(analysisText, allDoctors);
 
     pushFlag('price_question', hasPriceQuestion(clean) || multiIntents.includes('price_question') || routerIntents.includes('price_question'));
     pushFlag('doctor_names', doctorNameAsk || multiIntents.includes('doctor_names') || routerIntents.includes('doctor_lookup'));
@@ -267,7 +281,7 @@ export class BrainV2ShadowPlanner {
     pushFlag('concern_objection', hasConcern(clean) || multiIntents.includes('concern_objection') || routerIntents.includes('distance_objection'));
 
     const detectedIntents = unique([...routerIntents.filter(i => i !== 'generic_other'), ...multiIntents, ...flags]);
-    const departments = detectDepartments(inboundText, history, params.conversation);
+    const departments = detectDepartments(analysisText, history, params.conversation);
     const scopedDoctors = departments.length > 0
       ? departments.flatMap(dept => DoctorDirectoryResolver.getDoctors(params.brain, dept))
       : allDoctors;
@@ -318,7 +332,7 @@ export class BrainV2ShadowPlanner {
     if (flags.includes('price_question')) riskFlags.push('price_amount_forbidden');
     if (flags.includes('doctor_names') && doctorDirectory.length === 0) riskFlags.push('doctor_directory_missing_or_unscoped');
     if (flags.includes('accommodation_question')) riskFlags.push('accommodation_no_guarantee');
-    if (/form doldur/i.test(inboundText) && !hasAnyFormPayload) riskFlags.push('user_claims_form_without_verified_form');
+    if (/form doldur/i.test(analysisText) && !hasAnyFormPayload) riskFlags.push('user_claims_form_without_verified_form');
     if (/\b(7\s*14|7[./]14)\b/.test(clean)) riskFlags.push('ambiguous_date_needs_clarification');
     if (/\b(hangi konuda bilgi almak istiyorsunuz|size saglik talebinizle ilgili yardimci olayim)\b/.test(clean)) riskFlags.push('generic_escape_phrase_seen');
 

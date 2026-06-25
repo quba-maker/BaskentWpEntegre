@@ -358,8 +358,10 @@ function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { t
     [/annenizin\s+([^.\n,]+?)\s+şikayeti\s+oldu[ğg]unuzu/gi, 'annenizin $1 şikayeti olduğunu'],
     [/ve\s+(\d+\s+y[ıi]ld[ıi]r)\s+y[üu]r[üu]yemedi[ğg]inizi/gi, 've babanızın $1 yürüyemediğini'],
     [/Kesin\s+de[ğg]erlendirme\s+i[çc]in\s+hastan[ıi]n[ıi]z\s+hastanemizde/gi, 'Kesin değerlendirme için hastanın hastanemizde'],
+    [/Kesin\s+de[ğg]erlendirme\s+i[çc]in\s+hastan[ıi]n\s+hastanemizde\s+ilgili\s+uzman\s+hekim\s+taraf[ıi]ndan\s+muayene\s+edilmeniz/gi, 'Kesin değerlendirme için hastanemizde ilgili uzman hekim tarafından muayene edilmeniz'],
     [/Ge[çc]mi[şs]\s+olsun\s+dileklerimi\s+iletmek\s+isterim\.?/gi, 'Öncelikle geçmiş olsun.'],
     [/(^|\n)size\s+en\s+uygun/gi, '$1Size en uygun'],
+    [/^form\s+başvurunuz/gi, 'Form başvurunuz'],
   ];
   for (const [pattern, replacement] of morphologyRewrites) {
     const next = result.replace(pattern, replacement);
@@ -397,6 +399,22 @@ function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { t
     ];
     for (const pattern of ctaPatterns) {
       const next = result.replace(pattern, '').trim();
+      if (next !== result) {
+        result = next;
+        rewrote = true;
+      }
+    }
+  }
+
+  const fertilityInbound = /tekrar\s+anne\s+olmak|çocu[ğg]um\s+var|cocugum\s+var|gebelik|t[üu]p\s+bebek/i.test(ctx.inboundText || '');
+  if (fertilityInbound) {
+    const fertilityRewrites: Array<[RegExp, string]> = [
+      [/Tekrar\s+anne\s+olmak\s+istedi[ğg]inizi\s+belirtmi[şs]siniz\.\s*[ÖO]ncelikle\s+ge[çc]mi[şs]\s+olsun\./gi, 'Tekrar anne olmak istediğinizi belirtmişsiniz. İlginiz için teşekkür ederiz.'],
+      [/Formunuzda\s+şu\s+anda\s+yurt\s+d[ıi][şs][ıi]na\s+[çc][ıi]kamayaca[ğg][ıi]n[ıi]z[ıi]\s+belirtmi[şs]siniz\./gi, 'Formunuzda şu anda yurt dışına çıkamayacağınızı ve Konya’ya gelemeyeceğinizi belirtmişsiniz.'],
+      [/Bu\s+tarz\s+durumlarda,\s+uzaktan\s+ve\s+yaln[ıi]zca\s+mevcut\s+bilgilerle\s+net\s+bir\s+de[ğg]erlendirme\s+yapmak\s+m[üu]mk[üu]n\s+olmamakta(?:d[ıi]r)?\./gi, 'Gebelik planlamasında yaş, gebelik geçmişi ve genel sağlık durumu birlikte değerlendirilir; bu nedenle uzaktan net bir planlama yapmak doğru olmaz.'],
+    ];
+    for (const [pattern, replacement] of fertilityRewrites) {
+      const next = result.replace(pattern, replacement);
       if (next !== result) {
         result = next;
         rewrote = true;
@@ -496,21 +514,45 @@ function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): {
   const cleanText = (text || '').trim();
   const isGenericEscape =
     /size\s+sa[ğg]l[ıi]k\s+talebinizle\s+ilgili\s+yard[ıi]mc[ıi]\s+olay[ıi]m\.\s*hangi\s+konuda\s+bilgi\s+almak\s+istiyorsunuz\??/i.test(cleanText) ||
+    /devam\s+edelim;\s+son\s+mesaj[ıi]n[ıi]zdaki\s+talebi\s+tam\s+yakalayamad[ıi]m/i.test(cleanText) ||
     /hangi\s+konuda\s+bilgi\s+almak\s+istedi[ğg]inizi\s+iletebilirsiniz\??/i.test(cleanText) ||
+    /^hangi\s+konuda\s+yard[ıi]mc[ıi]\s+olmam[ıi]\s+istersiniz\??$/i.test(cleanText) ||
     /^hangi\s+konuda\s+yard[ıi]mc[ıi]\s+olay[ıi]m\??$/i.test(cleanText);
 
   if (!isGenericEscape) {
     return { text, rewrote: false };
   }
 
-  if (/\b(?:doktor|hekim|hoca|uzman|kadronuz|doktorunuzun|doktorunun)\b.*\b(?:isim|ismi|ismini|ad[ıi]|kim|kimler|liste|ara[şs]t[ıi]r)|\b(?:isim|ad[ıi])\s+s[öo]yle|\bara[şs]t[ıi]raca[ğg][ıi]m|\bara[şs]t[ıi]racam/i.test(inbound)) {
+  const asksPrice = /\b(?:fiyat|[üu]cret|tutar|[öo]deme|ne\s+kadar|ta\s*12|ta12)\b/i.test(inbound);
+  const asksAccommodation = /\b(?:konaklama|kalacak\s+yer\w*|otel|misafirhane|nerede\s+kal|accommodation|stay|unterkunft)\b/i.test(inbound);
+  const asksDoctor = /\b(?:doktor|hekim|hoca|uzman|kadronuz|doktorunuzun|doktorunun|dermatoloji|kardiyoloji|kad[ıi]n\s+do[ğg]um)\b.*\b(?:isim|ismi|ismini|ad[ıi]|kim|kimler|liste|ara[şs]t[ıi]r)|\b(?:isim|ad[ıi])\s+s[öo]yle|\bara[şs]t[ıi]raca[ğg][ıi]m|\bara[şs]t[ıi]racam/i.test(inbound);
+
+  if ([asksPrice, asksAccommodation, asksDoctor].filter(Boolean).length >= 2) {
+    const parts: string[] = [];
+    if (asksPrice) {
+      parts.push('Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.');
+    }
+    if (asksDoctor) {
+      parts.push('Doktor isimlerini öğrenmek istediğinizi görüyorum. Doğrulanmış hekim listesi varsa isimleri paylaşabilirim; hekimler hakkında kişisel başarı kıyaslaması yapamam.');
+    }
+    if (asksAccommodation) {
+      parts.push('Konaklama tarafının sizin için önemli olduğunu görüyorum. Hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda ekibimiz danışmanlık yapabilir; garanti veya rezervasyon sözü veremem.');
+    }
+    parts.push('Bu başlıklardan hangisini önce netleştirelim?');
+    return {
+      text: parts.join('\n\n'),
+      rewrote: true,
+    };
+  }
+
+  if (asksDoctor) {
     return {
       text: 'Doktor isimlerini öğrenmek istediğinizi görüyorum. Doğrulanmış hekim listesi varsa isimleri paylaşabilirim; hekimler hakkında kişisel başarı kıyaslaması yapamam.',
       rewrote: true,
     };
   }
 
-  if (/\b(?:konaklama|kalacak\s+yer|otel|misafirhane|nerede\s+kal|accommodation|stay|unterkunft)\b/i.test(inbound)) {
+  if (asksAccommodation) {
     return {
       text: 'Konaklama tarafının sizin için önemli olduğunu görüyorum. Hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda ekibimiz danışmanlık yapabilir; garanti veya rezervasyon sözü veremem.',
       rewrote: true,
@@ -524,7 +566,7 @@ function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): {
     };
   }
 
-  if (/\b(?:fiyat|[üu]cret|tutar|[öo]deme|ne\s+kadar|ta\s*12|ta12)\b/i.test(inbound)) {
+  if (asksPrice) {
     return {
       text: 'Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.',
       rewrote: true,

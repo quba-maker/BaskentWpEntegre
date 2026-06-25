@@ -575,6 +575,18 @@ export async function testBotPrompt(
 
       let finalReply = response.text || '⚠️ Model yanıt üretmedi.';
       if (response.text) {
+        const recentUserWindow: string[] = [];
+        for (let i = historyMessages.length - 1; i >= 0; i--) {
+          const msg = historyMessages[i];
+          if (msg.role === 'assistant') break;
+          if (msg.role === 'user' && msg.content) {
+            recentUserWindow.unshift(msg.content);
+          }
+        }
+        const auditorInboundText = Array.from(new Set([
+          ...recentUserWindow,
+          lastMessage?.content || ''
+        ].map(t => String(t || '').trim()).filter(Boolean))).join('\n');
         const { FinalOutboundBodyAuditor } = await import("@/lib/services/ai/final-outbound-body-auditor");
         const auditResult = FinalOutboundBodyAuditor.audit(response.text, {
           tenantId: ctx.tenantId,
@@ -583,7 +595,7 @@ export async function testBotPrompt(
           responseSource: response.modelUsed || aiModel,
           channel: 'whatsapp',
           replyLanguage: response.replyLanguage,
-          inboundText: lastMessage?.content || '',
+          inboundText: auditorInboundText || lastMessage?.content || '',
         });
         finalReply = auditResult.text;
       }

@@ -57,6 +57,10 @@ export class ContextAwareSafeFallbackResolver {
       .replace(/\s+/g, ' ')
       .trim();
     if (!clean || clean.length > 40) return null;
+    const tokens = clean.split(/\s+/).filter(Boolean);
+    if (tokens.some(token => /^(için|icin|bel|fıtığı|fitigi|fiyat|ücret|ucret|doktor|randevu|şikayet|sikayet)$/i.test(token))) {
+      return null;
+    }
     try {
       const { normalizeCountry } = require('../../utils/country-normalizer');
       const normalized = normalizeCountry(clean, null, 'patient_statement');
@@ -132,9 +136,41 @@ export class ContextAwareSafeFallbackResolver {
     return !alreadyAsked && this.weakLanguageSignalScore(inboundText, history) >= 2;
   }
 
+  private static buildRecentUserWindow(inboundText: string, history: any[] = []): string {
+    const tail: string[] = [];
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i];
+      if (msg?.role === 'assistant') break;
+      if (msg?.role === 'user' && msg.content) {
+        tail.unshift(String(msg.content));
+      }
+    }
+    const parts = [...tail, inboundText].map(t => String(t || '').trim()).filter(Boolean);
+    return Array.from(new Set(parts)).join('\n');
+  }
+
+  private static inferDepartmentsFromText(text: string): string[] {
+    const clean = this.normalizeLooseText(text)
+      .replace(/ğ/g, 'g').replace(/ü/g, 'u')
+      .replace(/ş/g, 's').replace(/ı/g, 'i')
+      .replace(/ö/g, 'o').replace(/ç/g, 'c');
+    const candidates: Array<[RegExp, string]> = [
+      [/\bdermatoloji|cildiye|egzama|sac|sacta\b/i, 'Dermatoloji'],
+      [/\bkadin\s+dogum|jinekoloji|gebelik|anne\s+olmak|tup\s+bebek|ivf\b/i, 'Kadın Hastalıkları ve Doğum'],
+      [/\bkardiyoloji|kalp|nefes\s+darligi\b/i, 'Kardiyoloji'],
+      [/\bbel\s+fitigi|boyun\s+fitigi|beyin\s+ve\s+sinir|sinir\s+cerrahisi\b/i, 'Beyin ve Sinir Cerrahisi'],
+      [/\bdiz|ortopedi|protez|kirik\b/i, 'Ortopedi'],
+      [/\bfizik\s+tedavi|ftr|rehabilitasyon\b/i, 'Fizik Tedavi ve Rehabilitasyon'],
+      [/\bcheck\s*up|check-up|genel\s+muayene\b/i, 'Check-up'],
+    ];
+    const found = candidates.filter(([pattern]) => pattern.test(clean)).map(([, dept]) => dept);
+    return Array.from(new Set(found));
+  }
+
   private static resolveDepartmentCandidates(params: {
     orchestratorDept?: string | null;
     unifiedContext?: any;
+    recentText?: string;
   }): string[] {
     const ctx = params.unifiedContext || {};
     const authoritativeDept = typeof params.orchestratorDept === 'string' && params.orchestratorDept.trim()
@@ -146,6 +182,7 @@ export class ContextAwareSafeFallbackResolver {
       ctx?.conversation?.department,
       ctx?.latestForm?.data?.onerilen_bolum,
       ctx?.latestForm?.data?.department,
+      ...ContextAwareSafeFallbackResolver.inferDepartmentsFromText(params.recentText || ''),
     ];
 
     const depts: string[] = [];
@@ -172,6 +209,14 @@ export class ContextAwareSafeFallbackResolver {
       (Array.isArray(unifiedContext?.patient_known_facts) && unifiedContext.patient_known_facts.length > 0);
 
     const history = unifiedContext?.history || [];
+    const recentUserText = ContextAwareSafeFallbackResolver.buildRecentUserWindow(inboundText, history);
+    const recentDepartmentContextText = [
+      recentUserText,
+      ...history
+        .filter((m: any) => m?.role === 'user' && m?.content)
+        .slice(-8)
+        .map((m: any) => String(m.content || '')),
+    ].join('\n');
     const { PendingQuestionResolver } = require('./pending-question-resolver');
     const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
     const { ConversationStateArbitrator } = require('./conversation-state-arbitrator');
@@ -379,6 +424,14 @@ export class ContextAwareSafeFallbackResolver {
       (Array.isArray(unifiedContext?.patient_known_facts) && unifiedContext.patient_known_facts.length > 0);
 
     const history = unifiedContext?.history || [];
+    const recentUserText = ContextAwareSafeFallbackResolver.buildRecentUserWindow(inboundText, history);
+    const recentDepartmentContextText = [
+      recentUserText,
+      ...history
+        .filter((m: any) => m?.role === 'user' && m?.content)
+        .slice(-8)
+        .map((m: any) => String(m.content || '')),
+    ].join('\n');
     const { PendingQuestionResolver } = require('./pending-question-resolver');
     const { ShortAnswerInterpreter } = require('./short-answer-interpreter');
     const { ConversationStateArbitrator } = require('./conversation-state-arbitrator');
@@ -433,6 +486,25 @@ export class ContextAwareSafeFallbackResolver {
         hasFormContext,
         hasComplaint: false,
         finalPath: 'country_answer_continuation_fallback',
+        detectedIntent
+      };
+    }
+    if (isHealthcare && countryOnlyAnswer) {
+      let text = `${countryOnlyAnswer}’da olduğunuzu not ediyorum.`;
+      const languageOffer = ContextAwareSafeFallbackResolver.shouldOfferLanguagePreference(countryOnlyAnswer, inboundText, history)
+        ? ContextAwareSafeFallbackResolver.languagePreferenceOffer(countryOnlyAnswer)
+        : null;
+      if (languageOffer) {
+        text += `\n\n${languageOffer}`;
+      } else {
+        text += ' Sağlık talebinizle ilgili hangi bilgiyi netleştirelim?';
+      }
+      return {
+        text,
+        sector: resolvedIndustry,
+        hasFormContext,
+        hasComplaint: false,
+        finalPath: 'country_answer_context_update_fallback',
         detectedIntent
       };
     }
@@ -510,14 +582,15 @@ export class ContextAwareSafeFallbackResolver {
       const departments = ContextAwareSafeFallbackResolver.resolveDepartmentCandidates({
         orchestratorDept,
         unifiedContext,
+        recentText: recentDepartmentContextText,
       });
       const hasPreviousDoctorAsk = history.some((m: any) =>
         m?.role === 'user' && isDoctorNameRequestText(String(m.content || ''), false)
       );
       const allVerifiedDoctors = DoctorDirectoryResolver.getDoctors(brain);
 
-      if (isDoctorProfileQuestionText(inboundText, allVerifiedDoctors)) {
-        const profile = DoctorNamesPolicy.resolveDoctorProfile(brain, inboundText, departments, lang);
+      if (isDoctorProfileQuestionText(recentUserText, allVerifiedDoctors)) {
+        const profile = DoctorNamesPolicy.resolveDoctorProfile(brain, recentUserText, departments, lang);
         if (profile) {
           return {
             text: profile.text,
@@ -530,7 +603,7 @@ export class ContextAwareSafeFallbackResolver {
         }
       }
 
-      if (isDoctorNameRequestText(inboundText, hasPreviousDoctorAsk)) {
+      if (isDoctorNameRequestText(recentUserText, hasPreviousDoctorAsk)) {
         const doctorResult = DoctorNamesPolicy.resolve(brain, departments, hasPreviousDoctorAsk, lang);
         return {
           text: doctorResult.text,
