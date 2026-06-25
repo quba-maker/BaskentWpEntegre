@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { FlaskConical, Send, Loader2, Bot, Trash2, ShieldCheck } from "lucide-react";
+import { FlaskConical, Send, Loader2, Bot, Trash2, ShieldCheck, ListChecks } from "lucide-react";
 import { type BotChannel } from "./shared";
 
 // ==========================================
@@ -108,6 +108,27 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
     setTesting(false);
   };
 
+  const brainPlan = debugMeta?.brainV2ShadowPlan;
+  const renderCompactList = (items?: string[], emptyLabel = "Yok") => {
+    const safeItems = Array.isArray(items) ? items.filter(Boolean).slice(0, 6) : [];
+    if (safeItems.length === 0) {
+      return <span className="text-[10px] text-gray-400">{emptyLabel}</span>;
+    }
+    return (
+      <div className="flex flex-wrap gap-1">
+        {safeItems.map((item, index) => (
+          <span
+            key={`${item}-${index}`}
+            className="px-2 py-1 rounded-full bg-white border text-[10px] text-gray-600"
+            style={{ borderColor: "var(--q-border-default)" }}
+          >
+            {item}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="mt-8 mb-8 flex flex-col h-[650px] border rounded-2xl bg-[#f8f9fa] overflow-hidden" style={{ borderColor: "var(--q-border-default)" }}>
       {/* Header */}
@@ -209,6 +230,43 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
           {testing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
         </button>
       </div>
+
+      {/* Brain v2 Shadow Diagnostics */}
+      {brainPlan && (
+        <div className="px-5 py-3 bg-white border-t space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
+          <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
+            <ListChecks className="w-4 h-4" style={{ color: "var(--q-blue, #007aff)" }} />
+            <span>Brain v2 Gölge Planı</span>
+            <span className="px-1.5 py-0.5 rounded bg-blue-50 text-[9px]" style={{ color: "var(--q-blue, #007aff)" }}>
+              Hasta yanıtını değiştirmez
+            </span>
+          </div>
+          <p className="text-[11px] leading-relaxed text-gray-500">{brainPlan.summary}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div>
+              <div className="text-[9px] font-bold text-gray-400 mb-1">ALGILANAN BAŞLIKLAR</div>
+              {renderCompactList(brainPlan.detectedIntents)}
+            </div>
+            <div>
+              <div className="text-[9px] font-bold text-gray-400 mb-1">CEVAPTA KAÇIRMA</div>
+              {renderCompactList(brainPlan.mustAnswer)}
+            </div>
+            <div>
+              <div className="text-[9px] font-bold text-gray-400 mb-1">RİSKLER</div>
+              {renderCompactList(brainPlan.riskFlags)}
+            </div>
+            <div>
+              <div className="text-[9px] font-bold text-gray-400 mb-1">EKSİK BİLGİ</div>
+              {renderCompactList(brainPlan.missingInformation)}
+            </div>
+          </div>
+          {brainPlan.recommendedFollowUp && (
+            <div className="text-[11px] leading-relaxed text-gray-600 bg-gray-50 border rounded-lg px-3 py-2" style={{ borderColor: "var(--q-border-default)" }}>
+              <span className="font-bold">Önerilen yön:</span> {brainPlan.recommendedFollowUp}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Debug Info Footer */}
       {debugMeta && (

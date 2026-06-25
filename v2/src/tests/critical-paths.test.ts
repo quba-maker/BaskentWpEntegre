@@ -599,6 +599,7 @@ test("BOT TEST: Doğru tenant botGroupId ile doğru prompt çözmeli ve db mutat
   assert(res.metadata.promptVersion === 2, "Prompt version mismatch");
   assert(res.metadata.sandboxMode === true, "Should be sandboxMode");
   assert(res.metadata.toolExecution === 'sandbox', "Tool execution mode mismatch");
+  assert(res.metadata.brainV2ShadowPlan?.mode === 'shadow', "Brain v2 shadow plan should be returned in sandbox metadata");
 });
 
 
@@ -14028,6 +14029,87 @@ test("Başkent v83 T112: Turkish normalizer fixes check-up package morphology re
   assert(!result.text.includes("Burunuz, boğaz"), result.text);
   assert(!result.text.includes("kiminiz size en uygun olduğunuz"), result.text);
   assert(result.text.includes("kimin size en uygun olduğunu"), result.text);
+});
+
+test("Başkent v84 T113: Brain v2 shadow plan detects price, doctor, and accommodation together", () => {
+  const { BrainV2ShadowPlanner } = require("../lib/services/ai/brain-v2-shadow-planner");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v84-t113",
+    "Sen Rüya'sın.",
+    {
+      industry: "healthcare",
+      doctors: `Dermatoloji:
+- Uzm. Dr. Selin YILMAZ
+- Uzm. Dr. Burak DEMİR`
+    },
+    null,
+    {
+      prices: "Fiyat bilgisi paylaşılmaz.",
+      rules: "Konaklama için garanti verme."
+    }
+  );
+
+  const plan = BrainV2ShadowPlanner.build({
+    inboundText: "paket fiyatını sordum check up birde dermatoloji doktorunuz kim birde kalacak yerim yok",
+    history: [
+      { role: "user", content: "10 ağustosta geleceğim" },
+      { role: "assistant", content: "Erkek check-up paketi içeriğini paylaşabilirim." }
+    ],
+    brain,
+    now: new Date("2026-06-25T10:00:00+03:00")
+  });
+
+  assert(plan.mode === "shadow", JSON.stringify(plan));
+  assert(plan.detectedIntents.includes("price_question"), JSON.stringify(plan.detectedIntents));
+  assert(plan.detectedIntents.includes("doctor_names"), JSON.stringify(plan.detectedIntents));
+  assert(plan.detectedIntents.includes("accommodation_question"), JSON.stringify(plan.detectedIntents));
+  assert(plan.mustAnswer.some((item: string) => item.includes("fiyat")), JSON.stringify(plan.mustAnswer));
+  assert(plan.mustAnswer.some((item: string) => item.includes("doktor")), JSON.stringify(plan.mustAnswer));
+  assert(plan.mustAnswer.some((item: string) => item.includes("konaklama")), JSON.stringify(plan.mustAnswer));
+  assert(JSON.stringify(plan.verifiedFacts.doctorDirectory || []).includes("Selin YILMAZ"), JSON.stringify(plan.verifiedFacts.doctorDirectory));
+  assert(plan.verifiedFacts.pricePolicy.includes("net fiyat paylaşamıyorum"), plan.verifiedFacts.pricePolicy || "");
+  assert(plan.riskFlags.includes("multi_intent_must_answer_all"), JSON.stringify(plan.riskFlags));
+});
+
+test("Başkent v84 T114: Brain v2 shadow plan separates form lead from direct inbound", () => {
+  const { BrainV2ShadowPlanner } = require("../lib/services/ai/brain-v2-shadow-planner");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v84-t114",
+    "Sen Rüya'sın.",
+    { industry: "healthcare" }
+  );
+
+  const direct = BrainV2ShadowPlanner.build({
+    inboundText: "merhaba",
+    history: [],
+    brain,
+    now: new Date("2026-06-25T10:00:00+03:00")
+  });
+  assert(direct.contactMode === "direct_inbound", JSON.stringify(direct));
+
+  const formLead = BrainV2ShadowPlanner.build({
+    inboundText: "Full name: Medine\nPhone number: +998991244018\nŞikayetiniz Nedir?: tekrar anne olmak istiyorum\nTürkiye'ye (Konya'ya) tedavi için gelme planınız nedir?: gelemem",
+    history: [],
+    brain,
+    now: new Date("2026-06-25T10:00:00+03:00")
+  });
+  assert(formLead.contactMode === "form_lead", JSON.stringify(formLead));
+  assert(formLead.detectedIntents.includes("form_payload"), JSON.stringify(formLead.detectedIntents));
+});
+
+test("Başkent v84 T115: Bot test UI exposes Brain v2 shadow diagnostics", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const code = fs.readFileSync(path.join(process.cwd(), "src/app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf8");
+  assert(code.includes("brainV2ShadowPlan"), "Bot test playground should read brainV2ShadowPlan metadata");
+  assert(code.includes("Brain v2 Gölge Planı"), "Bot test playground should show shadow plan section");
+  assert(code.includes("Hasta yanıtını değiştirmez"), "UI should clearly say the plan is non-patient-facing");
 });
 
 

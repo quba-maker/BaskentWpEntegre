@@ -553,6 +553,15 @@ export async function testBotPrompt(
         history: historyMessages
       });
 
+      const { BrainV2ShadowPlanner } = await import("@/lib/services/ai/brain-v2-shadow-planner");
+      const brainV2ShadowPlan = BrainV2ShadowPlanner.build({
+        inboundText: lastMessage?.content || '',
+        history: historyMessages,
+        brain: mockBrain as any,
+        channel: 'whatsapp',
+        now: new Date()
+      });
+
       return {
         success: true,
         reply: response.text || '⚠️ Model yanıt üretmedi.',
@@ -566,7 +575,8 @@ export async function testBotPrompt(
           toolExecution: 'sandbox',
           responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
           responseStyle: profile?.response_style || 'balanced',
-          maxResponseTokens: maxTokens
+          maxResponseTokens: maxTokens,
+          brainV2ShadowPlan
         }
       };
     }
