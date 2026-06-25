@@ -155,7 +155,10 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const qubaCapabilities: string[] = Array.isArray(qubaBrainDiagnostics?.capabilities) ? qubaBrainDiagnostics.capabilities : [];
   const qubaWarnings: string[] = Array.isArray(qubaBrainDiagnostics?.warnings) ? qubaBrainDiagnostics.warnings : [];
   const qubaMissingSetup: string[] = Array.isArray(qubaBrainDiagnostics?.missingSetup) ? qubaBrainDiagnostics.missingSetup : [];
-  const qubaSetupHealthy = qubaMissingSetup.length === 0;
+  const qubaReadiness = qubaBrainProfile?.readiness;
+  const qubaBlockers: string[] = Array.isArray(qubaReadiness?.blockers) ? qubaReadiness.blockers : [];
+  const qubaRecommendations: string[] = Array.isArray(qubaReadiness?.recommendations) ? qubaReadiness.recommendations : [];
+  const qubaSetupHealthy = qubaReadiness ? qubaReadiness.status === "ready" : qubaMissingSetup.length === 0;
   const renderCompactList = (items?: string[], emptyLabel = "Yok") => {
     const safeItems = Array.isArray(items) ? items.filter(Boolean).slice(0, 6) : [];
     if (safeItems.length === 0) {
@@ -210,6 +213,17 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
           <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
             <ListChecks className="w-4 h-4" style={{ color: qubaSetupHealthy ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }} />
             <span>Brain Kurulum Sağlığı</span>
+            {qubaReadiness && (
+              <span
+                className="px-1.5 py-0.5 rounded text-[9px] uppercase"
+                style={{
+                  backgroundColor: qubaReadiness.status === "ready" ? "rgba(34,197,94,0.10)" : "rgba(245,158,11,0.12)",
+                  color: qubaReadiness.status === "ready" ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)",
+                }}
+              >
+                {qubaReadiness.status} · {qubaReadiness.score}/100
+              </span>
+            )}
             {qubaRolloutMode && (
               <span
                 className="px-1.5 py-0.5 rounded text-[9px] uppercase"
@@ -254,10 +268,36 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
                 <div className="font-semibold text-gray-700">{qubaBrainProfile.rollout?.liveDirectiveEnabled ? "Açık" : "Kapalı"}</div>
               </div>
             </div>
+            {qubaReadiness && (
+              <div>
+                <div className="text-[9px] font-bold text-gray-400 mb-1">CANLIYA HAZIRLIK</div>
+                <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.max(0, Math.min(100, qubaReadiness.score || 0))}%`,
+                      backgroundColor: qubaReadiness.status === "ready" ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
             <div>
               <div className="text-[9px] font-bold text-gray-400 mb-1">YETENEKLER</div>
               {renderCompactList(qubaCapabilities, "Henüz algılanmadı")}
             </div>
+            {(qubaBlockers.length > 0 || qubaRecommendations.length > 0) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div>
+                  <div className="text-[9px] font-bold text-gray-400 mb-1">CANLI BLOKER</div>
+                  {renderCompactList(qubaBlockers)}
+                </div>
+                <div>
+                  <div className="text-[9px] font-bold text-gray-400 mb-1">ÖNERİ</div>
+                  {renderCompactList(qubaRecommendations)}
+                </div>
+              </div>
+            )}
             {(qubaMissingSetup.length > 0 || qubaWarnings.length > 0) && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 <div>

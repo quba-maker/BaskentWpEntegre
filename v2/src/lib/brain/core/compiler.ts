@@ -6,8 +6,10 @@ import type {
   QubaBrainSource,
   QubaIndustry,
   QubaKnowledgeProfile,
+  QubaPolicyRule,
   QubaRuntimeProfile,
   QubaServiceCatalogItem,
+  QubaActionPolicy,
 } from './schema';
 import { getSectorPack } from './sector-packs';
 import {
@@ -173,6 +175,69 @@ function resolveDiagnostics(profile: Pick<QubaBrainProfile, 'identity' | 'knowle
   return { warnings, missingSetup, capabilities };
 }
 
+function resolveReadiness(input: {
+  industry: QubaIndustry;
+  identity: QubaBrainProfile['identity'];
+  knowledge: QubaKnowledgeProfile;
+  serviceCatalog: QubaServiceCatalogItem[];
+  policies: QubaPolicyRule[];
+  actions: QubaActionPolicy[];
+}): QubaBrainProfile['readiness'] {
+  let score = 100;
+  const blockers: string[] = [];
+  const recommendations: string[] = [];
+
+  const addBlocker = (key: string, penalty: number) => {
+    blockers.push(key);
+    score -= penalty;
+  };
+  const addRecommendation = (key: string, penalty: number) => {
+    recommendations.push(key);
+    score -= penalty;
+  };
+
+  if (!input.identity.organizationName) {
+    addBlocker('Kurum adı eksik', 25);
+  }
+
+  if (!input.knowledge.rules && !input.knowledge.verifiedArchive) {
+    addBlocker('Doğrulanmış bilgi arşivi eksik', 25);
+  }
+
+  if (input.serviceCatalog.length === 0 && !input.knowledge.serviceCatalogAvailable) {
+    addBlocker('Hizmet kataloğu eksik', 15);
+  }
+
+  if (input.actions.length === 0) {
+    addBlocker('Ana aksiyon politikası eksik', 10);
+  }
+
+  if (!input.policies.some(policy => policy.severity === 'hard')) {
+    addBlocker('Sert güvenlik politikası eksik', 10);
+  }
+
+  if (input.industry === 'healthcare' && !input.knowledge.doctorDirectoryAvailable) {
+    addRecommendation('Doktor listesi doğrulanmamış', 5);
+  }
+
+  if (!input.identity.assistantName) {
+    addRecommendation('Asistan adı tanımlı değil', 5);
+  }
+
+  score = Math.max(0, Math.min(100, score));
+  const status = blockers.length > 0
+    ? (score >= 60 ? 'needs_review' : 'blocked')
+    : (score >= 85 ? 'ready' : 'needs_review');
+
+  return {
+    score,
+    status,
+    blockers,
+    recommendations,
+    requiredForActive: blockers,
+  };
+}
+
 function resolveSource(brain: TenantBrain): QubaBrainSource {
   return brain.context.brainSource === 'v2_channel_prompts'
     ? 'compiled_from_v2_channel_prompt'
@@ -207,12 +272,25 @@ export class QubaBrainCompiler {
           ]),
         }
       : sector.defaultTone;
+    const policies = mergeById(sector.policies, override.policies);
+    const actions = mergeById(sector.actions, override.actions);
+    const setupQuestions = mergeById(sector.setupQuestions, override.setupQuestions);
 
     const partial = {
       identity,
       knowledge,
       serviceCatalog,
     };
+    const readiness = resolveReadiness({
+      industry,
+      identity,
+      knowledge,
+      serviceCatalog,
+      policies,
+      actions,
+    });
+    const liveDirectiveEnabled = shouldApplyQubaBrainLiveDirective(rolloutMode)
+      && readiness.status === 'ready';
 
     return {
       version: 'quba_brain_v1',
@@ -224,16 +302,17 @@ export class QubaBrainCompiler {
       tone,
       goals: override.goals && override.goals.length > 0 ? override.goals : sector.goals,
       serviceCatalog,
-      policies: mergeById(sector.policies, override.policies),
-      actions: mergeById(sector.actions, override.actions),
+      policies,
+      actions,
       knowledge,
-      setupQuestions: mergeById(sector.setupQuestions, override.setupQuestions),
+      setupQuestions,
       runtime: resolveRuntime(brain, override),
       rollout: {
         mode: rolloutMode,
         sandboxDirectiveEnabled: shouldApplyQubaBrainSandboxDirective(rolloutMode),
-        liveDirectiveEnabled: shouldApplyQubaBrainLiveDirective(rolloutMode),
+        liveDirectiveEnabled,
       },
+      readiness,
       diagnostics: resolveDiagnostics(partial),
     };
   }
@@ -247,6 +326,7 @@ export class QubaBrainCompiler {
       `Kurum: ${profile.identity.organizationName || 'Belirtilmemiş'}`,
       profile.identity.assistantName ? `Asistan adı: ${profile.identity.assistantName}` : 'Asistan adı: belirtilmemiş',
       `Ton: ${profile.tone.preset}, hitap: ${profile.tone.addressStyle}`,
+      `Kurulum durumu: ${profile.readiness.status}, skor: ${profile.readiness.score}/100`,
     ];
 
     if (profile.goals.length > 0) {

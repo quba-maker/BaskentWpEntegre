@@ -14660,6 +14660,84 @@ test("Başkent v87 T130: Bot setup wizard keeps Brain live rollout explicit", ()
   assert(promptTabCode.includes("revealBotIdentity: false"), "Setup wizard should keep bot identity hidden by default");
 });
 
+test("Başkent v87 T131: Brain Core blocks active live directive when setup is incomplete", () => {
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const { QubaBrainCompiler } = require("../lib/brain/core");
+
+  const incompleteBrain = createTenantBrain(
+    "tenant-incomplete-active",
+    "whatsapp",
+    "payload-v87-t131",
+    "Sen asistansın.",
+    {
+      qubaBrain: {
+        rolloutMode: "active",
+        industry: "general",
+      },
+    },
+    null,
+    {},
+    undefined,
+    "v2_channel_prompts"
+  );
+
+  const readyBrain = createTenantBrain(
+    "tenant-ready-active",
+    "whatsapp",
+    "payload-v87-t131-ready",
+    "Sen Olimpik Yaşam Merkezi adına konuşan yardımcı asistansın.",
+    {
+      qubaBrain: {
+        rolloutMode: "active",
+        industry: "fitness",
+        identity: {
+          organizationName: "Olimpik Yaşam Merkezi",
+          assistantName: "Maya",
+        },
+        serviceCatalog: [
+          {
+            id: "adult_membership",
+            name: "Yetişkin üyelik",
+            aliases: ["fitness üyelik", "spor üyeliği"],
+            verifiedFacts: ["Kayıt için tesis ziyareti gerekir."],
+            requiredInfo: [],
+            safeAnswerHints: ["Fiyat bilgisi doğrulanmış paket bilgisinden paylaşılır."],
+          },
+        ],
+      },
+    },
+    null,
+    {
+      rules: "Fitness üyelikleri, yüzme kursları ve kayıt şartları doğrulanmış bilgiyle paylaşılır.",
+      prices: "Fiyat bilgisi paketlere göre paylaşılabilir.",
+    },
+    undefined,
+    "v2_channel_prompts"
+  );
+
+  const incompleteProfile = QubaBrainCompiler.compile(incompleteBrain);
+  const readyProfile = QubaBrainCompiler.compile(readyBrain);
+
+  assert(incompleteProfile.rollout.mode === "active", JSON.stringify(incompleteProfile.rollout));
+  assert(incompleteProfile.readiness.status !== "ready", JSON.stringify(incompleteProfile.readiness));
+  assert(incompleteProfile.readiness.blockers.length > 0, JSON.stringify(incompleteProfile.readiness));
+  assert(incompleteProfile.rollout.liveDirectiveEnabled === false, JSON.stringify(incompleteProfile.rollout));
+
+  assert(readyProfile.readiness.status === "ready", JSON.stringify(readyProfile.readiness));
+  assert(readyProfile.rollout.liveDirectiveEnabled === true, JSON.stringify(readyProfile.rollout));
+});
+
+test("Başkent v87 T132: Bot test panel exposes readiness score and live blockers", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
+
+  assert(playgroundCode.includes("CANLIYA HAZIRLIK"), "Test panel should show readiness progress");
+  assert(playgroundCode.includes("CANLI BLOKER"), "Test panel should show active rollout blockers");
+  assert(playgroundCode.includes("qubaReadiness.score"), "Test panel should render readiness score");
+  assert(playgroundCode.includes("qubaBrainProfile?.readiness"), "Test panel should consume compiler readiness");
+});
+
 
 async function runAllTests() {
   try {

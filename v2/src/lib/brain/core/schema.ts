@@ -37,6 +37,12 @@ export type QubaGoalType =
 
 export type QubaPolicySeverity = 'hard' | 'soft' | 'guide';
 
+export type QubaReadinessStatus =
+  | 'draft'
+  | 'needs_review'
+  | 'ready'
+  | 'blocked';
+
 export interface QubaIdentityProfile {
   organizationName: string;
   organizationShortName?: string;
@@ -139,6 +145,14 @@ export interface QubaBrainDiagnostics {
   capabilities: string[];
 }
 
+export interface QubaBrainReadinessProfile {
+  score: number;
+  status: QubaReadinessStatus;
+  blockers: string[];
+  recommendations: string[];
+  requiredForActive: string[];
+}
+
 export interface QubaBrainProfileOverride {
   industry?: QubaIndustry;
   identity?: Partial<QubaIdentityProfile>;
@@ -169,5 +183,6 @@ export interface QubaBrainProfile {
   setupQuestions: QubaSetupQuestion[];
   runtime: QubaRuntimeProfile;
   rollout: QubaBrainRolloutProfile;
+  readiness: QubaBrainReadinessProfile;
   diagnostics: QubaBrainDiagnostics;
 }
