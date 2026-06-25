@@ -14604,6 +14604,34 @@ test("Başkent v86 T126: Quba Brain Core rollout is explicit and live activation
   assert(shouldApplyQubaBrainLiveDirective(activeMode) === true, "only active applies live directive");
 });
 
+test("Başkent v86 T127: Bot test panel exposes Brain setup health before live rollout", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
+  const botPageCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/page.tsx"), "utf-8");
+  const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
+
+  assert(botActionCode.includes("getBotBrainDiagnostics"), "Server action should expose Brain diagnostics without calling the model");
+  assert(botActionCode.includes("shouldApplyQubaBrainLiveDirective"), "Diagnostics should expose live directive state");
+  assert(botPageCode.includes("onGetBrainDiagnostics={getBotBrainDiagnostics}"), "Bot page should wire diagnostics into test playground");
+  assert(playgroundCode.includes("Brain Kurulum Sağlığı"), "Test panel should show setup health");
+  assert(playgroundCode.includes("DOKTOR LİSTESİ"), "Test panel should surface doctor directory detection");
+  assert(playgroundCode.includes("CANLI DİREKTİF"), "Test panel should show whether Brain Core is live-active");
+  assert(playgroundCode.includes("qubaBrainProfile"), "Test panel should use compiled Quba Brain profile metadata");
+});
+
+test("Başkent v86 T128: Brain diagnostics do not hardcode every tenant as healthcare", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
+
+  assert(botActionCode.includes("function resolveBotIndustryHint"), "Bot actions should resolve industry from tenant/bot context");
+  assert(botActionCode.includes("return 'fitness'"), "Industry resolver should support fitness tenants");
+  assert(botActionCode.includes("return 'construction'"), "Industry resolver should support construction tenants");
+  assert(botActionCode.includes("industry: industryHint"), "Sandbox and diagnostics brains should use resolved industry");
+  assert(!botActionCode.includes("Default mock industry context"), "Healthcare-only mock industry comment should not remain");
+});
+
 
 async function runAllTests() {
   try {

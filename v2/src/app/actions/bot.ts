@@ -502,6 +502,12 @@ export async function testBotPrompt(
       const crypto = require('crypto');
       const rawSystemPrompt = activePrompt.prompt_text || '';
       const promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
+      const industryHint = resolveBotIndustryHint(
+        botGroupResult[0]?.bot_type,
+        rawSystemPrompt,
+        activePrompt.knowledge_rules,
+        activePrompt.knowledge_prices
+      );
 
       const mockBrain = {
         id: `test-brain-${botGroupId}`,
@@ -509,14 +515,14 @@ export async function testBotPrompt(
           systemPrompt: rawSystemPrompt,
           promptHash,
           metadata: {
-            industry: 'healthcare' // Default mock industry context
+            industry: industryHint
           }
         },
         context: {
           tenantId: ctx.tenantId,
           channel: 'whatsapp',
           config: {
-            industry: 'healthcare',
+            industry: industryHint,
             timezone: 'Europe/Istanbul'
           },
           knowledge: {
@@ -630,6 +636,113 @@ export async function testBotPrompt(
   ).then(res => {
     if (!res.success) return { success: false, reply: '❌ Hata: ' + res.error, metadata: null };
     return res.data!;
+  });
+}
+
+export async function getBotBrainDiagnostics(
+  botGroupId: string
+): Promise<{ success: boolean; metadata?: any; error?: string }> {
+  return withActionGuard(
+    { actionName: 'getBotBrainDiagnostics' },
+    async (ctx) => {
+      if (!botGroupId) {
+        return { success: false, error: 'Bot Group ID gerekli.' };
+      }
+
+      const botGroupResult = await ctx.db.executeSafe({
+        text: `SELECT id, name, display_name, bot_type, icon, color
+               FROM channel_groups
+               WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (botGroupResult.length === 0) {
+        throw new Error('Bot grubu bulunamadı veya yetkiniz yok');
+      }
+
+      const promptResult = await ctx.db.executeSafe({
+        text: `SELECT id, name, prompt_text, version, knowledge_prices, knowledge_rules
+               FROM channel_prompts
+               WHERE group_id = $1 AND tenant_id = $2 AND is_active = true AND prompt_type = 'system'
+               ORDER BY version DESC LIMIT 1`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      if (promptResult.length === 0) {
+        return { success: false, error: 'Bu bot grubuna bağlı aktif sistem promptu bulunamadı.' };
+      }
+
+      const activePrompt = promptResult[0];
+      const profileResult = await ctx.db.executeSafe({
+        text: `SELECT cap.ai_model, cap.max_response_tokens, cap.business_hours_json, cap.aggression_level, cap.response_delay_seconds, cap.response_style
+               FROM channel_ai_profiles cap
+               JOIN channel_groups cg ON cap.group_id = cg.id
+               WHERE group_id = $1 AND cg.tenant_id = $2 LIMIT 1`,
+        values: [botGroupId, ctx.tenantId]
+      });
+      const profile = profileResult[0] || null;
+
+      const crypto = require('crypto');
+      const rawSystemPrompt = activePrompt.prompt_text || '';
+      const promptHash = crypto.createHash('sha256').update(rawSystemPrompt).digest('hex');
+      const aiModel = profile?.ai_model || 'gemini-2.5-flash';
+      const maxTokens = profile?.max_response_tokens || 1000;
+      const industryHint = resolveBotIndustryHint(
+        botGroupResult[0]?.bot_type,
+        rawSystemPrompt,
+        activePrompt.knowledge_rules,
+        activePrompt.knowledge_prices
+      );
+
+      const mockBrain = {
+        id: `diagnostic-brain-${botGroupId}`,
+        prompts: {
+          systemPrompt: rawSystemPrompt,
+          promptHash,
+          metadata: {
+            industry: industryHint
+          }
+        },
+        context: {
+          tenantId: ctx.tenantId,
+          channel: 'whatsapp',
+          config: {
+            industry: industryHint,
+            timezone: 'Europe/Istanbul'
+          },
+          knowledge: {
+            prices: activePrompt.knowledge_prices || '',
+            rules: activePrompt.knowledge_rules || ''
+          },
+          settings: {
+            aiModel,
+            maxMessages: 20,
+            maxResponseTokens: maxTokens,
+            workingHours: profile?.business_hours_json || { enabled: false },
+            aggressionLevel: profile?.aggression_level || 'medium',
+            responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
+            responseStyle: profile?.response_style || 'balanced'
+          }
+        }
+      };
+
+      const { QubaBrainCompiler, resolveQubaBrainRolloutMode, shouldApplyQubaBrainSandboxDirective, shouldApplyQubaBrainLiveDirective } = await import("@/lib/brain/core");
+      const qubaBrainProfile = QubaBrainCompiler.compile(mockBrain as any);
+      const qubaBrainRolloutMode = resolveQubaBrainRolloutMode(mockBrain as any);
+
+      return {
+        success: true,
+        metadata: {
+          promptVersion: activePrompt.version,
+          botGroupId,
+          qubaBrainRolloutMode,
+          qubaBrainCoreApplied: shouldApplyQubaBrainSandboxDirective(qubaBrainRolloutMode),
+          qubaBrainLiveEnabled: shouldApplyQubaBrainLiveDirective(qubaBrainRolloutMode),
+          qubaBrainProfile,
+        }
+      };
+    }
+  ).then(res => {
+    if (!res.success) return { success: false, error: res.error };
+    return res.data as { success: boolean; metadata?: any; error?: string };
   });
 }
 
@@ -766,6 +879,24 @@ export async function getBotChannelBindings() {
 // DYNAMIC BOT MANAGEMENT — V2 SaaS Actions
 // channel_groups = Bot Entity
 // ==========================================
+
+function resolveBotIndustryHint(botType?: string | null, ...textParts: Array<string | null | undefined>): string {
+  const source = [botType || '', ...textParts.map(part => part || '')].join('\n').toLocaleLowerCase('tr-TR');
+
+  if (/\b(fitness|spor|havuz|yüzme|yuzme|kurs|gym|pilates)\b/.test(source)) {
+    return 'fitness';
+  }
+
+  if (/\b(inşaat|insaat|gayrimenkul|emlak|konut|daire|villa|proje|şantiye|santiye)\b/.test(source)) {
+    return 'construction';
+  }
+
+  if (/\b(hastane|hasta|doktor|hekim|muayene|randevu|şikayet|sikayet|tedavi|check-up|checkup|kardiyoloji|dermatoloji|başkent|baskent)\b/.test(source)) {
+    return 'healthcare';
+  }
+
+  return 'general';
+}
 
 export interface BotData {
   id: string;

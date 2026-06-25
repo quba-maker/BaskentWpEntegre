@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Bot, MessageSquare, Globe, Hash, Plus, Link2, AlertTriangle, X, FileText, Settings2, Cpu, RotateCcw } from "lucide-react";
 import {
   getBots, createBot, updateBot,
-  testBotPrompt, type BotData
+  testBotPrompt, getBotBrainDiagnostics, type BotData
 } from "@/app/actions/bot";
 import { PageLoader } from "@/components/ui/shared-states";
 import { PageShell, PageHeader } from "@/components/governance";
@@ -434,6 +434,7 @@ export default function BotManagementPage() {
               activeChannel={{ id: selectedBot.id, label: selectedBot.displayName, icon: resolveIcon(selectedBot.icon), promptKey: '', activeKey: '', color: selectedBot.color || '#6366f1', description: '' }}
               botGroupId={selectedBot.id}
               onTestPrompt={testBotPrompt}
+              onGetBrainDiagnostics={getBotBrainDiagnostics}
             />
           </div>
         </div>

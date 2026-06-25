@@ -16,14 +16,20 @@ interface BotTestPlaygroundProps {
     messages: { role: 'user' | 'assistant'; content: string }[],
     channelId?: string
   ) => Promise<{ success: boolean; reply: string; metadata?: any }>;
+  onGetBrainDiagnostics?: (
+    botGroupId: string
+  ) => Promise<{ success: boolean; metadata?: any; error?: string }>;
 }
 
-export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: BotTestPlaygroundProps) {
+export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onGetBrainDiagnostics }: BotTestPlaygroundProps) {
   const [testMsg, setTestMsg] = useState("");
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [testing, setTesting] = useState(false);
   const [waitingForDelay, setWaitingForDelay] = useState(false);
   const [debugMeta, setDebugMeta] = useState<any>(null);
+  const [brainMeta, setBrainMeta] = useState<any>(null);
+  const [brainDiagnosticsLoading, setBrainDiagnosticsLoading] = useState(false);
+  const [brainDiagnosticsError, setBrainDiagnosticsError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const delayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -40,9 +46,42 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
     }
     setMessages([]);
     setDebugMeta(null);
+    setBrainMeta(null);
+    setBrainDiagnosticsError(null);
     setWaitingForDelay(false);
     setTesting(false);
   }, [botGroupId]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadBrainDiagnostics() {
+      if (!onGetBrainDiagnostics || !botGroupId) return;
+      setBrainDiagnosticsLoading(true);
+      setBrainDiagnosticsError(null);
+      try {
+        const result = await onGetBrainDiagnostics(botGroupId);
+        if (!active) return;
+        if (result.success && result.metadata) {
+          setBrainMeta(result.metadata);
+        } else {
+          setBrainMeta(null);
+          setBrainDiagnosticsError(result.error || "Brain kurulumu okunamadı.");
+        }
+      } catch {
+        if (!active) return;
+        setBrainMeta(null);
+        setBrainDiagnosticsError("Brain kurulumu okunamadı.");
+      } finally {
+        if (active) setBrainDiagnosticsLoading(false);
+      }
+    }
+
+    loadBrainDiagnostics();
+    return () => {
+      active = false;
+    };
+  }, [botGroupId, onGetBrainDiagnostics]);
 
   useEffect(() => {
     return () => {
@@ -109,6 +148,14 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
   };
 
   const brainPlan = debugMeta?.brainV2ShadowPlan;
+  const qubaBrainMeta = debugMeta?.qubaBrainProfile ? debugMeta : brainMeta;
+  const qubaBrainProfile = qubaBrainMeta?.qubaBrainProfile;
+  const qubaBrainDiagnostics = qubaBrainProfile?.diagnostics;
+  const qubaRolloutMode = qubaBrainMeta?.qubaBrainRolloutMode || qubaBrainProfile?.rollout?.mode;
+  const qubaCapabilities: string[] = Array.isArray(qubaBrainDiagnostics?.capabilities) ? qubaBrainDiagnostics.capabilities : [];
+  const qubaWarnings: string[] = Array.isArray(qubaBrainDiagnostics?.warnings) ? qubaBrainDiagnostics.warnings : [];
+  const qubaMissingSetup: string[] = Array.isArray(qubaBrainDiagnostics?.missingSetup) ? qubaBrainDiagnostics.missingSetup : [];
+  const qubaSetupHealthy = qubaMissingSetup.length === 0;
   const renderCompactList = (items?: string[], emptyLabel = "Yok") => {
     const safeItems = Array.isArray(items) ? items.filter(Boolean).slice(0, 6) : [];
     if (safeItems.length === 0) {
@@ -155,6 +202,78 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt }: B
         <p className="leading-relaxed">
           <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve asistan araçları dry-run çalıştırılır. <span className="opacity-75">Yanıt gecikmesi canlıya yakın simüle edilir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.</span>
         </p>
+      </div>
+
+      {/* Quba Brain Setup Health */}
+      <div className="px-5 py-3 bg-white border-b space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
+            <ListChecks className="w-4 h-4" style={{ color: qubaSetupHealthy ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }} />
+            <span>Brain Kurulum Sağlığı</span>
+            {qubaRolloutMode && (
+              <span
+                className="px-1.5 py-0.5 rounded text-[9px] uppercase"
+                style={{
+                  backgroundColor: qubaRolloutMode === "active" ? "rgba(34,197,94,0.10)" : "rgba(59,130,246,0.10)",
+                  color: qubaRolloutMode === "active" ? "var(--q-green, #22c55e)" : "var(--q-blue, #007aff)",
+                }}
+              >
+                {qubaRolloutMode}
+              </span>
+            )}
+          </div>
+          {brainDiagnosticsLoading && (
+            <span className="flex items-center gap-1 text-[10px] text-gray-400">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Kontrol ediliyor
+            </span>
+          )}
+        </div>
+
+        {brainDiagnosticsError ? (
+          <div className="text-[11px] text-red-500 bg-red-50 border rounded-lg px-3 py-2" style={{ borderColor: "rgba(239,68,68,0.2)" }}>
+            {brainDiagnosticsError}
+          </div>
+        ) : qubaBrainProfile ? (
+          <>
+            <div className="grid grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+                <div className="font-bold text-gray-400 mb-0.5">SEKTÖR</div>
+                <div className="font-semibold text-gray-700">{qubaBrainProfile.industry || "Belirsiz"}</div>
+              </div>
+              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+                <div className="font-bold text-gray-400 mb-0.5">KURUM</div>
+                <div className="font-semibold text-gray-700 truncate">{qubaBrainProfile.identity?.organizationName || "Eksik"}</div>
+              </div>
+              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+                <div className="font-bold text-gray-400 mb-0.5">DOKTOR LİSTESİ</div>
+                <div className="font-semibold text-gray-700">{qubaBrainProfile.knowledge?.doctorDirectoryAvailable ? "Var" : "Yok / algılanmadı"}</div>
+              </div>
+              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+                <div className="font-bold text-gray-400 mb-0.5">CANLI DİREKTİF</div>
+                <div className="font-semibold text-gray-700">{qubaBrainProfile.rollout?.liveDirectiveEnabled ? "Açık" : "Kapalı"}</div>
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] font-bold text-gray-400 mb-1">YETENEKLER</div>
+              {renderCompactList(qubaCapabilities, "Henüz algılanmadı")}
+            </div>
+            {(qubaMissingSetup.length > 0 || qubaWarnings.length > 0) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div>
+                  <div className="text-[9px] font-bold text-gray-400 mb-1">EKSİK KURULUM</div>
+                  {renderCompactList(qubaMissingSetup)}
+                </div>
+                <div>
+                  <div className="text-[9px] font-bold text-gray-400 mb-1">UYARILAR</div>
+                  {renderCompactList(qubaWarnings)}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-[11px] text-gray-400">Brain profili henüz yüklenmedi.</p>
+        )}
       </div>
 
       {/* Chat Messages Log */}
