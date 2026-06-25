@@ -466,6 +466,55 @@ function applyPriceQuestionGuard(text: string, ctx: FinalOutboundAuditCtx): { te
   return { text: result, rewrote };
 }
 
+function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
+  const inbound = (ctx.inboundText || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase();
+  const cleanText = (text || '').trim();
+  const isGenericEscape =
+    /size\s+sa[ğg]l[ıi]k\s+talebinizle\s+ilgili\s+yard[ıi]mc[ıi]\s+olay[ıi]m\.\s*hangi\s+konuda\s+bilgi\s+almak\s+istiyorsunuz\??/i.test(cleanText) ||
+    /hangi\s+konuda\s+bilgi\s+almak\s+istedi[ğg]inizi\s+iletebilirsiniz\??/i.test(cleanText) ||
+    /^hangi\s+konuda\s+yard[ıi]mc[ıi]\s+olay[ıi]m\??$/i.test(cleanText);
+
+  if (!isGenericEscape) {
+    return { text, rewrote: false };
+  }
+
+  if (/\b(?:doktor|hekim|hoca|uzman|kadronuz|doktorunuzun|doktorunun)\b.*\b(?:isim|ismi|ismini|ad[ıi]|kim|kimler|liste|ara[şs]t[ıi]r)|\b(?:isim|ad[ıi])\s+s[öo]yle|\bara[şs]t[ıi]raca[ğg][ıi]m|\bara[şs]t[ıi]racam/i.test(inbound)) {
+    return {
+      text: 'Doktor isimlerini öğrenmek istediğinizi görüyorum. Doğrulanmış hekim listesi varsa isimleri paylaşabilirim; hekimler hakkında kişisel başarı kıyaslaması yapamam.',
+      rewrote: true,
+    };
+  }
+
+  if (/\b(?:konaklama|kalacak\s+yer|otel|misafirhane|nerede\s+kal|accommodation|stay|unterkunft)\b/i.test(inbound)) {
+    return {
+      text: 'Konaklama tarafının sizin için önemli olduğunu görüyorum. Hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda ekibimiz danışmanlık yapabilir; garanti veya rezervasyon sözü veremem.',
+      rewrote: true,
+    };
+  }
+
+  if (/\b(?:g[üu]ven|inanmad[ıi]m|bot|robot|anlam[ıi]yor|anlamad[ıi]n|emin\s+olam[ıi]yorum)\b/i.test(inbound)) {
+    return {
+      text: 'Haklısınız, cevabım yeterince net olmadı. Sorunuzu tekrar başa almadan buradan toparlayayım; hangi bilgiyi netleştirmemi istersiniz?',
+      rewrote: true,
+    };
+  }
+
+  if (/\b(?:fiyat|[üu]cret|tutar|[öo]deme|ne\s+kadar|ta\s*12|ta12)\b/i.test(inbound)) {
+    return {
+      text: 'Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.',
+      rewrote: true,
+    };
+  }
+
+  return {
+    text: 'Mesajınızı aldım. Aynı yerden devam edelim; hangi bilgiyi netleştireyim?',
+    rewrote: true,
+  };
+}
+
 export class FinalOutboundBodyAuditor {
   /**
    * Apply mandatory last-mile chain to the final body before 360dialog send.
@@ -557,6 +606,12 @@ export class FinalOutboundBodyAuditor {
       const priceGuard = applyPriceQuestionGuard(result, ctx);
       if (priceGuard.rewrote) {
         result = priceGuard.text;
+        rewrote = true;
+      }
+
+      const genericEscape = applyGenericEscapeRecovery(result, ctx);
+      if (genericEscape.rewrote) {
+        result = genericEscape.text;
         rewrote = true;
       }
 

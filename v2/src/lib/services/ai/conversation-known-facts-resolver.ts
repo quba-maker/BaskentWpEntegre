@@ -41,7 +41,7 @@ const COUNTRY_ALIASES: Array<{ label: string; aliases: string[] }> = [
   { label: 'Türkiye', aliases: ['türkiye', 'turkiye', 'turkiyede', 'türkiyede'] },
   { label: 'Almanya', aliases: ['almanya', 'almanyada', 'almanyadayım', 'almanyadayim', 'germany', 'deutschland'] },
   { label: 'Kazakistan', aliases: ['kazakistan', 'kazakistandan', 'kazakhstan'] },
-  { label: 'Özbekistan', aliases: ['özbekistan', 'ozbekistan', "o'zbekiston", 'uzbekistan'] },
+  { label: 'Özbekistan', aliases: ['özbekistan', 'ozbekistan', 'özbeksitan', 'ozbeksitan', "o'zbekiston", 'uzbekiston', 'uzbekistan'] },
   { label: 'Hollanda', aliases: ['hollanda', 'netherlands'] },
   { label: 'Fransa', aliases: ['fransa', 'france'] },
   { label: 'Belçika', aliases: ['belçika', 'belcika', 'belgium'] },
@@ -530,6 +530,10 @@ export class ConversationKnownFactsResolver {
       'Kardiyoloji',
       'Dahiliye',
       'Ortopedi',
+      'Dermatoloji',
+      'Kadın Hastalıkları ve Doğum',
+      'Kadın Doğum',
+      'Tüp Bebek',
       'Organ Nakli Merkezi',
       'Plastik ve Rekonstrüktif Cerrahi'
     ];

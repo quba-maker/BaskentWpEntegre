@@ -132,6 +132,32 @@ export class ContextAwareSafeFallbackResolver {
     return !alreadyAsked && this.weakLanguageSignalScore(inboundText, history) >= 2;
   }
 
+  private static resolveDepartmentCandidates(params: {
+    orchestratorDept?: string | null;
+    unifiedContext?: any;
+  }): string[] {
+    const ctx = params.unifiedContext || {};
+    const authoritativeDept = typeof params.orchestratorDept === 'string' && params.orchestratorDept.trim()
+      ? params.orchestratorDept.trim()
+      : null;
+    const values = [
+      authoritativeDept,
+      authoritativeDept ? null : ctx?.opportunity?.department,
+      ctx?.conversation?.department,
+      ctx?.latestForm?.data?.onerilen_bolum,
+      ctx?.latestForm?.data?.department,
+    ];
+
+    const depts: string[] = [];
+    for (const value of values) {
+      if (typeof value !== 'string') continue;
+      const clean = value.trim();
+      if (!clean || depts.some(d => d.toLocaleLowerCase('tr-TR') === clean.toLocaleLowerCase('tr-TR'))) continue;
+      depts.push(clean);
+    }
+    return depts;
+  }
+
   private static resolveArabic(params: DeterministicFallbackParams): DeterministicFallbackResult {
     const { inboundText, brain, identityConfig, unifiedContext } = params;
     const orchestratorDept = params.resolvedActiveDepartment || null;
@@ -470,6 +496,53 @@ export class ContextAwareSafeFallbackResolver {
         finalPath: 'what_turkish_bypass',
         detectedIntent
       };
+    }
+
+    const isStructuredFormPayload = /(?:Full\s+name|Phone\s+number|WhatsApp\s+number|Şikayetiniz\s+Nedir|Sikayetiniz\s+Nedir|Hangi\s+[üu]lkede\s+ya[şs][ıi]yorsunuz|Date\s+of\s+birth|Türkiye'ye\s*\(Konya'ya\)\s+tedavi)/i.test(inboundText || '');
+    if (isHealthcare && !isStructuredFormPayload) {
+      const {
+        DoctorNamesPolicy,
+        isDoctorNameRequestText,
+        isDoctorProfileQuestionText,
+      } = require('./doctor-names-policy');
+      const { DoctorDirectoryResolver } = require('./doctor-directory-resolver');
+
+      const departments = ContextAwareSafeFallbackResolver.resolveDepartmentCandidates({
+        orchestratorDept,
+        unifiedContext,
+      });
+      const hasPreviousDoctorAsk = history.some((m: any) =>
+        m?.role === 'user' && isDoctorNameRequestText(String(m.content || ''), false)
+      );
+      const allVerifiedDoctors = DoctorDirectoryResolver.getDoctors(brain);
+
+      if (isDoctorProfileQuestionText(inboundText, allVerifiedDoctors)) {
+        const profile = DoctorNamesPolicy.resolveDoctorProfile(brain, inboundText, departments, lang);
+        if (profile) {
+          return {
+            text: profile.text,
+            sector: resolvedIndustry,
+            hasFormContext,
+            hasComplaint,
+            finalPath: 'doctor_profile_fallback_verified',
+            detectedIntent: 'doctor_lookup' as any,
+          };
+        }
+      }
+
+      if (isDoctorNameRequestText(inboundText, hasPreviousDoctorAsk)) {
+        const doctorResult = DoctorNamesPolicy.resolve(brain, departments, hasPreviousDoctorAsk, lang);
+        return {
+          text: doctorResult.text,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: doctorResult.mode === 'verified_list'
+            ? 'doctor_names_fallback_verified_list'
+            : 'doctor_lookup_bypass',
+          detectedIntent: 'doctor_lookup' as any,
+        };
+      }
     }
 
     if (detectedIntent === 'arrival_date_answer') {

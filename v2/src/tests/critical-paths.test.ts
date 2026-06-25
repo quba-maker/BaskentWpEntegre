@@ -13844,6 +13844,120 @@ test("Başkent v81 T103: orchestrator disables doctor lookup gates for structure
   assert(code.includes("const isDoctorNamesRequest = !isStructuredFormPayload"), "Doctor name request must ignore structured form payloads");
 });
 
+test("Başkent v82 T104: fallback answers doctor name request from verified directory, not reset escape", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v82-t104",
+    "Sen Rüya'sın.",
+    {
+      industry: "healthcare",
+      doctors: `Dermatoloji:
+- Uzm. Dr. Selin YILMAZ
+- Uzm. Dr. Burak DEMİR`
+    }
+  );
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "Dermatoloji doktorunun ismini öğrenmek istiyorum",
+    brain,
+    identityConfig: { personaName: "Rüya", organizationName: "Başkent Üniversitesi Konya Hastanesi" },
+    unifiedContext: {
+      history: [
+        { role: "user", content: "Dermatoloji bölümünden randevu almak istiyorum" },
+        { role: "assistant", content: "Dermatoloji bölümünden destek alabilirsiniz." }
+      ],
+      conversation: { department: "Dermatoloji" }
+    },
+    resolvedActiveDepartment: "Dermatoloji",
+    replyLanguage: "tr"
+  } as any);
+
+  assert(result.text.includes("Selin YILMAZ"), result.text);
+  assert(result.text.includes("Burak DEMİR"), result.text);
+  assert(!result.text.includes("Hangi konuda bilgi almak istiyorsunuz"), result.text);
+  assert(result.finalPath.includes("doctor_names_fallback_verified_list"), result.finalPath);
+});
+
+test("Başkent v82 T105: fallback handles known doctor profile question naturally", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v82-t105",
+    "Sen Rüya'sın.",
+    {
+      industry: "healthcare",
+      doctors: `Kadın Hastalıkları ve Doğum:
+- Prof. Dr. Emel Ebru ÖZÇİMEN
+- Doç. Dr. Mehmet Ufuk CERAN`
+    }
+  );
+
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "Ufuk hoca nasıl?",
+    brain,
+    identityConfig: { personaName: "Rüya", organizationName: "Başkent Üniversitesi Konya Hastanesi" },
+    unifiedContext: {
+      history: [
+        { role: "user", content: "Kadın doğum doktorlarının ismini öğrenmek istiyorum" },
+        { role: "assistant", content: "Doç. Dr. Mehmet Ufuk CERAN bölümümüzde görev yapmaktadır." }
+      ],
+      conversation: { department: "Kadın Hastalıkları ve Doğum" }
+    },
+    resolvedActiveDepartment: "Kadın Hastalıkları ve Doğum",
+    replyLanguage: "tr"
+  } as any);
+
+  assert(result.text.includes("Mehmet Ufuk CERAN"), result.text);
+  assert(result.text.includes("kişisel yorum") || result.text.includes("başarı kıyaslaması"), result.text);
+  assert(!result.text.includes("Hangi konuda bilgi almak istiyorsunuz"), result.text);
+});
+
+test("Başkent v82 T106: final auditor recovers generic escape for doctor/accommodation questions", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const generic = "Size sağlık talebinizle ilgili yardımcı olayım. Hangi konuda bilgi almak istiyorsunuz?";
+
+  const doctor = FinalOutboundBodyAuditor.audit(generic, {
+    tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    conversationId: "v82-t106-doc",
+    workerPath: "test",
+    channel: "whatsapp",
+    replyLanguage: "tr",
+    inboundText: "Dermatoloji doktorunuzun adı ne?"
+  });
+  assert(!doctor.text.includes("Hangi konuda bilgi almak istiyorsunuz"), doctor.text);
+  assert(doctor.text.includes("Doktor isimlerini"), doctor.text);
+
+  const accommodation = FinalOutboundBodyAuditor.audit(generic, {
+    tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    conversationId: "v82-t106-lodge",
+    workerPath: "test",
+    channel: "whatsapp",
+    replyLanguage: "tr",
+    inboundText: "Diyorum ya konaklama diye, kalacak yerim yok"
+  });
+  assert(!accommodation.text.includes("Hangi konuda bilgi almak istiyorsunuz"), accommodation.text);
+  assert(accommodation.text.includes("Hastaneye yakın konaklama seçenekleri"), accommodation.text);
+});
+
+test("Başkent v82 T107: known facts tolerate country typo and remember new departments", () => {
+  const { ConversationKnownFactsResolver } = require("../lib/services/ai/conversation-known-facts-resolver");
+  const facts = ConversationKnownFactsResolver.resolve({
+    history: [
+      { role: "user", content: "Aysu ben Özbeksitanda yaşıyorum" },
+      { role: "user", content: "Kadın Doğum doktorlarının ismini öğrenmek istiyorum" }
+    ],
+    conversation: { department: "Kadın Doğum" }
+  });
+  const formatted = ConversationKnownFactsResolver.formatFacts(facts).join("\n");
+  assert(formatted.includes("Özbekistan") || formatted.includes("Özbeksitan"), formatted);
+  assert(formatted.includes("Kadın Doğum"), formatted);
+});
+
 
 async function runAllTests() {
   try {
