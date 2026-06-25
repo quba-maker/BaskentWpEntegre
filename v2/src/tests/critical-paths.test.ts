@@ -14786,6 +14786,19 @@ test("Başkent v88 T134: Bot test panel exposes Brain v2 response evaluation", (
   assert(playgroundCode.includes("brainEvaluation.score"), "Test panel should render Brain v2 score");
 });
 
+test("Başkent v88 T135: Live orchestrator writes Brain v2 shadow evaluation as non-blocking safe audit", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const orchestratorCode = fs.readFileSync(path.resolve(__dirname, "../lib/services/ai/ai-response-orchestrator.ts"), "utf-8");
+
+  assert(orchestratorCode.includes("brain_v2_shadow_eval"), "Live orchestrator should write a Brain v2 shadow audit event");
+  assert(orchestratorCode.includes("BrainV2ShadowPlanner"), "Live orchestrator should build a shadow plan");
+  assert(orchestratorCode.includes("BrainV2ResponseEvaluator"), "Live orchestrator should evaluate the final response");
+  assert(orchestratorCode.includes("if (!sandbox && conversationId && text)"), "Shadow audit should be live-only and not alter sandbox/test behavior");
+  assert(orchestratorCode.includes("catch (brainV2ShadowErr)"), "Shadow audit errors must be non-blocking");
+  assert(!orchestratorCode.includes("rawReply"), "Shadow audit must not log raw reply text");
+});
+
 
 async function runAllTests() {
   try {

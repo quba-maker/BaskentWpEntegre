@@ -2202,6 +2202,66 @@ export class AIResponseOrchestrator {
         }
       }
 
+      if (!sandbox && conversationId && text) {
+        try {
+          const { BrainV2ShadowPlanner } = await import('./brain-v2-shadow-planner');
+          const { BrainV2ResponseEvaluator } = await import('./brain-v2-response-evaluator');
+          const brainV2ShadowPlan = BrainV2ShadowPlanner.build({
+            inboundText,
+            history: history
+              .filter((message: ChatMessage) => typeof message.content === 'string')
+              .map((message: ChatMessage) => ({
+                role: message.role,
+                content: message.content as string,
+              })),
+            brain,
+            channel: params.channel,
+            now: new Date(),
+            conversation: unifiedContext?.conversation,
+            opportunity: unifiedContext?.opportunity,
+            profile: unifiedContext?.profile,
+            latestForm: unifiedContext?.latestForm,
+          });
+          const brainV2ResponseEvaluation = BrainV2ResponseEvaluator.evaluate(
+            text,
+            brainV2ShadowPlan,
+            inboundText
+          );
+          const shouldLogBrainV2Shadow = brainV2ResponseEvaluation.status !== 'pass'
+            || brainV2ShadowPlan.detectedIntents.length > 0
+            || brainV2ShadowPlan.riskFlags.length > 0;
+
+          if (shouldLogBrainV2Shadow) {
+            await settingsDb.executeSafe({
+              text: `INSERT INTO ai_audit_logs (tenant_id, conversation_id, action, reasoning_summary, result_summary)
+                     VALUES ($1, $2, $3, $4, $5)`,
+              values: [
+                tenantId,
+                conversationId,
+                'brain_v2_shadow_eval',
+                `Brain v2 shadow status: ${brainV2ResponseEvaluation.status}, score: ${brainV2ResponseEvaluation.score}`,
+                JSON.stringify({
+                  version: brainV2ResponseEvaluation.version,
+                  score: brainV2ResponseEvaluation.score,
+                  status: brainV2ResponseEvaluation.status,
+                  contactMode: brainV2ShadowPlan.contactMode,
+                  detectedIntents: brainV2ShadowPlan.detectedIntents.slice(0, 12),
+                  mustAnswer: brainV2ShadowPlan.mustAnswer.slice(0, 12),
+                  riskFlags: brainV2ShadowPlan.riskFlags.slice(0, 12),
+                  missingAnswers: brainV2ResponseEvaluation.missingAnswers.slice(0, 12),
+                  forbiddenHits: brainV2ResponseEvaluation.forbiddenHits.slice(0, 12),
+                  qualityWarnings: brainV2ResponseEvaluation.qualityWarnings.slice(0, 12),
+                  workerPath,
+                  timestamp: new Date().toISOString(),
+                })
+              ]
+            });
+          }
+        } catch (brainV2ShadowErr) {
+          console.error('[AIResponseOrchestrator] Brain v2 shadow evaluation failed:', brainV2ShadowErr);
+        }
+      }
+
       if (conversationId) {
         console.log(JSON.stringify({
           tag: "AI_RESPONSE_ORCHESTRATOR_COMPLETED",
