@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { FlaskConical, Send, Loader2, Bot, Trash2, ShieldCheck, ListChecks, FileText } from "lucide-react";
+import { FlaskConical, Send, Loader2, Bot, Trash2, ShieldCheck, ListChecks, FileText, ChevronDown } from "lucide-react";
 import { type BotChannel } from "./shared";
 
 // ==========================================
@@ -37,6 +37,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const [sandboxFormEnabled, setSandboxFormEnabled] = useState(false);
   const [sandboxFormName, setSandboxFormName] = useState("Sandbox Test Formu");
   const [sandboxFormText, setSandboxFormText] = useState("");
+  const [showBrainDetails, setShowBrainDetails] = useState(false);
   const [brainDiagnosticsLoading, setBrainDiagnosticsLoading] = useState(false);
   const [brainDiagnosticsError, setBrainDiagnosticsError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -59,6 +60,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
     setSandboxFormEnabled(false);
     setSandboxFormName("Sandbox Test Formu");
     setSandboxFormText("");
+    setShowBrainDetails(false);
     setBrainDiagnosticsError(null);
     setWaitingForDelay(false);
     setTesting(false);
@@ -219,9 +221,9 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   };
 
   return (
-    <div className="mt-8 mb-8 flex flex-col h-[650px] border rounded-2xl bg-[#f8f9fa] overflow-hidden" style={{ borderColor: "var(--q-border-default)" }}>
+    <div className="mt-8 mb-8 flex min-h-0 h-[650px] flex-col border rounded-2xl bg-[#f8f9fa] overflow-hidden" style={{ borderColor: "var(--q-border-default)" }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b bg-white" style={{ borderColor: "var(--q-border-default)" }}>
+      <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b bg-white" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="flex items-center gap-2">
           <FlaskConical className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
           <h2 className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Bot Test Alanı</h2>
@@ -239,7 +241,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       {/* Sandbox Alert Info Banner */}
-      <div className="px-5 py-2.5 bg-blue-50/50 border-b flex items-start gap-2 text-[11px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
+      <div className="shrink-0 px-5 py-2.5 bg-blue-50/50 border-b flex items-start gap-2 text-[11px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
         <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
         <p className="leading-relaxed">
           <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve asistan araçları dry-run çalıştırılır. <span className="opacity-75">Yanıt gecikmesi canlıya yakın simüle edilir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.</span>
@@ -247,7 +249,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       {/* Live-like form context */}
-      <div className="px-5 py-3 bg-white border-b space-y-3" style={{ borderColor: "var(--q-border-default)" }}>
+      <div className="shrink-0 px-5 py-3 bg-white border-b space-y-3" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="flex flex-col gap-2">
           <div className="flex items-start gap-2">
             <FileText className="w-4 h-4" style={{ color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-secondary)" }} />
@@ -308,7 +310,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       {/* Quba Brain Setup Health */}
-      <div className="px-5 py-3 bg-white border-b space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
+      <div className="shrink-0 px-5 py-3 bg-white border-b space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
             <ListChecks className="w-4 h-4" style={{ color: qubaSetupHealthy ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }} />
@@ -336,19 +338,32 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
               </span>
             )}
           </div>
-          {brainDiagnosticsLoading && (
-            <span className="flex items-center gap-1 text-[10px] text-gray-400">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              Kontrol ediliyor
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {brainDiagnosticsLoading && (
+              <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Kontrol ediliyor
+              </span>
+            )}
+            {(qubaBrainProfile || brainDiagnosticsError) && (
+              <button
+                type="button"
+                onClick={() => setShowBrainDetails(prev => !prev)}
+                className="flex items-center gap-1 rounded-full border px-2 py-1 text-[9px] font-bold text-gray-500 hover:bg-gray-50"
+                style={{ borderColor: "var(--q-border-default)" }}
+              >
+                {showBrainDetails ? "Detayları Gizle" : "Detayları Göster"}
+                <ChevronDown className={`h-3 w-3 transition-transform ${showBrainDetails ? "rotate-180" : ""}`} />
+              </button>
+            )}
+          </div>
         </div>
 
-        {brainDiagnosticsError ? (
+        {brainDiagnosticsError && showBrainDetails ? (
           <div className="text-[11px] text-red-500 bg-red-50 border rounded-lg px-3 py-2" style={{ borderColor: "rgba(239,68,68,0.2)" }}>
             {brainDiagnosticsError}
           </div>
-        ) : qubaBrainProfile ? (
+        ) : qubaBrainProfile && showBrainDetails ? (
           <>
             <div className="grid grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
