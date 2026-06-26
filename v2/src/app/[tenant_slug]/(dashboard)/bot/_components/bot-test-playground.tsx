@@ -241,6 +241,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
         )}
       </div>
 
+      <div className="shrink-0 max-h-[360px] overflow-y-auto">
       {/* Sandbox Alert Info Banner */}
       <div className="shrink-0 px-5 py-2.5 bg-blue-50/50 border-b flex items-start gap-2 text-[11px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
         <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
@@ -439,6 +440,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
         ) : (
           <p className="text-[11px] text-gray-400">Brain profili henüz yüklenmedi.</p>
         )}
+      </div>
       </div>
 
       {/* Chat Messages Log */}
