@@ -262,6 +262,7 @@ export default function BotManagementPage() {
   const [activeTab, setActiveTab] = useState<DetailTab>('prompt');
 
   const selectedBot = bots.find(b => b.id === selectedBotId) || bots[0] || null;
+  const selectedBotTestChannel = selectedBot?.channels?.find(channel => channel.hasCredentials || channel.hasPromptBinding) || selectedBot?.channels?.[0] || null;
 
   // ---- Data Loading ----
   const loadBots = useCallback(async () => {
@@ -435,7 +436,15 @@ export default function BotManagementPage() {
           </div>
           <div className="min-w-0 xl:sticky xl:top-4 xl:self-start">
             <BotTestPlayground
-              activeChannel={{ id: selectedBot.id, label: selectedBot.displayName, icon: resolveIcon(selectedBot.icon), promptKey: '', activeKey: '', color: selectedBot.color || '#6366f1', description: '' }}
+              activeChannel={{
+                id: selectedBotTestChannel?.id || '',
+                label: selectedBotTestChannel?.name || selectedBot.displayName,
+                icon: resolveIcon(selectedBot.icon),
+                promptKey: '',
+                activeKey: '',
+                color: selectedBot.color || '#6366f1',
+                description: selectedBotTestChannel ? `${selectedBotTestChannel.provider} test kanalı` : 'Kanal bağlanmadan sandbox test',
+              }}
               botGroupId={selectedBot.id}
               onTestPrompt={testBotPrompt}
               onGetBrainDiagnostics={getBotBrainDiagnostics}

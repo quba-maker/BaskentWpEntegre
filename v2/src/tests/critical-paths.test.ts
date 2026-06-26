@@ -14927,6 +14927,21 @@ test("Başkent v88 T134e: Sandbox can test pure SaaS Brain separately from legac
   assert(playgroundCode.includes("sandboxBrainMode"), "Panel should pass the selected mode into the sandbox action");
 });
 
+test("Başkent v88 T134f: Bot test uses a real channel id and UI exposes legacy vs SaaS Brain setup", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const pageCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/page.tsx"), "utf-8");
+  const promptTabCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-prompt-tab.tsx"), "utf-8");
+
+  assert(pageCode.includes("selectedBotTestChannel"), "Bot page should resolve an actual channel for sandbox tests");
+  assert(pageCode.includes("id: selectedBotTestChannel?.id || ''"), "Sandbox should not pass bot group id as channel id");
+  assert(promptTabCode.includes("Mevcut Sistem"), "Prompt UI should expose the legacy/current system path");
+  assert(promptTabCode.includes("Yeni SaaS V2 Brain"), "Prompt UI should expose the new segmented SaaS Brain path");
+  assert(promptTabCode.includes("applyBaskentBrainDraft"), "Prompt UI should provide a Başkent Brain draft filler");
+  assert(promptTabCode.includes("Başkent alanlarını doldur"), "Prompt UI should let admins populate structured Brain fields");
+  assert(promptTabCode.includes("buildBaskentHealthcareServiceCatalogDraft"), "Başkent draft should include a structured service catalog");
+});
+
 test("Başkent v88 T135: Live orchestrator writes Brain v2 shadow evaluation as non-blocking safe audit", () => {
   const fs = require("fs");
   const path = require("path");

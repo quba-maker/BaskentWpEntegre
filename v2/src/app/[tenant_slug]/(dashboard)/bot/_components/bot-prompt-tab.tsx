@@ -103,6 +103,44 @@ function buildPrimaryAction(action: string) {
   };
 }
 
+function buildBaskentHealthcareServiceCatalogDraft() {
+  return [
+    "Bel fıtığı / Boyun fıtığı | bel fıtığı, boyun fıtığı, omurga, fıtık | Uzaktan net değerlendirme yapılmaz; ilgili uzman muayenesi ve gerekirse tetkik gerekir.",
+    "Kardiyoloji | kalp ağrısı, kalp rahatsızlığı, nefes darlığı, merdiven çıkarken zorlanma | Acil belirti varsa acile yönlendir; diğer durumlarda kardiyoloji değerlendirmesi gerekir.",
+    "Check-up | check up, genel kontrol, genel muayene | Kadın/erkek paket ayrımını ve geliş dönemini doğal şekilde netleştir.",
+    "Dermatoloji | egzama, saç egzaması, cildiye, deri | Doğrulanmış hekim adı varsa paylaş; hekim hakkında başarı/kıyas yorumu yapma.",
+    "Kadın Hastalıkları ve Doğum | kadın doğum, gebelik, tekrar anne olmak, doğurganlık | Net tedavi sözü verme; uzman değerlendirmesi gerektiğini söyle.",
+    "Ortopedi | diz ağrısı, protez, yürüme zorluğu, merdiven | Protez/ameliyat kararı uzaktan verilmez; muayene ve görüntüleme ile değerlendirilir.",
+    "Konaklama / ulaşım | konaklama, kalacak yer, transfer, ulaşım | Hastaneye yakın seçenekler ve anlaşmalı oteller konusunda danışmanlık yapılabilir; garanti veya rezervasyon sözü verme.",
+    "Fiyat / ödeme | fiyat, ücret, paket fiyatı, TA12, ödeme | Fiyat bilgisi paylaşılmaz; fiyat hastanedeki değerlendirme ve planlanacak sürece göre değişir.",
+  ].join("\n");
+}
+
+function buildBaskentAvoidPhrasesDraft() {
+  return [
+    "Size sağlık talebinizle ilgili yardımcı olayım. Hangi konuda bilgi almak istiyorsunuz?",
+    "Bu konuda isimleri yanlış vermek istemem",
+    "Görüşme sırasında en uygun uzman bilgisi netleştirilecektir",
+    "İlerleyen dönemde Türkiye'ye/Konya'ya gelme ihtimaliniz olur mu?",
+    "Sizin için uygun görünüyor",
+    "Konuşma geçmişimizdeki bilgileri dikkatle takip ediyorum",
+    "Bey",
+    "Hanım",
+    "Sayın",
+    "Bayan",
+    "ön görüşme",
+  ].join("\n");
+}
+
+function buildBaskentPreferredClosersDraft() {
+  return [
+    "Bu konuda en çok hangi kısmı netleştirmek istersiniz?",
+    "İsterseniz önce aklınızdaki soruyu buradan yanıtlayayım.",
+    "Geliş planınız netleştiyse günü birlikte netleştirebiliriz.",
+    "Bu bilgi karar vermeniz için yeterli oldu mu, başka bir noktayı da açıklayayım mı?",
+  ].join("\n");
+}
+
 export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
   const [prompt, setPrompt] = useState(bot.prompt?.text || "");
   const [prices, setPrices] = useState(bot.prompt?.knowledgePrices || "");
@@ -191,6 +229,20 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
     setTimeout(() => setSaved(false), 2000);
   }
 
+  function applyBaskentBrainDraft() {
+    setIndustry("healthcare");
+    setRolloutMode("sandbox");
+    setOrganizationName("Başkent Üniversitesi Konya Hastanesi");
+    setAssistantName("Rüya");
+    setDefaultLanguage("tr");
+    setSupportedLanguages("tr, en, de, nl, fr, ru, uz, ar");
+    setTonePreset("warm_corporate");
+    setPrimaryAction("schedule_callback");
+    setServicesText(buildBaskentHealthcareServiceCatalogDraft());
+    setAvoidPhrases(buildBaskentAvoidPhrasesDraft());
+    setPreferredClosers(buildBaskentPreferredClosersDraft());
+  }
+
   const rolloutCards = [
     {
       value: "disabled",
@@ -252,6 +304,45 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
             >
               Aktif mod: {selectedRollout.title}
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setRolloutMode("disabled")}
+              className="text-left rounded-2xl border p-4 transition-all hover:bg-gray-50"
+              style={{
+                borderColor: rolloutMode === "disabled" ? "var(--q-blue, #007aff)" : "var(--q-border-default)",
+                backgroundColor: rolloutMode === "disabled" ? "rgba(0,122,255,0.06)" : "#fff",
+                boxShadow: rolloutMode === "disabled" ? "0 0 0 1px rgba(0,122,255,0.12)" : "none",
+              }}
+            >
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Mevcut Sistem</span>
+                <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-gray-100" style={{ color: "var(--q-text-secondary)" }}>Canlı çekirdek</span>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
+                Eski Sistem Prompt ve bilgi bankasıyla çalışır. Başkent’in mevcut canlı düzenidir.
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setRolloutMode(rolloutMode === "disabled" ? "sandbox" : rolloutMode)}
+              className="text-left rounded-2xl border p-4 transition-all hover:bg-gray-50"
+              style={{
+                borderColor: rolloutMode !== "disabled" ? "var(--q-green, #22c55e)" : "var(--q-border-default)",
+                backgroundColor: rolloutMode !== "disabled" ? "rgba(34,197,94,0.08)" : "#fff",
+                boxShadow: rolloutMode !== "disabled" ? "0 0 0 1px rgba(34,197,94,0.12)" : "none",
+              }}
+            >
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Yeni SaaS V2 Brain</span>
+                <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: "rgba(34,197,94,0.10)", color: "var(--q-green, #22c55e)" }}>Parçalı test</span>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
+                Firma davranışı alanlara bölünür. Önce sandbox, sonra gölge izleme, en son onayla canlıya alınır.
+              </p>
+            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -381,7 +472,7 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
         className="rounded-2xl border p-5"
         style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}
       >
-        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <SlidersHorizontal className="w-4 h-4" style={{ color: "var(--q-text-secondary)" }} />
             <div>
@@ -402,6 +493,25 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
           >
             {rolloutMode}
           </span>
+        </div>
+
+        <div className="mb-4 rounded-xl border p-3 bg-green-50/40" style={{ borderColor: "rgba(34,197,94,0.20)" }}>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold" style={{ color: "var(--q-text-primary)" }}>Başkent V2 Brain taslağı</div>
+              <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
+                Eski prompttaki ana davranışı SaaS alanlarına ayırır. Canlıya almaz; önce sağ panelde test edilir.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={applyBaskentBrainDraft}
+              className="px-3 py-2 rounded-xl text-xs font-bold text-white"
+              style={{ backgroundColor: "var(--q-green, #22c55e)" }}
+            >
+              Başkent alanlarını doldur
+            </button>
+          </div>
         </div>
 
         <div className="mb-4 rounded-xl border px-3 py-2 flex items-start gap-2 bg-blue-50/50" style={{ borderColor: "rgba(59,130,246,0.18)" }}>
