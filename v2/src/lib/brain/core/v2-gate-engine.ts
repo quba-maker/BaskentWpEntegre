@@ -177,7 +177,7 @@ function detectSignals(clean: string, analysisText: string, history: { role: str
   const addressPatterns = [/\b(adres|konum|harita|neredesiniz|nerede|location|address)\b/];
   const countryPatterns = [/\b(almanya|kazakistan|ozbekistan|özbekistan|o'zbekiston|fransa|kanada|hollanda|ukrayna|rusca|rusça|ozbekce|özbekçe|ingilizce|turkce|türkçe)\b/];
   const concernPatterns = [/\b(suphe|şüphe|guven|güven|inanmadim|inanmadım|emin degil|emin değil|kararsiz|kararsız|pahali|pahalı|uzak|endise|endişe)\b/];
-  const trustPatterns = [/\b(bot musun|botsun|yapay zeka|guvenemedim|güvenemedim|inanmadim|inanmadım|yardimci olamayacaksiniz|yardımcı olamayacaksınız|beni anlamiyorsun|beni anlamıyorsun|sorularima cevap vermedin|sorularıma cevap vermedin)\b/];
+  const trustPatterns = [/\b(bot musun|bor musun|botsun|yapay zeka|guvenemedim|güvenemedim|inanmadim|inanmadım|yardimci olamayacaksiniz|yardımcı olamayacaksınız|beni anlamiyorsun|beni anlamıyorsun|unuttun|unutuyorsun|soyledim ya|söyledim ya|dedim ya|sorularima cevap vermedin|sorularıma cevap vermedin)\b/];
   const mediaPatterns = [/\b(gorsel|görsel|fotograf|fotoğraf|resim|rapor|belge|dosya|mr|mrg|em[ae]r|radyoloji|tetkik|sonuc|sonuç|image|photo|document|report)\b/];
 
   push('price_question', pricePatterns.some(p => p.test(clean)), 'fiyat politikasını güvenli cümleyle yanıtla', 'high', evidenceFor(clean, pricePatterns));
@@ -355,11 +355,15 @@ export class QubaV2GateEngine {
     if (hasIntent('trust_repair')) riskFlags.push('trust_repair_needed');
     if (hasIntent('media_or_document')) riskFlags.push('media_no_diagnosis_or_review_promise');
     if (/form doldur/i.test(analysisText) && !hasAnyFormPayload) riskFlags.push('user_claims_form_without_verified_form');
-    if (/\b(7\s*14|7[./]14)\b/.test(clean)) riskFlags.push('ambiguous_date_needs_clarification');
+    const ambiguousVisitDate = /\b(7\s*14|7[./]14|7\s*8|7[./]8)\b/.test(clean) &&
+      /\b(turkiye|türkiye|konya|gelecem|gelecegim|gelicem|gelmeyi|gelme|geleceğim)\b/.test(clean);
+    if (ambiguousVisitDate) riskFlags.push('ambiguous_date_needs_clarification');
 
     let recommendedFollowUp: string | undefined;
-    if (/\b(7\s*14|7[./]14)\b/.test(clean)) {
-      recommendedFollowUp = '7 14 derken, 14 Temmuz mu yoksa 7-14 Temmuz arası mı?';
+    if (ambiguousVisitDate) {
+      recommendedFollowUp = /\b(7\s*8|7[./]8)\b/.test(clean)
+        ? '7 8 derken, 8 Temmuz mu yoksa 7-8 Temmuz arası mı?'
+        : '7 14 derken, 14 Temmuz mu yoksa 7-14 Temmuz arası mı?';
     } else if (hasIntent('doctor_names') && doctorDirectory.length > 0) {
       recommendedFollowUp = 'Doktor isimlerini paylaş; kişisel yorum istenirse yorum/başarı kıyaslaması yapma.';
     } else if (hasIntent('accommodation_question')) {

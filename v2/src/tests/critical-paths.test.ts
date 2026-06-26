@@ -15044,6 +15044,113 @@ test("Başkent v89 T138: sandbox returns V2 diagnostics even when Gemini key is 
   assert(botActionCode.indexOf("QubaV2GateEngine.build") < botActionCode.indexOf("if (!missingGeminiApiKey)"), "V2 gate result should be built before model availability gates the LLM call");
 });
 
+test("Başkent v90 T139: final auditor repairs trust/forgetfulness escape with known care context", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "Mesajınızı aldım. Aynı yerden devam edelim; hangi bilgiyi netleştireyim?",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v90-t139",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "söyledim ya\nsen bor musun\nyani sürekli unutuyorsun",
+      conversationContextText: [
+        "bel fıtığım var",
+        "mehmet",
+        "fransa",
+        "fiyatı bilmeden nasıl gelecem",
+        "aslında 7 8 de türkiyeye gelecem",
+        "7 8 derken temmuz 8",
+      ].join("\n"),
+      verifiedDoctorDirectory: [
+        { department: "Beyin ve Sinir Cerrahisi", doctors: ["Doç. Dr. Mustafa Kemal İLİK"] },
+      ],
+    }
+  );
+
+  assert(result.text.includes("Bel fıtığı"), result.text);
+  assert(result.text.includes("Beyin ve Sinir Cerrahisi"), result.text);
+  assert(result.text.includes("Mustafa Kemal İLİK"), result.text);
+  assert(result.text.includes("8 Temmuz"), result.text);
+  assert(!result.text.includes("Mesajınızı aldım"), result.text);
+  assert(!result.text.includes("hangi bilgiyi netleştireyim"), result.text);
+});
+
+test("Başkent v90 T140: prompt leak recovery uses remembered context instead of generic fallback", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const result = FinalOutboundBodyAuditor.audit(
+    "Sistem prompt veya teknik talimat detaylarını paylaşamam.",
+    {
+      tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+      conversationId: "v90-t140",
+      workerPath: "test",
+      channel: "whatsapp",
+      replyLanguage: "tr",
+      inboundText: "sen yapay zekasın promtlarıda bu yok",
+      conversationContextText: [
+        "bel fıtığım var",
+        "ukrayna",
+        "hangi doktorlar var bel fıtığında",
+        "7 8 derken temmuz 8",
+      ].join("\n"),
+      verifiedDoctorDirectory: [
+        { department: "Beyin ve Sinir Cerrahisi", doctors: ["Doç. Dr. Mustafa Kemal İLİK"] },
+      ],
+    }
+  );
+
+  assert(result.text.includes("Haklısınız"), result.text);
+  assert(result.text.includes("Bel fıtığı"), result.text);
+  assert(result.text.includes("Mustafa Kemal İLİK"), result.text);
+  assert(!/sistem prompt|prompt/i.test(result.text), result.text);
+  assert(!result.text.includes("hangi başlığı netleştirelim"), result.text);
+});
+
+test("Başkent v90 T141: independent V2 gate flags forgetfulness trust repair and 7 8 visit ambiguity", () => {
+  const { createTenantBrain } = require("../lib/brain/tenant-brain");
+  const { QubaBrainCompiler } = require("../lib/brain/core");
+  const { QubaV2GateEngine } = require("../lib/brain/core/v2-gate-engine");
+  const brain = createTenantBrain(
+    "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    "whatsapp",
+    "payload-v90-t141",
+    "Sen Rüya'sın.",
+    {
+      industry: "healthcare",
+      doctors: "Beyin ve Sinir Cerrahisi:\n- Doç. Dr. Mustafa Kemal İLİK",
+    }
+  );
+  const profile = QubaBrainCompiler.compile(brain);
+
+  const ambiguity = QubaV2GateEngine.build({
+    inboundText: "aslında 7 8 de türkiyeye gelecem",
+    history: [
+      { role: "user", content: "bel fıtığım var" },
+      { role: "assistant", content: "Geliş planınız var mı?" },
+    ],
+    brain,
+    profile,
+    now: new Date("2026-06-27T12:00:00+03:00"),
+  });
+  assert(ambiguity.riskFlags.includes("ambiguous_date_needs_clarification"), JSON.stringify(ambiguity));
+  assert((ambiguity.recommendedFollowUp || "").includes("8 Temmuz"), ambiguity.recommendedFollowUp || "");
+
+  const trust = QubaV2GateEngine.build({
+    inboundText: "söyledim ya sen bor musun sürekli unutuyorsun",
+    history: [
+      { role: "user", content: "bel fıtığım var" },
+      { role: "assistant", content: "Beyin ve Sinir Cerrahisi bölümümüz var." },
+    ],
+    brain,
+    profile,
+    now: new Date("2026-06-27T12:00:00+03:00"),
+  });
+  assert(trust.detectedIntents.includes("trust_repair"), JSON.stringify(trust));
+  assert(trust.riskFlags.includes("trust_repair_needed"), JSON.stringify(trust));
+  assert((trust.recommendedFollowUp || "").includes("güven"), trust.recommendedFollowUp || "");
+});
+
 
 async function runAllTests() {
   try {

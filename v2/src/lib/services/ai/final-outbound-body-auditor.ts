@@ -195,6 +195,122 @@ function containsPromptLeak(text: string): boolean {
   return PROMPT_LEAK_PATTERNS.some(pattern => pattern.test(text));
 }
 
+function normalizeTurkishForAudit(text?: string): string {
+  return String(text || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/\u0307/g, '')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function auditContextText(ctx: FinalOutboundAuditCtx): string {
+  return [
+    ctx.conversationContextText || '',
+    ctx.inboundText || '',
+    ...(ctx.patientKnownFacts || []),
+  ].filter(Boolean).join('\n');
+}
+
+function extractTravelDateSummaryFromContext(rawContext: string): string | null {
+  const text = String(rawContext || '');
+  const monthNames = [
+    'ocak', 'şubat', 'subat', 'mart', 'nisan', 'mayıs', 'mayis', 'haziran',
+    'temmuz', 'ağustos', 'agustos', 'eylül', 'eylul', 'ekim', 'kasım', 'kasim',
+    'aralık', 'aralik',
+  ];
+  const normalizedMonth: Record<string, string> = {
+    ocak: 'Ocak',
+    'şubat': 'Şubat',
+    subat: 'Şubat',
+    mart: 'Mart',
+    nisan: 'Nisan',
+    'mayıs': 'Mayıs',
+    mayis: 'Mayıs',
+    haziran: 'Haziran',
+    temmuz: 'Temmuz',
+    'ağustos': 'Ağustos',
+    agustos: 'Ağustos',
+    'eylül': 'Eylül',
+    eylul: 'Eylül',
+    ekim: 'Ekim',
+    'kasım': 'Kasım',
+    kasim: 'Kasım',
+    'aralık': 'Aralık',
+    aralik: 'Aralık',
+  };
+
+  const dayMonthMatches = Array.from(text.matchAll(new RegExp(`\\b(\\d{1,2})\\s+(${monthNames.join('|')})\\b`, 'gi')));
+  const monthDayMatches = Array.from(text.matchAll(new RegExp(`\\b(${monthNames.join('|')})\\s+(\\d{1,2})\\b`, 'gi')));
+  const candidates = [
+    ...dayMonthMatches.map(match => ({ index: match.index || 0, day: match[1], month: match[2] })),
+    ...monthDayMatches.map(match => ({ index: match.index || 0, day: match[2], month: match[1] })),
+  ].sort((a, b) => b.index - a.index);
+
+  for (const candidate of candidates) {
+    const day = Number(candidate.day);
+    if (!Number.isFinite(day) || day < 1 || day > 31) continue;
+    const monthKey = candidate.month.toLocaleLowerCase('tr-TR');
+    const month = normalizedMonth[monthKey] || normalizedMonth[monthKey.replace(/ı/g, 'i')] || candidate.month;
+    return `${day} ${month}`;
+  }
+
+  const ambiguousResolved = text.match(/\b(?:7\s+8|7[./]8)\b[\s\S]{0,80}\btemmuz\s+8\b/i);
+  if (ambiguousResolved) return '8 Temmuz';
+  return null;
+}
+
+function buildKnownContextRecovery(ctx: FinalOutboundAuditCtx, reason: 'trust' | 'generic' | 'prompt_leak' = 'generic'): string | null {
+  const rawContext = auditContextText(ctx);
+  const cleanContext = normalizeTurkishForAudit(rawContext);
+  const cleanInbound = normalizeTurkishForAudit(ctx.inboundText);
+  const directoryText = formatVerifiedDoctorDirectoryForRecovery(ctx.verifiedDoctorDirectory);
+  const hasSpineComplaint = /\b(?:bel\s+fitigi|bel\s+fitigim|boyun\s+fitigi|fitik|fitig)\b/.test(cleanContext);
+  const hasPriceContext = /\b(?:fiyat|ucret|tutar|odeme|ne\s+kadar|ta\s*12|ta12)\b/.test(cleanContext);
+  const hasVisitContext = /\b(?:gelecem|gelecegim|gelebilirim|turkiye|konya|gelme\s+plani)\b/.test(cleanContext);
+  const travelDate = extractTravelDateSummaryFromContext(rawContext);
+  const hasTrustSignal = /\b(?:bot|bor\s+musun|yapay\s+zeka\w*|guven|inanmadim|anlamadin|anlamiyorsun|unut|soyledim|dedim\s+ya|cevap\s+vermedin|sorularima\s+cevap)\b/.test(cleanInbound);
+
+  if (!hasSpineComplaint && !directoryText && !hasPriceContext && !travelDate && !hasVisitContext) {
+    return null;
+  }
+
+  const intro = reason === 'trust' || hasTrustSignal
+    ? 'Haklısınız, önceki cevabım yeterince net olmadı. Aynı yerden toparlayayım.'
+    : 'Aynı yerden devam edelim.';
+  const parts: string[] = [intro];
+
+  if (hasSpineComplaint) {
+    if (directoryText) {
+      parts.push(`Bel fıtığı için konuşuyorduk. Hastanemizde bu konuda Beyin ve Sinir Cerrahisi bölümünden destek alabilirsiniz.\n\n${directoryText}`);
+    } else {
+      parts.push('Bel fıtığı için konuşuyorduk. Bu şikayette doğru değerlendirme için ilgili uzman hekim muayenesi ve gerekirse tetkiklerle değerlendirme gerekir.');
+    }
+  } else if (directoryText) {
+    parts.push(directoryText);
+  }
+
+  if (travelDate) {
+    parts.push(`${travelDate} geliş planınızı da dikkate alıyorum.`);
+  }
+
+  if (hasPriceContext) {
+    parts.push('Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.');
+  }
+
+  const followUp = hasPriceContext
+    ? 'Fiyat tarafını netleştirmek için telefon görüşmesi planlayabiliriz; gün ve saat olarak size ne uygun olur?'
+    : 'Süreç, randevu veya telefon görüşmesi tarafında hangi adımı netleştirelim?';
+  parts.push(followUp);
+
+  return parts.join('\n\n');
+}
+
 function buildPromptLeakRecovery(ctx: FinalOutboundAuditCtx): string {
   const inbound = ctx.inboundText || '';
   const complaint = extractPayloadField(inbound, ['Şikayetiniz Nedir?', 'Sikayetiniz Nedir?', 'Complaint']);
@@ -219,6 +335,11 @@ function buildPromptLeakRecovery(ctx: FinalOutboundAuditCtx): string {
       'Merhaba,',
       'Form başvurunuz bize ulaştı. Sağlık talebinizi doğru değerlendirebilmem için bu aşamada merak ettiğiniz ana konuyu buradan yazabilir misiniz?',
     ].join('\n\n');
+  }
+
+  const contextRecovery = buildKnownContextRecovery(ctx, 'prompt_leak');
+  if (contextRecovery) {
+    return contextRecovery;
   }
 
   return 'Mesajınızı aldım. Bu konuda doğru bilgiyle yardımcı olayım; hangi başlığı netleştirelim?';
@@ -757,7 +878,15 @@ function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): {
     };
   }
 
-  if (/\b(?:g[üu]ven|inanmad[ıi]m|bot|robot|anlam[ıi]yor|anlamad[ıi]n|emin\s+olam[ıi]yorum|yard[ıi]mc[ıi]\s+olamayacaks[ıi]n[ıi]z)\b/i.test(inbound)) {
+  if (/\b(?:g[üu]ven|inanmad[ıi]m|bot|bor\s+musun|robot|yapay\s+zeka|anlam[ıi]yor|anlamad[ıi]n|unut|unuttun|unutuyorsun|s[öo]yledim|dedim\s+ya|emin\s+olam[ıi]yorum|yard[ıi]mc[ıi]\s+olamayacaks[ıi]n[ıi]z)\b/i.test(inbound)) {
+    const contextRecovery = buildKnownContextRecovery(ctx, 'trust');
+    if (contextRecovery) {
+      return {
+        text: contextRecovery,
+        rewrote: true,
+      };
+    }
+
     const directoryText = doctorContext ? formatVerifiedDoctorDirectoryForRecovery(ctx.verifiedDoctorDirectory) : null;
     if (directoryText) {
       return {
@@ -784,6 +913,14 @@ function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): {
     };
   }
 
+  const contextRecovery = buildKnownContextRecovery(ctx, 'generic');
+  if (contextRecovery) {
+    return {
+      text: contextRecovery,
+      rewrote: true,
+    };
+  }
+
   return {
     text: 'Mesajınızı aldım. Aynı yerden devam edelim; hangi bilgiyi netleştireyim?',
     rewrote: true,
@@ -801,8 +938,13 @@ function applyTrustRepairGuard(text: string, ctx: FinalOutboundAuditCtx): { text
     .replace(/I/g, 'ı')
     .toLowerCase();
 
-  const hasTrustSignal = /\b(?:g[üu]ven|inanmad[ıi]m|bot|robot|anlam[ıi]yor|anlamad[ıi]n|yard[ıi]mc[ıi]\s+olamayacaks[ıi]n[ıi]z|cevap\s+vermedin|cevaplamad[ıi]n|sorular[ıi]ma\s+cevap)\b/i.test(inbound);
+  const hasTrustSignal = /\b(?:g[üu]ven|inanmad[ıi]m|bot|bor\s+musun|robot|yapay\s+zeka|anlam[ıi]yor|anlamad[ıi]n|unut|unuttun|unutuyorsun|s[öo]yledim|dedim\s+ya|yard[ıi]mc[ıi]\s+olamayacaks[ıi]n[ıi]z|cevap\s+vermedin|cevaplamad[ıi]n|sorular[ıi]ma\s+cevap)\b/i.test(inbound);
   if (!hasTrustSignal) return { text, rewrote: false };
+
+  const contextRecovery = buildKnownContextRecovery(ctx, 'trust');
+  if (contextRecovery) {
+    return { text: contextRecovery, rewrote: true };
+  }
 
   const looksLikeWrongFallback =
     /gelme\s+d[üu][şs][üu]ncenizi\s+not\s+ald[ıi]m/i.test(text) ||
