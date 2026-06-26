@@ -14870,6 +14870,18 @@ test("Başkent v88 T134: Bot test panel exposes Brain v2 response evaluation", (
   assert(playgroundCode.includes("brainEvaluation.score"), "Test panel should render Brain v2 score");
 });
 
+test("Başkent v88 T134b: Bot test input remains stable and automation-friendly", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
+
+  assert(playgroundCode.includes("min-h-0 flex-1 overflow-y-auto"), "Chat log should own overflow without pushing the input out of view");
+  assert(playgroundCode.includes("className=\"shrink-0 relative z-20 p-4 border-t bg-white flex items-center gap-2\""), "Input bar should stay as a stable bottom control");
+  assert(playgroundCode.includes("aria-label=\"Sandbox test mesajı\""), "Sandbox input should be accessible to UI automation");
+  assert(playgroundCode.includes("name=\"sandboxTestMessage\""), "Sandbox input should expose a stable field name");
+  assert(playgroundCode.indexOf("{/* Brain v2 Response Evaluation */}") < playgroundCode.indexOf("{/* Input Bar */}"), "Diagnostics should render above the input bar");
+});
+
 test("Başkent v88 T135: Live orchestrator writes Brain v2 shadow evaluation as non-blocking safe audit", () => {
   const fs = require("fs");
   const path = require("path");

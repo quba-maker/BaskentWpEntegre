@@ -41,6 +41,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const [brainDiagnosticsLoading, setBrainDiagnosticsLoading] = useState(false);
   const [brainDiagnosticsError, setBrainDiagnosticsError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const delayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-scroll to bottom of chat
@@ -156,6 +157,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
     const updatedMessages = [...messages, { role: 'user' as const, content: trimmed }];
     setMessages(updatedMessages);
     setTestMsg("");
+    setTimeout(() => inputRef.current?.focus(), 0);
     scheduleBotResponse(updatedMessages);
   };
 
@@ -168,6 +170,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
     setDebugMeta(null);
     setWaitingForDelay(false);
     setTesting(false);
+    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const loadSampleForm = () => {
@@ -185,6 +188,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       "Tedavi planlamanız ve ön görüşme için sizi ne zaman arayalım?: Öğleden sonra (12:00 - 18:00)",
       "Önerilen Bölüm: Ortopedi",
     ].join("\n"));
+    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const brainPlan = debugMeta?.brainV2ShadowPlan;
@@ -491,7 +495,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       {/* Chat Messages Log */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-5 space-y-4">
         {messages.map((m, idx) => {
           const isUser = m.role === 'user';
           return (
@@ -538,35 +542,9 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
         <div ref={chatEndRef} />
       </div>
 
-      {/* Input Bar */}
-      <div className="p-4 border-t bg-white flex items-center gap-2" style={{ borderColor: "var(--q-border-default)" }}>
-        <input
-          type="text"
-          value={testMsg}
-          onChange={e => setTestMsg(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') runTest(); }}
-          placeholder="Test mesajı yazın... (örn: Merhaba, randevu istiyorum)"
-          disabled={testing}
-          className="flex-1 px-4 py-2.5 text-sm border rounded-xl outline-none transition-all disabled:opacity-50"
-          style={{
-            borderColor: "var(--q-border-default)",
-            backgroundColor: "rgba(0,0,0,0.02)",
-            color: "var(--q-text-primary)"
-          }}
-        />
-        <button
-          onClick={runTest}
-          disabled={testing || !testMsg.trim()}
-          className="p-2.5 text-white rounded-xl flex items-center justify-center disabled:opacity-50 transition-all"
-          style={{ backgroundColor: activeChannel.color || 'var(--q-blue)' }}
-        >
-          {testing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-        </button>
-      </div>
-
       {/* Brain v2 Response Evaluation */}
       {brainEvaluation && (
-        <div className="px-5 py-3 bg-white border-t space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
+        <div className="shrink-0 max-h-[170px] overflow-y-auto px-5 py-3 bg-white border-t space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
           <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
             <ListChecks
               className="w-4 h-4"
@@ -630,7 +608,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
 
       {/* Brain v2 Shadow Diagnostics */}
       {brainPlan && (
-        <div className="px-5 py-3 bg-white border-t space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
+        <div className="shrink-0 max-h-[170px] overflow-y-auto px-5 py-3 bg-white border-t space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
           <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
             <ListChecks className="w-4 h-4" style={{ color: "var(--q-blue, #007aff)" }} />
             <span>Brain v2 Gölge Planı</span>
@@ -667,7 +645,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
 
       {/* Debug Info Footer */}
       {debugMeta && (
-        <div className="px-5 py-2.5 bg-gray-50 border-t flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] text-gray-400 font-mono font-medium" style={{ borderColor: "var(--q-border-default)" }}>
+        <div className="shrink-0 px-5 py-2.5 bg-gray-50 border-t flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] text-gray-400 font-mono font-medium" style={{ borderColor: "var(--q-border-default)" }}>
           <span>MODEL: {debugMeta.model}</span>
           <span>PROMPT SÜRÜMÜ: v{debugMeta.promptVersion}</span>
           <span>SÜRE: {debugMeta.latencyMs}ms</span>
@@ -676,6 +654,45 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
           <span>GECİKME: {debugMeta.responseDelaySeconds}sn</span>
         </div>
       )}
+
+      {/* Input Bar */}
+      <form
+        className="shrink-0 relative z-20 p-4 border-t bg-white flex items-center gap-2"
+        style={{ borderColor: "var(--q-border-default)" }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          runTest();
+        }}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) inputRef.current?.focus();
+        }}
+      >
+        <input
+          ref={inputRef}
+          aria-label="Sandbox test mesajı"
+          name="sandboxTestMessage"
+          type="text"
+          value={testMsg}
+          onChange={e => setTestMsg(e.target.value)}
+          placeholder="Test mesajı yazın... (örn: Merhaba, randevu istiyorum)"
+          disabled={testing}
+          className="min-w-0 flex-1 px-4 py-2.5 text-sm border rounded-xl outline-none transition-all disabled:opacity-50 focus:ring-2 focus:ring-blue-100"
+          style={{
+            borderColor: "var(--q-border-default)",
+            backgroundColor: "rgba(0,0,0,0.02)",
+            color: "var(--q-text-primary)",
+          }}
+        />
+        <button
+          type="submit"
+          aria-label="Sandbox test mesajını gönder"
+          disabled={testing || !testMsg.trim()}
+          className="shrink-0 p-2.5 text-white rounded-xl flex items-center justify-center disabled:opacity-50 transition-all"
+          style={{ backgroundColor: activeChannel.color || 'var(--q-blue)' }}
+        >
+          {testing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+        </button>
+      </form>
     </div>
   );
 }
