@@ -235,7 +235,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   };
 
   return (
-    <div className="mb-8 flex min-h-[640px] h-[calc(100vh-120px)] max-h-[820px] flex-col border rounded-2xl bg-[#f8f9fa] overflow-hidden" style={{ borderColor: "var(--q-border-default)" }}>
+    <div className="mb-8 flex min-h-[560px] h-[calc(100vh-96px)] max-h-[760px] xl:h-[calc(100vh-48px)] xl:max-h-none flex-col border rounded-2xl bg-[#f8f9fa] overflow-hidden" style={{ borderColor: "var(--q-border-default)" }}>
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b bg-white" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="flex items-center gap-2">
@@ -257,9 +257,9 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
         )}
       </div>
 
-      <div className="shrink-0 max-h-[300px] overflow-y-auto">
+      <div className="shrink-0 max-h-[230px] overflow-y-auto border-b" style={{ borderColor: "var(--q-border-default)" }}>
       {/* Active test mode */}
-      <div className="shrink-0 px-5 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
+      <div className="shrink-0 px-4 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
             <div className="text-[9px] font-bold text-gray-400 mb-0.5">TEST MOTORU</div>
@@ -294,7 +294,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       {/* Sandbox Alert Info Banner */}
-      <div className="shrink-0 px-5 py-2.5 bg-blue-50/50 border-b flex items-start gap-2 text-[11px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
+      <div className="shrink-0 px-4 py-2 bg-blue-50/50 border-b flex items-start gap-2 text-[10px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
         <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <p className="leading-relaxed">
           <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve araçlar dry-run çalışır. <span className="opacity-75">Yanıt gecikmesi canlıya yakın simüle edilir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.</span>
@@ -302,7 +302,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       {/* Live-like form context */}
-      <div className="shrink-0 px-5 py-3 bg-white border-b space-y-3" style={{ borderColor: "var(--q-border-default)" }}>
+      <div className="shrink-0 px-4 py-3 bg-white border-b space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="flex flex-col gap-2">
           <div className="flex items-start gap-2">
             <FileText className="w-4 h-4" style={{ color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-secondary)" }} />
@@ -366,7 +366,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       {/* Quba Brain Setup Health */}
-      <div className="shrink-0 px-5 py-3 bg-white border-b space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
+      <div className="shrink-0 px-4 py-3 bg-white space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
             <ListChecks className="w-4 h-4" style={{ color: qubaSetupHealthy ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }} />
@@ -420,7 +420,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
             {brainDiagnosticsError}
           </div>
         ) : qubaBrainProfile && showBrainDetails ? (
-          <div className="max-h-[240px] overflow-y-auto pr-1 space-y-2">
+          <div className="max-h-[150px] overflow-y-auto pr-1 space-y-2">
             <div className="grid grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
                 <div className="font-bold text-gray-400 mb-0.5">SEKTÖR</div>
@@ -495,7 +495,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       {/* Chat Messages Log */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((m, idx) => {
           const isUser = m.role === 'user';
           return (
@@ -657,7 +657,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
 
       {/* Input Bar */}
       <form
-        className="shrink-0 relative z-20 p-4 border-t bg-white flex items-center gap-2"
+        className="shrink-0 relative z-20 p-3 border-t bg-white flex items-center gap-2 shadow-[0_-4px_14px_rgba(15,23,42,0.04)]"
         style={{ borderColor: "var(--q-border-default)" }}
         onSubmit={(event) => {
           event.preventDefault();

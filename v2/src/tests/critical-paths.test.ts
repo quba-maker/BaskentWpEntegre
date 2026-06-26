@@ -14876,10 +14876,23 @@ test("Başkent v88 T134b: Bot test input remains stable and automation-friendly"
   const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
 
   assert(playgroundCode.includes("min-h-0 flex-1 overflow-y-auto"), "Chat log should own overflow without pushing the input out of view");
-  assert(playgroundCode.includes("className=\"shrink-0 relative z-20 p-4 border-t bg-white flex items-center gap-2\""), "Input bar should stay as a stable bottom control");
+  assert(playgroundCode.includes("className=\"shrink-0 relative z-20 p-3 border-t bg-white flex items-center gap-2"), "Input bar should stay as a stable bottom control");
   assert(playgroundCode.includes("aria-label=\"Sandbox test mesajı\""), "Sandbox input should be accessible to UI automation");
   assert(playgroundCode.includes("name=\"sandboxTestMessage\""), "Sandbox input should expose a stable field name");
   assert(playgroundCode.indexOf("{/* Brain v2 Response Evaluation */}") < playgroundCode.indexOf("{/* Input Bar */}"), "Diagnostics should render above the input bar");
+});
+
+test("Başkent v88 T134c: Bot test panel keeps the composer visible on dashboard screens", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
+  const pageCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/page.tsx"), "utf-8");
+
+  assert(playgroundCode.includes("xl:h-[calc(100vh-48px)]"), "Test panel should use viewport height on desktop");
+  assert(playgroundCode.includes("max-h-[230px] overflow-y-auto"), "Setup/form/health area should not push chat composer out of view");
+  assert(playgroundCode.includes("max-h-[150px] overflow-y-auto"), "Expanded health details should stay internally scrollable");
+  assert(pageCode.includes("xl:grid-cols-[minmax(0,1fr)_420px]"), "Dashboard should reserve a stable right panel width");
+  assert(pageCode.includes("xl:sticky xl:top-4"), "Right test panel should stay pinned while editing setup fields");
 });
 
 test("Başkent v88 T135: Live orchestrator writes Brain v2 shadow evaluation as non-blocking safe audit", () => {

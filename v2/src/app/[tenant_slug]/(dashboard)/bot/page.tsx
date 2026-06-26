@@ -392,8 +392,8 @@ export default function BotManagementPage() {
 
       {/* SELECTED BOT DETAIL — 3 Tab System */}
       {selectedBot && (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
-          <div className="xl:col-span-2">
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_460px] gap-6 items-start">
+          <div className="min-w-0">
             {/* Tab Navigation */}
             <div className="flex items-center gap-1 p-1 rounded-xl mb-5 w-fit" style={{ backgroundColor: 'rgba(0,0,0,0.04)' }}>
               {DETAIL_TABS.map(tab => {
@@ -433,7 +433,7 @@ export default function BotManagementPage() {
               />
             )}
           </div>
-          <div className="xl:col-span-1 sticky top-6">
+          <div className="min-w-0 xl:sticky xl:top-4 xl:self-start">
             <BotTestPlayground
               activeChannel={{ id: selectedBot.id, label: selectedBot.displayName, icon: resolveIcon(selectedBot.icon), promptKey: '', activeKey: '', color: selectedBot.color || '#6366f1', description: '' }}
               botGroupId={selectedBot.id}
