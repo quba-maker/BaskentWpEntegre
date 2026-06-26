@@ -201,6 +201,15 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const qubaBlockers: string[] = Array.isArray(qubaReadiness?.blockers) ? qubaReadiness.blockers : [];
   const qubaRecommendations: string[] = Array.isArray(qubaReadiness?.recommendations) ? qubaReadiness.recommendations : [];
   const qubaSetupHealthy = qubaReadiness ? qubaReadiness.status === "ready" : qubaMissingSetup.length === 0;
+  const qubaLiveEnabled = Boolean(qubaBrainProfile?.rollout?.liveDirectiveEnabled);
+  const qubaSandboxEnabled = Boolean(qubaBrainProfile?.rollout?.sandboxDirectiveEnabled);
+  const rolloutLabelMap: Record<string, string> = {
+    disabled: "Eski düzen",
+    sandbox: "Yeni Brain test",
+    shadow: "Gölge izleme",
+    active: "Yeni Brain canlı",
+  };
+  const rolloutLabel = rolloutLabelMap[String(qubaRolloutMode || "")] || "Mod yükleniyor";
   const renderCompactList = (items?: string[], emptyLabel = "Yok") => {
     const safeItems = Array.isArray(items) ? items.filter(Boolean).slice(0, 6) : [];
     if (safeItems.length === 0) {
@@ -227,7 +236,10 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b bg-white" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="flex items-center gap-2">
           <FlaskConical className="w-5 h-5" style={{ color: "var(--q-text-secondary)" }} />
-          <h2 className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Bot Test Alanı</h2>
+          <div>
+            <h2 className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Bot Test Alanı</h2>
+            <p className="text-[10px] text-gray-400">Gerçek hastaya mesaj gitmeden canlıya yakın deneme</p>
+          </div>
         </div>
         {messages.length > 0 && (
           <button
@@ -242,11 +254,46 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       <div className="shrink-0 max-h-[360px] overflow-y-auto">
+      {/* Active test mode */}
+      <div className="shrink-0 px-5 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+            <div className="text-[9px] font-bold text-gray-400 mb-0.5">TEST MOTORU</div>
+            <div className="text-[11px] font-bold truncate" style={{ color: "var(--q-text-primary)" }}>
+              {rolloutLabel}
+            </div>
+          </div>
+          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+            <div className="text-[9px] font-bold text-gray-400 mb-0.5">CANLI ETKİ</div>
+            <div
+              className="text-[11px] font-bold truncate"
+              style={{ color: qubaLiveEnabled ? "var(--q-green, #22c55e)" : "var(--q-text-primary)" }}
+            >
+              {qubaLiveEnabled ? "Brain açık" : "Canlı korunur"}
+            </div>
+          </div>
+          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+            <div className="text-[9px] font-bold text-gray-400 mb-0.5">FORM BAĞLAMI</div>
+            <div
+              className="text-[11px] font-bold truncate"
+              style={{ color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-primary)" }}
+            >
+              {sandboxFormEnabled ? "Formlu" : "Formsuz"}
+            </div>
+          </div>
+        </div>
+        {!qubaSandboxEnabled && (
+          <div className="mt-2 rounded-lg border px-3 py-2 text-[10px] leading-relaxed bg-yellow-50" style={{ borderColor: "rgba(245,158,11,0.25)", color: "var(--q-yellow, #f59e0b)" }}>
+            Yeni Brain direktifi testte kapalı. Yeni mimariyi denemek için solda “Yeni Brain testi” modunu seçip kaydedin.
+          </div>
+        )}
+      </div>
+
       {/* Sandbox Alert Info Banner */}
       <div className="shrink-0 px-5 py-2.5 bg-blue-50/50 border-b flex items-start gap-2 text-[11px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
         <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
-        <p className="leading-relaxed">
-          <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve asistan araçları dry-run çalıştırılır. <span className="opacity-75">Yanıt gecikmesi canlıya yakın simüle edilir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.</span>
+          <p className="leading-relaxed">
+          <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve araçlar dry-run çalışır. <span className="opacity-75">Yeni test mesajı gelirse sayaç sıfırlanır; peş peşe mesajlar tek konuşma gibi değerlendirilir.</span>
         </p>
       </div>
 
@@ -264,13 +311,13 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
             <button
               onClick={loadSampleForm}
               type="button"
-              className="px-2.5 py-2 rounded-lg border text-[10px] font-bold hover:bg-gray-50"
-              style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}
+              className="px-2.5 py-2.5 rounded-xl border text-[10px] font-bold hover:bg-gray-50"
+              style={{ borderColor: "rgba(0,122,255,0.25)", color: "var(--q-blue, #007aff)", backgroundColor: "rgba(0,122,255,0.04)" }}
             >
               Örnek Formla Aç
             </button>
             <label
-              className="flex items-center justify-center gap-2 px-2.5 py-2 rounded-lg border text-[10px] font-bold cursor-pointer"
+              className="flex items-center justify-center gap-2 px-2.5 py-2.5 rounded-xl border text-[10px] font-bold cursor-pointer"
               style={{
                 borderColor: sandboxFormEnabled ? "rgba(0,122,255,0.35)" : "var(--q-border-default)",
                 color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-secondary)",
