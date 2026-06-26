@@ -716,23 +716,39 @@ export async function testBotPrompt(
       const sandboxUnifiedContext = buildSandboxUnifiedContext(options?.sandboxForm || null);
 
       const { BrainV2ShadowPlanner } = await import("@/lib/services/ai/brain-v2-shadow-planner");
-      const { QubaBrainCompiler, resolveQubaBrainRolloutMode, shouldApplyQubaBrainSandboxDirective } = await import("@/lib/brain/core");
+      const { QubaBrainCompiler, QubaV2GateEngine, resolveQubaBrainRolloutMode, shouldApplyQubaBrainSandboxDirective } = await import("@/lib/brain/core");
       const qubaBrainProfile = QubaBrainCompiler.compile(mockBrain as any);
       const qubaBrainRolloutMode = resolveQubaBrainRolloutMode(mockBrain as any);
       const qubaBrainCoreApplied = shouldApplyQubaBrainSandboxDirective(qubaBrainRolloutMode);
       const qubaBrainDirective = qubaBrainCoreApplied ? QubaBrainCompiler.buildDirective(qubaBrainProfile) : '';
-      const brainV2ShadowPlan = BrainV2ShadowPlanner.build({
-        inboundText: lastMessage?.content || '',
-        history: historyMessages,
-        brain: mockBrain as any,
-        channel: 'whatsapp',
-        now: new Date(),
-        latestForm: sandboxUnifiedContext?.latestForm,
-        opportunity: sandboxUnifiedContext?.opportunity,
-        conversation: sandboxUnifiedContext?.conversation
-      });
-      const brainV2SandboxDirective = BrainV2ShadowPlanner.buildSandboxPromptDirective(brainV2ShadowPlan);
       const sandboxBrainMode = normalizeSandboxBrainMode(options?.sandboxBrainMode);
+      const qubaV2GateResult = sandboxBrainMode === 'v2'
+        ? QubaV2GateEngine.build({
+            inboundText: lastMessage?.content || '',
+            history: historyMessages,
+            brain: mockBrain as any,
+            profile: qubaBrainProfile,
+            now: new Date(),
+            latestForm: sandboxUnifiedContext?.latestForm,
+            opportunity: sandboxUnifiedContext?.opportunity,
+            conversation: sandboxUnifiedContext?.conversation
+          })
+        : null;
+      const brainV2ShadowPlan = qubaV2GateResult
+        ? QubaV2GateEngine.toLegacyShadowPlan(qubaV2GateResult)
+        : BrainV2ShadowPlanner.build({
+            inboundText: lastMessage?.content || '',
+            history: historyMessages,
+            brain: mockBrain as any,
+            channel: 'whatsapp',
+            now: new Date(),
+            latestForm: sandboxUnifiedContext?.latestForm,
+            opportunity: sandboxUnifiedContext?.opportunity,
+            conversation: sandboxUnifiedContext?.conversation
+          });
+      const brainV2SandboxDirective = qubaV2GateResult
+        ? QubaV2GateEngine.buildSandboxPromptDirective(qubaV2GateResult)
+        : BrainV2ShadowPlanner.buildSandboxPromptDirective(brainV2ShadowPlan);
       const effectiveQubaBrainCoreApplied = sandboxBrainMode === 'v2' && qubaBrainCoreApplied;
       const sandboxSystemPrompt = sandboxBrainMode === 'v2'
         ? `${buildPureQubaSandboxPrompt({
@@ -830,6 +846,8 @@ export async function testBotPrompt(
           legacySystemPromptChars: rawSystemPrompt.length,
           sandboxSystemPromptChars: sandboxSystemPrompt.length,
           qubaBrainProfile,
+          qubaV2GateEngineApplied: sandboxBrainMode === 'v2',
+          qubaV2GateResult,
           brainV2ShadowPlanApplied: true,
           sandboxFormApplied: !!sandboxUnifiedContext?.latestForm,
           sandboxForm: sandboxUnifiedContext?.latestForm || null,

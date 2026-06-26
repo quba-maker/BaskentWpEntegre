@@ -15004,6 +15004,23 @@ test("Başkent v88 T136: AI audit schema supports action-based logs without requ
   assert(drizzleCode.includes("ALTER COLUMN tool_name DROP NOT NULL"), "Drizzle migration should relax legacy tool_name requirement");
 });
 
+test("Başkent v89 T137: Yeni V2 Brain uses independent gate engine in sandbox", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const gateCode = fs.readFileSync(path.resolve(__dirname, "../lib/brain/core/v2-gate-engine.ts"), "utf-8");
+  const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
+  const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
+
+  assert(gateCode.includes("quba_v2_independent"), "V2 gate engine should identify itself as independent");
+  assert(gateCode.includes("usedLegacyRuntimeGates: false"), "V2 gate engine should declare no legacy runtime gates");
+  assert(!gateCode.includes("ConversationIntentRouter"), "Independent V2 gate engine must not import the legacy intent router");
+  assert(!gateCode.includes("MultiIntentConsultantComposer"), "Independent V2 gate engine must not import legacy multi-intent composer");
+  assert(botActionCode.includes("QubaV2GateEngine.build"), "Sandbox V2 path should build the independent gate result");
+  assert(botActionCode.includes("qubaV2GateEngineApplied"), "Sandbox metadata should expose V2 gate usage");
+  assert(playgroundCode.includes("Bağımsız V2 Kapıları"), "Test panel should show the independent V2 gate diagnostics");
+  assert(playgroundCode.includes("Parçalı SaaS alanları + bağımsız V2 kapılar"), "Test panel should explain V2 uses independent gates");
+});
+
 
 async function runAllTests() {
   try {

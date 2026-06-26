@@ -196,6 +196,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   };
 
   const brainPlan = debugMeta?.brainV2ShadowPlan;
+  const v2GateResult = debugMeta?.qubaV2GateResult;
   const brainEvaluation = debugMeta?.brainV2ResponseEvaluation;
   const qubaBrainMeta = debugMeta?.qubaBrainProfile ? debugMeta : brainMeta;
   const qubaBrainProfile = qubaBrainMeta?.qubaBrainProfile;
@@ -274,7 +275,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
                 {selectedSystemLabel} · {sandboxFormEnabled ? "Formlu test" : "Formsuz test"}
               </div>
               <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
-                Güvenli test: Gerçek hastaya mesaj gönderilmez. Seçilen sistem canlıdaki kapılarla denenir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.
+                Güvenli test: Gerçek hastaya mesaj gönderilmez. Eski sistem mevcut kapılarıyla, Yeni V2 Brain ise bağımsız V2 kapılarıyla denenir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.
               </p>
             </div>
             <button
@@ -302,7 +303,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
               }}
             >
               <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Eski Sistem</div>
-              <div className="text-[9px] leading-relaxed text-gray-400">Mevcut prompt + canlı kapılar</div>
+              <div className="text-[9px] leading-relaxed text-gray-400">Mevcut prompt + eski kapılar</div>
             </button>
             <button
               type="button"
@@ -317,7 +318,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
               }}
             >
               <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Yeni V2 Brain</div>
-              <div className="text-[9px] leading-relaxed text-gray-400">Parçalı SaaS alanları + canlı kapılar</div>
+              <div className="text-[9px] leading-relaxed text-gray-400">Parçalı SaaS alanları + bağımsız V2 kapılar</div>
             </button>
           </div>
 
@@ -655,37 +656,48 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       )}
 
       {/* Brain v2 Shadow Diagnostics */}
-      {brainPlan && showBrainDetails && (
+      {(v2GateResult || brainPlan) && showBrainDetails && (
         <div className="shrink-0 max-h-[170px] overflow-y-auto px-5 py-3 bg-white border-t space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
           <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
             <ListChecks className="w-4 h-4" style={{ color: "var(--q-blue, #007aff)" }} />
-            <span>Brain v2 Gölge Planı</span>
+            <span>{v2GateResult ? "Bağımsız V2 Kapıları" : "Brain v2 Gölge Planı"}</span>
             <span className="px-1.5 py-0.5 rounded bg-blue-50 text-[9px]" style={{ color: "var(--q-blue, #007aff)" }}>
-              Sadece test cevabına uygulanır
+              {v2GateResult ? "Eski kapılardan ayrı" : "Sadece test cevabına uygulanır"}
             </span>
           </div>
-          <p className="text-[11px] leading-relaxed text-gray-500">{brainPlan.summary}</p>
+          <p className="text-[11px] leading-relaxed text-gray-500">{v2GateResult?.summary || brainPlan?.summary}</p>
+          {v2GateResult && (
+            <div className="rounded-lg border bg-gray-50 px-3 py-2 text-[11px] leading-relaxed text-gray-600" style={{ borderColor: "var(--q-border-default)" }}>
+              <span className="font-bold">Kapı rolü:</span> Cevap yazmaz; sadece sinyal, doğrulanmış veri ve dry-run aksiyon sonucu üretir.
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <div>
               <div className="text-[9px] font-bold text-gray-400 mb-1">ALGILANAN BAŞLIKLAR</div>
-              {renderCompactList(brainPlan.detectedIntents)}
+              {renderCompactList(v2GateResult?.detectedIntents || brainPlan?.detectedIntents)}
             </div>
             <div>
               <div className="text-[9px] font-bold text-gray-400 mb-1">CEVAPTA KAÇIRMA</div>
-              {renderCompactList(brainPlan.mustAnswer)}
+              {renderCompactList(v2GateResult?.mustAnswer || brainPlan?.mustAnswer)}
             </div>
             <div>
               <div className="text-[9px] font-bold text-gray-400 mb-1">RİSKLER</div>
-              {renderCompactList(brainPlan.riskFlags)}
+              {renderCompactList(v2GateResult?.riskFlags || brainPlan?.riskFlags)}
             </div>
             <div>
               <div className="text-[9px] font-bold text-gray-400 mb-1">EKSİK BİLGİ</div>
-              {renderCompactList(brainPlan.missingInformation)}
+              {renderCompactList(v2GateResult?.missingInformation || brainPlan?.missingInformation)}
             </div>
           </div>
-          {brainPlan.recommendedFollowUp && (
+          {v2GateResult?.dryRunActions?.length > 0 && (
+            <div>
+              <div className="text-[9px] font-bold text-gray-400 mb-1">DRY-RUN AKSİYON</div>
+              {renderCompactList(v2GateResult.dryRunActions.map((action: any) => `${action.action}: ${action.status}${action.requiredMissing?.length ? ` (${action.requiredMissing.join(", ")})` : ""}`))}
+            </div>
+          )}
+          {(v2GateResult?.recommendedFollowUp || brainPlan?.recommendedFollowUp) && (
             <div className="text-[11px] leading-relaxed text-gray-600 bg-gray-50 border rounded-lg px-3 py-2" style={{ borderColor: "var(--q-border-default)" }}>
-              <span className="font-bold">Önerilen yön:</span> {brainPlan.recommendedFollowUp}
+              <span className="font-bold">Önerilen yön:</span> {v2GateResult?.recommendedFollowUp || brainPlan?.recommendedFollowUp}
             </div>
           )}
         </div>
@@ -701,6 +713,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
           <span>MAX TOKEN: {debugMeta.maxResponseTokens}</span>
           <span>GECİKME: {debugMeta.responseDelaySeconds}sn</span>
           <span>KAYNAK: {debugMeta.sandboxBrainMode === 'v2' ? 'Yeni V2 Brain' : 'Eski Sistem'}</span>
+          <span>KAPI: {debugMeta.qubaV2GateEngineApplied ? 'Bağımsız V2' : 'Eski/Legacy'}</span>
           {debugMeta.sandboxSystemPromptChars && <span>TEST PROMPT: {debugMeta.sandboxSystemPromptChars} krk.</span>}
         </div>
       )}

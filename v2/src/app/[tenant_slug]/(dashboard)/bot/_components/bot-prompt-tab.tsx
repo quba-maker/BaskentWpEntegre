@@ -297,7 +297,7 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
                 <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-gray-100" style={{ color: "var(--q-text-secondary)" }}>Canlı çekirdek</span>
               </div>
               <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-                Mevcut Sistem Prompt ve bilgi bankası. Başkent’in bugünkü güvenli düzeni.
+                Mevcut Sistem Prompt, bilgi bankası ve eski kapılar. Başkent’in bugünkü canlı düzeni burada korunur.
               </p>
             </button>
             <button
@@ -312,10 +312,10 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
             >
               <div className="flex items-center justify-between gap-2 mb-1">
                 <span className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Yeni SaaS V2 Brain</span>
-                <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: "rgba(34,197,94,0.10)", color: "var(--q-green, #22c55e)" }}>Parçalı test</span>
+                <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: "rgba(34,197,94,0.10)", color: "var(--q-green, #22c55e)" }}>Bağımsız test</span>
               </div>
               <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-                Yeni müşteri mantığı: kurum, ton, hizmet, aksiyon ve kaçınılacak kalıplar ayrı alanlardan yönetilir.
+                Yeni müşteri mantığı: kurum, ton, hizmet, aksiyon ve kaçınılacak kalıplar ayrı alanlardan yönetilir; V2 kapıları eski kapılardan bağımsız test edilir.
               </p>
             </button>
           </div>
@@ -434,7 +434,7 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
         <div className="mb-4 rounded-xl border px-3 py-2 flex items-start gap-2 bg-blue-50/50" style={{ borderColor: "rgba(59,130,246,0.18)" }}>
           <ShieldCheck className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "var(--q-blue, #007aff)" }} />
           <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-            Yeni V2 Brain şu an sadece test alanı için hazırlanır. Başkent canlı geçişi ayrıca onaylandıktan sonra yapılacak.
+            Yeni V2 Brain şu an sadece test alanı için hazırlanır. Bu alanlar ileride yeni müşteri kurulum sihirbazının temelidir; Başkent canlı geçişi ayrıca onaylandıktan sonra yapılacak.
           </p>
         </div>
 
