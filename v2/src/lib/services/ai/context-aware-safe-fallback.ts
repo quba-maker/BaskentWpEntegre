@@ -51,6 +51,49 @@ export class ContextAwareSafeFallbackResolver {
     return '';
   }
 
+  private static latestUserTextBeforeCurrent(history: any[] = []): string {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i];
+      if (msg?.role === 'user' && msg?.content) {
+        return this.normalizeLooseText(String(msg.content));
+      }
+    }
+    return '';
+  }
+
+  private static assistantAskedCallTimeClarification(text: string): boolean {
+    if (!text) return false;
+    const asksTimeOrDay = (
+      text.includes('hangi gün') ||
+      text.includes('hangi gun') ||
+      text.includes('hangi saat') ||
+      text.includes('netleştirebilir') ||
+      text.includes('netlestirebilir') ||
+      text.includes('kastediyorsunuz') ||
+      text.includes('teyit ediyor musunuz')
+    );
+    const callContext = (
+      text.includes('telefon') ||
+      text.includes('arama') ||
+      text.includes('aran') ||
+      text.includes('görüşme') ||
+      text.includes('gorusme')
+    );
+    const hasExplicitHour = /\b([01]?\d|2[0-3])\s*[:.]\s*[0-5]\d\b/.test(text);
+    return asksTimeOrDay && (callContext || hasExplicitHour);
+  }
+
+  private static extractLooseHour(text: string): string | null {
+    const normalized = this.normalizeLooseText(text);
+    const colonOrDot = normalized.match(/\b([01]?\d|2[0-3])\s*[:.]\s*([0-5]\d)\b/);
+    if (colonOrDot) {
+      return `${String(colonOrDot[1]).padStart(2, '0')}:${colonOrDot[2]}`;
+    }
+    const plainHour = normalized.match(/\b(?:saat\s*)?([0-9]|1[0-9]|2[0-3])\s*(?:olur|uygun|da|de)?\b/);
+    if (!plainHour) return null;
+    return `${String(plainHour[1]).padStart(2, '0')}:00`;
+  }
+
   private static detectCountryOnlyAnswer(inboundText?: string): string | null {
     const clean = this.normalizeLooseText(inboundText)
       .replace(/[^\p{L}\s']/gu, ' ')
@@ -884,6 +927,28 @@ export class ContextAwareSafeFallbackResolver {
     );
 
     if (isShortConfirmation && !hasPendingSlotActive && !hasActiveTaskTimeContext) {
+      const lastAssistant = ContextAwareSafeFallbackResolver.latestAssistantText(history);
+      if (ContextAwareSafeFallbackResolver.assistantAskedCallTimeClarification(lastAssistant)) {
+        const latestUserBeforeCurrent = ContextAwareSafeFallbackResolver.latestUserTextBeforeCurrent(history);
+        const recentHour = ContextAwareSafeFallbackResolver.extractLooseHour(latestUserBeforeCurrent);
+        console.log(JSON.stringify({
+          tag: 'SHORT_CONFIRMATION_AFTER_CALL_TIME_CLARIFICATION',
+          inbound: lowerInbound,
+          latestUserBeforeCurrent,
+          recentHour,
+          finalPath: 'short_confirmation_after_call_time_clarification'
+        }));
+        return {
+          text: recentHour
+            ? `Tamam. Telefon görüşmesi için saat ${recentHour} uygun diyorsunuz. Hangi gün için planlayalım?`
+            : `Tamam. Telefon görüşmesi için hangi gün ve saat uygun olur?`,
+          sector: resolvedIndustry,
+          hasFormContext,
+          hasComplaint,
+          finalPath: 'short_confirmation_after_call_time_clarification',
+          detectedIntent: 'callback_time_answer' as any
+        };
+      }
       console.log(JSON.stringify({
         tag: 'SHORT_CONFIRMATION_NO_SLOT_BYPASS',
         inbound: lowerInbound,

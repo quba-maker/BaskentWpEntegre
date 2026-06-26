@@ -20,7 +20,7 @@ interface BotTestPlaygroundProps {
         formName?: string;
         rawText?: string;
       } | null;
-      sandboxBrainMode?: 'hybrid' | 'pure';
+      sandboxBrainMode?: 'legacy' | 'v2';
     }
   ) => Promise<{ success: boolean; reply: string; metadata?: any }>;
   onGetBrainDiagnostics?: (
@@ -38,7 +38,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const [sandboxFormEnabled, setSandboxFormEnabled] = useState(false);
   const [sandboxFormName, setSandboxFormName] = useState("Sandbox Test Formu");
   const [sandboxFormText, setSandboxFormText] = useState("");
-  const [sandboxBrainMode, setSandboxBrainMode] = useState<'hybrid' | 'pure'>('hybrid');
+  const [sandboxBrainMode, setSandboxBrainMode] = useState<'legacy' | 'v2'>('v2');
   const [showBrainDetails, setShowBrainDetails] = useState(false);
   const [brainDiagnosticsLoading, setBrainDiagnosticsLoading] = useState(false);
   const [brainDiagnosticsError, setBrainDiagnosticsError] = useState<string | null>(null);
@@ -63,7 +63,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
     setSandboxFormEnabled(false);
     setSandboxFormName("Sandbox Test Formu");
     setSandboxFormText("");
-    setSandboxBrainMode('hybrid');
+    setSandboxBrainMode('v2');
     setShowBrainDetails(false);
     setBrainDiagnosticsError(null);
     setWaitingForDelay(false);
@@ -216,12 +216,13 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const qubaLiveEnabled = Boolean(qubaBrainProfile?.rollout?.liveDirectiveEnabled);
   const qubaSandboxEnabled = Boolean(qubaBrainProfile?.rollout?.sandboxDirectiveEnabled);
   const rolloutLabelMap: Record<string, string> = {
-    disabled: "Eski düzen",
-    sandbox: "Yeni Brain test",
-    shadow: "Gölge izleme",
-    active: "Yeni Brain canlı",
+    disabled: "Kapalı",
+    sandbox: "Sandbox",
+    shadow: "Gölge",
+    active: "Canlı",
   };
-  const rolloutLabel = rolloutLabelMap[String(qubaRolloutMode || "")] || "Mod yükleniyor";
+  const rolloutLabel = rolloutLabelMap[String(qubaRolloutMode || "")] || "Yükleniyor";
+  const selectedSystemLabel = sandboxBrainMode === 'v2' ? "Yeni V2 Brain" : "Eski Sistem";
   const renderCompactList = (items?: string[], emptyLabel = "Yok") => {
     const safeItems = Array.isArray(items) ? items.filter(Boolean).slice(0, 6) : [];
     if (safeItems.length === 0) {
@@ -270,9 +271,9 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       <div className="shrink-0 px-4 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-            <div className="text-[9px] font-bold text-gray-400 mb-0.5">TEST MOTORU</div>
+            <div className="text-[9px] font-bold text-gray-400 mb-0.5">TEST EDİLEN SİSTEM</div>
             <div className="text-[11px] font-bold truncate" style={{ color: "var(--q-text-primary)" }}>
-              {sandboxBrainMode === 'pure' ? 'Saf Brain' : rolloutLabel}
+              {selectedSystemLabel}
             </div>
           </div>
           <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
@@ -294,57 +295,58 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
             </div>
           </div>
         </div>
-        {!qubaSandboxEnabled && (
+        {sandboxBrainMode === 'v2' && !qubaSandboxEnabled && (
           <div className="mt-2 rounded-lg border px-3 py-2 text-[10px] leading-relaxed bg-yellow-50" style={{ borderColor: "rgba(245,158,11,0.25)", color: "var(--q-yellow, #f59e0b)" }}>
-            Yeni Brain direktifi testte kapalı. Yeni mimariyi denemek için solda “Yeni Brain testi” modunu seçip kaydedin.
+            Yeni V2 Brain test ediliyor. Bu mod canlı hastayı etkilemez; sadece test alanında eski prompt yerine parçalı alanları konuşturur.
           </div>
         )}
         <div className="mt-2 rounded-xl border p-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <div>
-              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Test prompt kaynağı</div>
-              <div className="text-[9px] text-gray-400">Canlı hasta akışını etkilemez.</div>
+              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Test edilecek sistem</div>
+              <div className="text-[9px] text-gray-400">İki sistem de canlıya göndermez; sadece test cevabı üretir.</div>
             </div>
             <span className="text-[9px] font-bold rounded-md border px-1.5 py-0.5 text-gray-500" style={{ borderColor: "var(--q-border-default)" }}>
-              {sandboxBrainMode === 'pure' ? "Parçalı" : "Güvenli"}
+              {sandboxBrainMode === 'v2' ? "Parçalı V2" : "Mevcut"}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => {
-                setSandboxBrainMode('hybrid');
+                setSandboxBrainMode('legacy');
                 setDebugMeta(null);
               }}
               className="rounded-lg border px-2.5 py-2 text-left transition-all hover:bg-white"
               style={{
-                borderColor: sandboxBrainMode === 'hybrid' ? "rgba(0,122,255,0.35)" : "var(--q-border-default)",
-                backgroundColor: sandboxBrainMode === 'hybrid' ? "rgba(0,122,255,0.06)" : "#fff",
+                borderColor: sandboxBrainMode === 'legacy' ? "rgba(0,122,255,0.35)" : "var(--q-border-default)",
+                backgroundColor: sandboxBrainMode === 'legacy' ? "rgba(0,122,255,0.06)" : "#fff",
               }}
             >
-              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Karma güvenli test</div>
-              <div className="text-[9px] leading-relaxed text-gray-400">Eski prompt + parçalanmış Brain</div>
+              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Eski Sistem</div>
+              <div className="text-[9px] leading-relaxed text-gray-400">Mevcut sistem promptu + canlı kapılar</div>
             </button>
             <button
               type="button"
               onClick={() => {
-                setSandboxBrainMode('pure');
+                setSandboxBrainMode('v2');
                 setDebugMeta(null);
               }}
               className="rounded-lg border px-2.5 py-2 text-left transition-all hover:bg-white"
               style={{
-                borderColor: sandboxBrainMode === 'pure' ? "rgba(34,197,94,0.35)" : "var(--q-border-default)",
-                backgroundColor: sandboxBrainMode === 'pure' ? "rgba(34,197,94,0.08)" : "#fff",
+                borderColor: sandboxBrainMode === 'v2' ? "rgba(34,197,94,0.35)" : "var(--q-border-default)",
+                backgroundColor: sandboxBrainMode === 'v2' ? "rgba(34,197,94,0.08)" : "#fff",
               }}
             >
-              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Saf SaaS Brain</div>
-              <div className="text-[9px] leading-relaxed text-gray-400">Eski prompt yok; alanlar konuşur</div>
+              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Yeni V2 Brain</div>
+              <div className="text-[9px] leading-relaxed text-gray-400">Parçalı SaaS alanları + canlı kapılar</div>
             </button>
           </div>
         </div>
       </div>
 
       {/* Live automation state */}
+      {showBrainDetails && (
       <div className="shrink-0 px-4 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2">
@@ -407,12 +409,13 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
           </div>
         )}
       </div>
+      )}
 
       {/* Sandbox Alert Info Banner */}
       <div className="shrink-0 px-4 py-2 bg-blue-50/50 border-b flex items-start gap-2 text-[10px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
         <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <p className="leading-relaxed">
-          <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve araçlar dry-run çalışır. <span className="opacity-75">Yanıt gecikmesi canlıya yakın simüle edilir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.</span>
+          <strong>Güvenli test:</strong> Gerçek hastaya mesaj gönderilmez. Seçilen sistem canlıdaki kapılarla denenir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.
         </p>
       </div>
 
@@ -658,7 +661,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       </div>
 
       {/* Brain v2 Response Evaluation */}
-      {brainEvaluation && (
+      {brainEvaluation && (showBrainDetails || brainEvaluation.status !== "pass") && (
         <div className="shrink-0 max-h-[170px] overflow-y-auto px-5 py-3 bg-white border-t space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
           <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
             <ListChecks
@@ -722,7 +725,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       )}
 
       {/* Brain v2 Shadow Diagnostics */}
-      {brainPlan && (
+      {brainPlan && showBrainDetails && (
         <div className="shrink-0 max-h-[170px] overflow-y-auto px-5 py-3 bg-white border-t space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
           <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
             <ListChecks className="w-4 h-4" style={{ color: "var(--q-blue, #007aff)" }} />
@@ -767,7 +770,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
           <span>STİL: {debugMeta.responseStyle}</span>
           <span>MAX TOKEN: {debugMeta.maxResponseTokens}</span>
           <span>GECİKME: {debugMeta.responseDelaySeconds}sn</span>
-          <span>KAYNAK: {debugMeta.sandboxBrainMode === 'pure' ? 'Saf Brain' : 'Karma'}</span>
+          <span>KAYNAK: {debugMeta.sandboxBrainMode === 'v2' ? 'Yeni V2 Brain' : 'Eski Sistem'}</span>
           {debugMeta.sandboxSystemPromptChars && <span>TEST PROMPT: {debugMeta.sandboxSystemPromptChars} krk.</span>}
         </div>
       )}

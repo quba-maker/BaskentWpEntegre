@@ -6719,6 +6719,28 @@ test("P0.17-1: Short confirmation 'olur' with no pending slot → safe acknowled
   });
 });
 
+test("P0.17-1b: Short confirmation after call time clarification keeps callback context", () => {
+  const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
+  const result = ContextAwareSafeFallbackResolver.resolve({
+    inboundText: "evet",
+    brain: {
+      context: { config: { industry: "healthcare" }, channel: "whatsapp" },
+      prompts: { metadata: { identity: { personaName: "Rüya", organizationShortName: "Başkent" } } }
+    },
+    identityConfig: { personaName: "Rüya", organizationShortName: "Başkent", organizationName: "Başkent Hastanesi" },
+    unifiedContext: {
+      history: [
+        { role: "user", content: "9 olur" },
+        { role: "assistant", content: "9 derken, hangi gün ve saat 9'u kastediyorsunuz? Örneğin 27 Haziran Cuma Türkiye saatiyle 09:00 gibi netleştirebilir misiniz?" },
+      ],
+    }
+  });
+  assert(result.finalPath === "short_confirmation_after_call_time_clarification",
+    `Expected call-time clarification continuation, got: ${result.finalPath}`);
+  assert(result.text.includes("09:00"), `Expected response to preserve the recent hour, got: ${result.text}`);
+  assert(!result.text.includes("Hangi konuda yardımcı olayım"), `Should not reset the conversation, got: ${result.text}`);
+});
+
 test("P0.17-2: Short confirmation 'tamam' with no slot → safe path", () => {
   const { ContextAwareSafeFallbackResolver } = require("../lib/services/ai/context-aware-safe-fallback");
   const result = ContextAwareSafeFallbackResolver.resolve({
@@ -12207,7 +12229,7 @@ test("Başkent v75 Bot Test T30b: sandbox playground simulates live delay reset"
 
   assert(playgroundCode.includes("delayTimerRef"), "Test playground should keep a delay timer");
   assert(playgroundCode.includes("clearTimeout(delayTimerRef.current)"), "New test messages should reset the previous timer");
-  assert(playgroundCode.includes("Yanıt gecikmesi canlıya yakın simüle edilir"), "Sandbox copy should explain live-like delay simulation");
+  assert(playgroundCode.includes("yeni test mesajı gelirse sayaç sıfırlanır"), "Sandbox copy should explain live-like delay reset");
   assert(playgroundCode.includes("mesajlar birlikte değerlendirilir"), "Sandbox copy should explain burst messages are evaluated together");
 });
 
@@ -14911,7 +14933,7 @@ test("Başkent v88 T134d: Bot test panel separates sandbox from live automation 
   assert(playgroundCode.includes("Dry-run / göndermez"), "Panel should clearly show dry-run as non-sending");
 });
 
-test("Başkent v88 T134e: Sandbox can test pure SaaS Brain separately from legacy prompt", () => {
+test("Başkent v88 T134e: Sandbox can test V2 Brain separately from legacy prompt", () => {
   const fs = require("fs");
   const path = require("path");
   const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
@@ -14919,11 +14941,11 @@ test("Başkent v88 T134e: Sandbox can test pure SaaS Brain separately from legac
 
   assert(botActionCode.includes("SandboxBrainMode"), "Test action should accept an explicit Brain source mode");
   assert(botActionCode.includes("buildPureQubaSandboxPrompt"), "Test action should build a pure Brain prompt without legacy system prompt");
-  assert(botActionCode.includes("legacy_prompt_plus_quba_brain"), "Hybrid mode should remain available for safe Başkent parity tests");
-  assert(botActionCode.includes("pure_quba_brain"), "Pure Brain mode should be exposed in sandbox metadata");
-  assert(playgroundCode.includes("Test prompt kaynağı"), "Panel should label the selected test prompt source");
-  assert(playgroundCode.includes("Karma güvenli test"), "Panel should offer safe legacy+Brain testing");
-  assert(playgroundCode.includes("Saf SaaS Brain"), "Panel should offer pure segmented Brain testing");
+  assert(botActionCode.includes("legacy_system_prompt"), "Legacy mode should use the current system prompt without V2 Brain overlay");
+  assert(botActionCode.includes("v2_quba_brain"), "V2 Brain mode should be exposed in sandbox metadata");
+  assert(playgroundCode.includes("Test edilecek sistem"), "Panel should label the selected test system");
+  assert(playgroundCode.includes("Eski Sistem"), "Panel should offer the current legacy system test");
+  assert(playgroundCode.includes("Yeni V2 Brain"), "Panel should offer the segmented V2 Brain test");
   assert(playgroundCode.includes("sandboxBrainMode"), "Panel should pass the selected mode into the sandbox action");
 });
 

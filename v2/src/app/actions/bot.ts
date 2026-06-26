@@ -21,10 +21,12 @@ type SandboxFormInput = {
   rawText?: string;
 };
 
-type SandboxBrainMode = 'hybrid' | 'pure';
+type SandboxBrainMode = 'legacy' | 'v2' | 'hybrid' | 'pure';
+type NormalizedSandboxBrainMode = 'legacy' | 'v2';
 
-function normalizeSandboxBrainMode(value: unknown): SandboxBrainMode {
-  return value === 'pure' ? 'pure' : 'hybrid';
+function normalizeSandboxBrainMode(value: unknown): NormalizedSandboxBrainMode {
+  if (value === 'v2' || value === 'pure') return 'v2';
+  return 'legacy';
 }
 
 function normalizeSandboxFormKey(label: string): string {
@@ -731,13 +733,14 @@ export async function testBotPrompt(
       });
       const brainV2SandboxDirective = BrainV2ShadowPlanner.buildSandboxPromptDirective(brainV2ShadowPlan);
       const sandboxBrainMode = normalizeSandboxBrainMode(options?.sandboxBrainMode);
-      const sandboxSystemPrompt = sandboxBrainMode === 'pure'
+      const effectiveQubaBrainCoreApplied = sandboxBrainMode === 'v2' && qubaBrainCoreApplied;
+      const sandboxSystemPrompt = sandboxBrainMode === 'v2'
         ? `${buildPureQubaSandboxPrompt({
             qubaBrainDirective: qubaBrainDirective || QubaBrainCompiler.buildDirective(qubaBrainProfile),
             knowledgePrices: activePrompt.knowledge_prices,
             knowledgeRules: activePrompt.knowledge_rules,
           })}${brainV2SandboxDirective}`
-        : `${rawSystemPrompt}${qubaBrainDirective}${brainV2SandboxDirective}`;
+        : rawSystemPrompt;
       const sandboxPromptHash = crypto.createHash('sha256').update(sandboxSystemPrompt).digest('hex');
       const sandboxBrain = {
         ...mockBrain,
@@ -820,10 +823,10 @@ export async function testBotPrompt(
           responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
           responseStyle: profile?.response_style || 'balanced',
           maxResponseTokens: maxTokens,
-          qubaBrainCoreApplied,
+          qubaBrainCoreApplied: effectiveQubaBrainCoreApplied,
           qubaBrainRolloutMode,
           sandboxBrainMode,
-          sandboxPromptSource: sandboxBrainMode === 'pure' ? 'pure_quba_brain' : 'legacy_prompt_plus_quba_brain',
+          sandboxPromptSource: sandboxBrainMode === 'v2' ? 'v2_quba_brain' : 'legacy_system_prompt',
           legacySystemPromptChars: rawSystemPrompt.length,
           sandboxSystemPromptChars: sandboxSystemPrompt.length,
           qubaBrainProfile,
