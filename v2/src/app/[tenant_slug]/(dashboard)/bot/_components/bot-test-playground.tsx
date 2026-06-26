@@ -20,6 +20,7 @@ interface BotTestPlaygroundProps {
         formName?: string;
         rawText?: string;
       } | null;
+      sandboxBrainMode?: 'hybrid' | 'pure';
     }
   ) => Promise<{ success: boolean; reply: string; metadata?: any }>;
   onGetBrainDiagnostics?: (
@@ -37,6 +38,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const [sandboxFormEnabled, setSandboxFormEnabled] = useState(false);
   const [sandboxFormName, setSandboxFormName] = useState("Sandbox Test Formu");
   const [sandboxFormText, setSandboxFormText] = useState("");
+  const [sandboxBrainMode, setSandboxBrainMode] = useState<'hybrid' | 'pure'>('hybrid');
   const [showBrainDetails, setShowBrainDetails] = useState(false);
   const [brainDiagnosticsLoading, setBrainDiagnosticsLoading] = useState(false);
   const [brainDiagnosticsError, setBrainDiagnosticsError] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
     setSandboxFormEnabled(false);
     setSandboxFormName("Sandbox Test Formu");
     setSandboxFormText("");
+    setSandboxBrainMode('hybrid');
     setShowBrainDetails(false);
     setBrainDiagnosticsError(null);
     setWaitingForDelay(false);
@@ -133,6 +136,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
             sandboxForm: sandboxFormEnabled && sandboxFormText.trim()
               ? { formName: sandboxFormName, rawText: sandboxFormText }
               : null,
+            sandboxBrainMode,
           }
         );
         if (result) {
@@ -268,7 +272,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
           <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
             <div className="text-[9px] font-bold text-gray-400 mb-0.5">TEST MOTORU</div>
             <div className="text-[11px] font-bold truncate" style={{ color: "var(--q-text-primary)" }}>
-              {rolloutLabel}
+              {sandboxBrainMode === 'pure' ? 'Saf Brain' : rolloutLabel}
             </div>
           </div>
           <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
@@ -295,6 +299,49 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
             Yeni Brain direktifi testte kapalı. Yeni mimariyi denemek için solda “Yeni Brain testi” modunu seçip kaydedin.
           </div>
         )}
+        <div className="mt-2 rounded-xl border p-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Test prompt kaynağı</div>
+              <div className="text-[9px] text-gray-400">Canlı hasta akışını etkilemez.</div>
+            </div>
+            <span className="text-[9px] font-bold rounded-md border px-1.5 py-0.5 text-gray-500" style={{ borderColor: "var(--q-border-default)" }}>
+              {sandboxBrainMode === 'pure' ? "Parçalı" : "Güvenli"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setSandboxBrainMode('hybrid');
+                setDebugMeta(null);
+              }}
+              className="rounded-lg border px-2.5 py-2 text-left transition-all hover:bg-white"
+              style={{
+                borderColor: sandboxBrainMode === 'hybrid' ? "rgba(0,122,255,0.35)" : "var(--q-border-default)",
+                backgroundColor: sandboxBrainMode === 'hybrid' ? "rgba(0,122,255,0.06)" : "#fff",
+              }}
+            >
+              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Karma güvenli test</div>
+              <div className="text-[9px] leading-relaxed text-gray-400">Eski prompt + parçalanmış Brain</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSandboxBrainMode('pure');
+                setDebugMeta(null);
+              }}
+              className="rounded-lg border px-2.5 py-2 text-left transition-all hover:bg-white"
+              style={{
+                borderColor: sandboxBrainMode === 'pure' ? "rgba(34,197,94,0.35)" : "var(--q-border-default)",
+                backgroundColor: sandboxBrainMode === 'pure' ? "rgba(34,197,94,0.08)" : "#fff",
+              }}
+            >
+              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Saf SaaS Brain</div>
+              <div className="text-[9px] leading-relaxed text-gray-400">Eski prompt yok; alanlar konuşur</div>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Live automation state */}
@@ -720,6 +767,8 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
           <span>STİL: {debugMeta.responseStyle}</span>
           <span>MAX TOKEN: {debugMeta.maxResponseTokens}</span>
           <span>GECİKME: {debugMeta.responseDelaySeconds}sn</span>
+          <span>KAYNAK: {debugMeta.sandboxBrainMode === 'pure' ? 'Saf Brain' : 'Karma'}</span>
+          {debugMeta.sandboxSystemPromptChars && <span>TEST PROMPT: {debugMeta.sandboxSystemPromptChars} krk.</span>}
         </div>
       )}
 

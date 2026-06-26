@@ -14911,6 +14911,22 @@ test("Başkent v88 T134d: Bot test panel separates sandbox from live automation 
   assert(playgroundCode.includes("Dry-run / göndermez"), "Panel should clearly show dry-run as non-sending");
 });
 
+test("Başkent v88 T134e: Sandbox can test pure SaaS Brain separately from legacy prompt", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
+  const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
+
+  assert(botActionCode.includes("SandboxBrainMode"), "Test action should accept an explicit Brain source mode");
+  assert(botActionCode.includes("buildPureQubaSandboxPrompt"), "Test action should build a pure Brain prompt without legacy system prompt");
+  assert(botActionCode.includes("legacy_prompt_plus_quba_brain"), "Hybrid mode should remain available for safe Başkent parity tests");
+  assert(botActionCode.includes("pure_quba_brain"), "Pure Brain mode should be exposed in sandbox metadata");
+  assert(playgroundCode.includes("Test prompt kaynağı"), "Panel should label the selected test prompt source");
+  assert(playgroundCode.includes("Karma güvenli test"), "Panel should offer safe legacy+Brain testing");
+  assert(playgroundCode.includes("Saf SaaS Brain"), "Panel should offer pure segmented Brain testing");
+  assert(playgroundCode.includes("sandboxBrainMode"), "Panel should pass the selected mode into the sandbox action");
+});
+
 test("Başkent v88 T135: Live orchestrator writes Brain v2 shadow evaluation as non-blocking safe audit", () => {
   const fs = require("fs");
   const path = require("path");

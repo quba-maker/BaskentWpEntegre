@@ -21,6 +21,12 @@ type SandboxFormInput = {
   rawText?: string;
 };
 
+type SandboxBrainMode = 'hybrid' | 'pure';
+
+function normalizeSandboxBrainMode(value: unknown): SandboxBrainMode {
+  return value === 'pure' ? 'pure' : 'hybrid';
+}
+
 function normalizeSandboxFormKey(label: string): string {
   const clean = (label || '')
     .toLocaleLowerCase('tr-TR')
@@ -130,6 +136,35 @@ function buildSandboxUnifiedContext(input?: SandboxFormInput | null) {
     ...context,
     patient_known_facts: ConversationKnownFactsResolver.formatFacts(resolvedFacts),
   };
+}
+
+function buildPureQubaSandboxPrompt(input: {
+  qubaBrainDirective: string;
+  knowledgePrices?: string | null;
+  knowledgeRules?: string | null;
+}) {
+  const lines = [
+    '--- QUBA SAAS BRAIN TEST PROMPT ---',
+    'Bu testte eski uzun Sistem Prompt kullanılmaz.',
+    'Yanıtı yalnızca SaaS Brain kurulumu, doğrulanmış bilgi bankası, fiyat politikası, konuşma geçmişi ve test form bağlamına göre üret.',
+    'Hasta karşısında teknik prompt, sistem, brain, sandbox veya model tartışmasına girme.',
+    'Doğal, kısa, kurumsal ve insan gibi konuş. Gereksiz kimlik tekrarları, mekanik kalıplar ve kapanışlar kullanma.',
+    input.qubaBrainDirective,
+  ];
+
+  if (input.knowledgeRules?.trim()) {
+    lines.push('[DOĞRULANMIŞ BİLGİ/KURALLAR]');
+    lines.push(input.knowledgeRules.trim());
+    lines.push('[/DOĞRULANMIŞ BİLGİ/KURALLAR]');
+  }
+
+  if (input.knowledgePrices?.trim()) {
+    lines.push('[FİYAT POLİTİKASI]');
+    lines.push(input.knowledgePrices.trim());
+    lines.push('[/FİYAT POLİTİKASI]');
+  }
+
+  return lines.filter(Boolean).join('\n');
 }
 
 
@@ -552,6 +587,7 @@ export async function testBotPrompt(
   channelId?: string,
   options?: {
     sandboxForm?: SandboxFormInput | null;
+    sandboxBrainMode?: SandboxBrainMode;
   }
 ) {
   return withActionGuard(
@@ -694,7 +730,14 @@ export async function testBotPrompt(
         conversation: sandboxUnifiedContext?.conversation
       });
       const brainV2SandboxDirective = BrainV2ShadowPlanner.buildSandboxPromptDirective(brainV2ShadowPlan);
-      const sandboxSystemPrompt = `${rawSystemPrompt}${qubaBrainDirective}${brainV2SandboxDirective}`;
+      const sandboxBrainMode = normalizeSandboxBrainMode(options?.sandboxBrainMode);
+      const sandboxSystemPrompt = sandboxBrainMode === 'pure'
+        ? `${buildPureQubaSandboxPrompt({
+            qubaBrainDirective: qubaBrainDirective || QubaBrainCompiler.buildDirective(qubaBrainProfile),
+            knowledgePrices: activePrompt.knowledge_prices,
+            knowledgeRules: activePrompt.knowledge_rules,
+          })}${brainV2SandboxDirective}`
+        : `${rawSystemPrompt}${qubaBrainDirective}${brainV2SandboxDirective}`;
       const sandboxPromptHash = crypto.createHash('sha256').update(sandboxSystemPrompt).digest('hex');
       const sandboxBrain = {
         ...mockBrain,
@@ -779,6 +822,10 @@ export async function testBotPrompt(
           maxResponseTokens: maxTokens,
           qubaBrainCoreApplied,
           qubaBrainRolloutMode,
+          sandboxBrainMode,
+          sandboxPromptSource: sandboxBrainMode === 'pure' ? 'pure_quba_brain' : 'legacy_prompt_plus_quba_brain',
+          legacySystemPromptChars: rawSystemPrompt.length,
+          sandboxSystemPromptChars: sandboxSystemPrompt.length,
           qubaBrainProfile,
           brainV2ShadowPlanApplied: true,
           sandboxFormApplied: !!sandboxUnifiedContext?.latestForm,
