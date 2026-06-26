@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { FlaskConical, Send, Loader2, Bot, Trash2, ShieldCheck, ListChecks } from "lucide-react";
+import { FlaskConical, Send, Loader2, Bot, Trash2, ShieldCheck, ListChecks, FileText } from "lucide-react";
 import { type BotChannel } from "./shared";
 
 // ==========================================
@@ -14,7 +14,13 @@ interface BotTestPlaygroundProps {
   onTestPrompt: (
     botGroupId: string,
     messages: { role: 'user' | 'assistant'; content: string }[],
-    channelId?: string
+    channelId?: string,
+    options?: {
+      sandboxForm?: {
+        formName?: string;
+        rawText?: string;
+      } | null;
+    }
   ) => Promise<{ success: boolean; reply: string; metadata?: any }>;
   onGetBrainDiagnostics?: (
     botGroupId: string
@@ -28,6 +34,9 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const [waitingForDelay, setWaitingForDelay] = useState(false);
   const [debugMeta, setDebugMeta] = useState<any>(null);
   const [brainMeta, setBrainMeta] = useState<any>(null);
+  const [sandboxFormEnabled, setSandboxFormEnabled] = useState(false);
+  const [sandboxFormName, setSandboxFormName] = useState("Sandbox Test Formu");
+  const [sandboxFormText, setSandboxFormText] = useState("");
   const [brainDiagnosticsLoading, setBrainDiagnosticsLoading] = useState(false);
   const [brainDiagnosticsError, setBrainDiagnosticsError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -47,6 +56,9 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
     setMessages([]);
     setDebugMeta(null);
     setBrainMeta(null);
+    setSandboxFormEnabled(false);
+    setSandboxFormName("Sandbox Test Formu");
+    setSandboxFormText("");
     setBrainDiagnosticsError(null);
     setWaitingForDelay(false);
     setTesting(false);
@@ -110,7 +122,16 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
 
       const historyPayload = nextMessages.slice(-20);
       try {
-        const result = await onTestPrompt(botGroupId, historyPayload);
+        const result = await onTestPrompt(
+          botGroupId,
+          historyPayload,
+          activeChannel.id,
+          {
+            sandboxForm: sandboxFormEnabled && sandboxFormText.trim()
+              ? { formName: sandboxFormName, rawText: sandboxFormText }
+              : null,
+          }
+        );
         if (result) {
           setMessages(prev => [...prev, { role: 'assistant' as const, content: result.reply }]);
           if (result.metadata) {
@@ -145,6 +166,22 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
     setDebugMeta(null);
     setWaitingForDelay(false);
     setTesting(false);
+  };
+
+  const loadSampleForm = () => {
+    setSandboxFormEnabled(true);
+    setSandboxFormName("Gurbetçiler Form Randevu");
+    setSandboxFormText([
+      "Full name: Aysu Maysu",
+      "Phone number: +905535874260",
+      "Hangi ülkede yaşıyorsunuz?: Babam Türkiye'de ben Almanya'dayım",
+      "Yaşınız?: 76",
+      "Şikayetiniz Nedir?: Bel ve boyun fıtığı nedeniyle 3 yıldır yürüyemiyor babam. Ameliyat riskli, sinirlerinin zedelenebileceğini söylediler.",
+      "Şikayetiniz Ne Zaman Başladı?: 3 yıl önce",
+      "Size ne zaman randevu oluşturmamızı istersiniz?: Önce bilgi almak istiyorum, daha sonra gelebiliriz",
+      "Tedavi planlamanız ve ön görüşme için sizi ne zaman arayalım?: Öğleden sonra (12:00 - 18:00)",
+      "Önerilen Bölüm: Ortopedi",
+    ].join("\n"));
   };
 
   const brainPlan = debugMeta?.brainV2ShadowPlan;
@@ -207,6 +244,60 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
         <p className="leading-relaxed">
           <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve asistan araçları dry-run çalıştırılır. <span className="opacity-75">Yanıt gecikmesi canlıya yakın simüle edilir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.</span>
         </p>
+      </div>
+
+      {/* Live-like form context */}
+      <div className="px-5 py-3 bg-white border-b space-y-3" style={{ borderColor: "var(--q-border-default)" }}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4" style={{ color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-secondary)" }} />
+            <div>
+              <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Formlu Test</div>
+              <div className="text-[10px] text-gray-400">Canlıdaki form lead akışını test alanında simüle eder.</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={loadSampleForm}
+              type="button"
+              className="px-2.5 py-1.5 rounded-lg border text-[10px] font-bold hover:bg-gray-50"
+              style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}
+            >
+              Örnek Form
+            </button>
+            <label className="flex items-center gap-2 text-[11px] font-bold text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sandboxFormEnabled}
+                onChange={e => setSandboxFormEnabled(e.target.checked)}
+                className="w-4 h-4"
+              />
+              Aç
+            </label>
+          </div>
+        </div>
+        {sandboxFormEnabled && (
+          <div className="space-y-2">
+            <input
+              value={sandboxFormName}
+              onChange={e => setSandboxFormName(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border text-xs"
+              style={{ borderColor: "var(--q-border-default)" }}
+              placeholder="Form adı"
+            />
+            <textarea
+              value={sandboxFormText}
+              onChange={e => setSandboxFormText(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 rounded-xl border text-xs resize-y"
+              style={{ borderColor: "var(--q-border-default)" }}
+              placeholder={"Canlı form metnini buraya yapıştırın.\nÖrn: Full name: ...\nŞikayetiniz Nedir?: ...\nNerede yaşıyorsunuz?: ..."}
+            />
+            <div className="text-[10px] text-gray-400">
+              Açıkken ilk “merhaba” cevabı form karşılaması gibi; kapalıyken doğrudan WhatsApp hastası gibi test edilir.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Quba Brain Setup Health */}

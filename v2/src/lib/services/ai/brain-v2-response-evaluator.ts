@@ -80,6 +80,12 @@ export class BrainV2ResponseEvaluator {
       }
     }
 
+    if (planRequires(plan, 'fiyat sorusu tekrarlandı')) {
+      if (!includesAny(cleanReply, ['telefon görüşmesi', 'sizi arayabilir', 'görüşmede', 'hasta danışmanı', 'uygun gün', 'uygun saat'])) {
+        missingAnswers.push('Tekrarlı fiyat çıkmazında telefon/danışman seçeneği doğal şekilde sunulmadı');
+      }
+    }
+
     if (planRequires(plan, 'doktor adı')) {
       const hasDoctorDirectory = (plan.verifiedFacts.doctorDirectory || []).some(block => (block.doctors || []).length > 0);
       if (hasDoctorDirectory && !hasVerifiedDoctorName(plan, cleanReply)) {
@@ -133,6 +139,27 @@ export class BrainV2ResponseEvaluator {
       }
     }
 
+    if (planRequires(plan, 'güven kırılmasını')) {
+      if (!includesAny(cleanReply, ['haklısınız', 'anlıyorum', 'güven', 'net yardımcı', 'daha net', 'somut'])) {
+        missingAnswers.push('Güven kırılması sahiplenilmedi');
+      }
+      if (includesAny(cleanReply, ['hangi konuda bilgi almak istiyorsunuz', 'size sağlık talebinizle ilgili yardımcı olayım'])) {
+        forbiddenHits.push('Güven kırılmasında generic kaçış cevabı kullanıldı');
+      }
+    }
+
+    if (planRequires(plan, 'görsel/rapor/belge')) {
+      if (!includesAny(cleanReply, ['ulaştı', 'geldi', 'rapor', 'görsel', 'belge', 'tetkik'])) {
+        missingAnswers.push('Görsel/rapor/belge geldiği belirtilmedi');
+      }
+      if (!includesAny(cleanReply, ['tıbbi yorum yapamam', 'buradan yorum yapamam', 'net değerlendirme yapamam'])) {
+        missingAnswers.push('Medya/belge için tıbbi yorum sınırı belirtilmedi');
+      }
+      if (includesAny(cleanReply, ['doktorumuz inceleyecek', 'ekibimiz değerlendirecek', 'rapora göre teşhis'])) {
+        forbiddenHits.push('Medya/belge için inceleme veya tanı vaadi riski');
+      }
+    }
+
     if (planRequires(plan, 'geliş bilgisini')) {
       if (includesAny(cleanReply, ['gelme ihtimaliniz olur mu', 'türkiye’ye gelme ihtimaliniz', 'turkiye\'ye gelme ihtimaliniz'])) {
         qualityWarnings.push('Geliş niyeti zaten varken tekrar sorulmuş olabilir');
@@ -148,6 +175,11 @@ export class BrainV2ResponseEvaluator {
 
     if (/\b(Bey|Hanım|Sayın|Bayan|Bay)\b/.test(reply)) {
       qualityWarnings.push('Cinsiyetli/resmi hitap kullanıldı');
+    }
+
+    const mechanicalStarts = (reply.match(/(?:^|\n)\s*(?:Anlıyorum|Anladım)\b/g) || []).length;
+    if (mechanicalStarts > 1) {
+      qualityWarnings.push('Mekanik Anlıyorum/Anladım başlangıcı tekrarlanıyor');
     }
 
     if (includesAny(cleanReply, ['başkent üniversitesi konya hastanesi’nden ben', 'başkent üniversitesi konya hastanesi\'nden ben']) && plan.contactMode === 'continuing_conversation') {

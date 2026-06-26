@@ -55,6 +55,7 @@ const COUNTRY_ALIASES: Array<{ label: string; aliases: string[] }> = [
 
 function detectRelationFromText(text?: string | null): RelatedPersonFact['relation'] | null {
   const lower = (text || '').toLocaleLowerCase('tr-TR');
+  if (/\b(?:tekrar\s+anne\s+olmak|anne\s+olmak|anne\s+olmak\s+istiyorum|anne\s+olabilmek|bebek\s+sahibi|çocuk\s+sahibi|cocuk\s+sahibi)\b/.test(lower)) return null;
   if (/\b(?:babam|babamın|babasi|babası|baba)\b/.test(lower)) return 'father';
   if (/\b(?:annem|annemin|annesi|anne)\b/.test(lower)) return 'mother';
   if (/\b(?:eşim|esim|eşimin|esimin|eşi|esi|karım|kocam)\b/.test(lower)) return 'spouse';
@@ -150,7 +151,8 @@ export class ConversationKnownFactsResolver {
       for (const fact of patient_known_facts) {
         if (typeof fact === 'string') {
           const lowerFact = fact.toLowerCase();
-          if (lowerFact.includes('yakın') || lowerFact.includes('yakin') || lowerFact.includes('anne') || lowerFact.includes('baba') || lowerFact.includes('eşi') || lowerFact.includes('esi')) {
+          const fertilitySelfPhrase = /\b(?:tekrar\s+anne\s+olmak|anne\s+olmak|anne\s+olmak\s+istiyorum|anne\s+olabilmek|bebek\s+sahibi|çocuk\s+sahibi|cocuk\s+sahibi)\b/.test(lowerFact);
+          if (!fertilitySelfPhrase && (lowerFact.includes('yakın') || lowerFact.includes('yakin') || lowerFact.includes('anne') || lowerFact.includes('baba') || lowerFact.includes('eşi') || lowerFact.includes('esi'))) {
             const match = fact.match(/(?:konusu|şikayeti|şikayet|sikayet):\s*(.+)/i);
             const topic = match && match[1] ? match[1].replace(/[.]+$/, '').trim() : fact;
             let relation: 'mother' | 'father' | 'spouse' | 'relative' = 'relative';
@@ -330,7 +332,9 @@ export class ConversationKnownFactsResolver {
 
       // Check relationship mentions
       let foundRelation = false;
+      const fertilitySelfPhrase = /\b(?:tekrar\s+anne\s+olmak|anne\s+olmak|anne\s+olmak\s+istiyorum|anne\s+olabilmek|bebek\s+sahibi|çocuk\s+sahibi|cocuk\s+sahibi)\b/.test(lower);
       for (const rel of relationshipMapping) {
+        if (fertilitySelfPhrase && rel.relation === 'mother') continue;
         if (rel.keys.some(key => lower.includes(key))) {
           foundRelation = true;
           let topic: string | undefined = undefined;
@@ -379,7 +383,19 @@ export class ConversationKnownFactsResolver {
     // Fallbacks from opportunity/form
     if (!self.complaint) {
       if (opportunity?.metadata?.complaint) {
-        self.complaint = opportunity.metadata.complaint;
+        const rawComplaint = String(opportunity.metadata.complaint || '');
+        const relation = detectRelationFromText(rawComplaint);
+        if (relation) {
+          const existing = relatedPersons.find(rp => rp.relation === relation);
+          const topic = summarizeComplaintTopic(rawComplaint);
+          if (existing) {
+            existing.topic = existing.topic || topic;
+          } else {
+            relatedPersons.push({ relation, topic });
+          }
+        } else {
+          self.complaint = normalizeFormValue(rawComplaint);
+        }
       } else if (latestForm?.data) {
         const data = typeof latestForm.data === 'string' ? (() => { try { return JSON.parse(latestForm.data); } catch { return {}; } })() : latestForm.data;
         // Primary: sikayet field
@@ -563,6 +579,9 @@ export class ConversationKnownFactsResolver {
 
     if (facts.self?.complaint) {
       facts.complaint = facts.self.complaint;
+    } else if (facts.relatedPersons && facts.relatedPersons.length > 0) {
+      const relatedTopic = facts.relatedPersons.find(rp => rp.topic)?.topic;
+      if (relatedTopic) facts.complaint = relatedTopic;
     }
 
     return facts;

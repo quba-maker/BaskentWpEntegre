@@ -2628,6 +2628,20 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     // Emits FINAL_OUTBOUND_BODY_AUDIT telemetry.
     if (finalResponseText && channel === 'whatsapp') {
       const { FinalOutboundBodyAuditor } = await import('@/lib/services/ai/final-outbound-body-auditor');
+      let verifiedDoctorDirectory: Array<{ department: string; doctors: string[] }> | undefined;
+      try {
+        const { DoctorDirectoryResolver } = await import('@/lib/services/ai/doctor-directory-resolver');
+        const activeDept = unifiedContext?.conversation?.department || unifiedContext?.opportunity?.department || undefined;
+        const doctors = DoctorDirectoryResolver.getDoctors(brain, activeDept);
+        if (doctors.length > 0) {
+          const grouped = new Map<string, string[]>();
+          doctors.forEach((doctor: any) => {
+            const dept = doctor.department || activeDept || 'İlgili bölüm';
+            grouped.set(dept, [...(grouped.get(dept) || []), doctor.name]);
+          });
+          verifiedDoctorDirectory = Array.from(grouped.entries()).map(([department, doctors]) => ({ department, doctors }));
+        }
+      } catch { /* non-fatal */ }
       const auditResult = FinalOutboundBodyAuditor.audit(finalResponseText, {
         tenantId,
         conversationId: conversationId || undefined,
@@ -2636,6 +2650,15 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         channel: 'whatsapp',
         replyLanguage: orchestratorResult.replyLanguage,
         inboundText: content || '',
+        conversationContextText: [
+          ...(Array.isArray(history) ? history : [])
+            .filter((m: any) => m?.role === 'user' || m?.direction === 'in')
+            .slice(-10)
+            .map((m: any) => String(m.content || '')),
+          content || ''
+        ].filter(Boolean).join('\n'),
+        verifiedDoctorDirectory,
+        patientKnownFacts: Array.isArray(unifiedContext?.patient_known_facts) ? unifiedContext.patient_known_facts : [],
       });
       finalResponseText = auditResult.text;
     } else if (finalResponseText && channel !== 'whatsapp') {
@@ -4714,6 +4737,20 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       // Replaces legacy formatForWhatsApp() for WhatsApp channel.
       if (finalResponseText && channel === 'whatsapp') {
         const { FinalOutboundBodyAuditor } = await import('@/lib/services/ai/final-outbound-body-auditor');
+        let verifiedDoctorDirectory: Array<{ department: string; doctors: string[] }> | undefined;
+        try {
+          const { DoctorDirectoryResolver } = await import('@/lib/services/ai/doctor-directory-resolver');
+          const activeDept = unifiedContext?.conversation?.department || unifiedContext?.opportunity?.department || undefined;
+          const doctors = DoctorDirectoryResolver.getDoctors(brain, activeDept);
+          if (doctors.length > 0) {
+            const grouped = new Map<string, string[]>();
+            doctors.forEach((doctor: any) => {
+              const dept = doctor.department || activeDept || 'İlgili bölüm';
+              grouped.set(dept, [...(grouped.get(dept) || []), doctor.name]);
+            });
+            verifiedDoctorDirectory = Array.from(grouped.entries()).map(([department, doctors]) => ({ department, doctors }));
+          }
+        } catch { /* non-fatal */ }
         const auditResult = FinalOutboundBodyAuditor.audit(finalResponseText, {
           tenantId,
           conversationId: conversationId || undefined,
@@ -4722,6 +4759,15 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
           channel: 'whatsapp',
           replyLanguage: orchestratorResult.replyLanguage,
           inboundText: combinedInboundText,
+          conversationContextText: [
+            ...(Array.isArray(history) ? history : [])
+              .filter((m: any) => m?.role === 'user' || m?.direction === 'in')
+              .slice(-10)
+              .map((m: any) => String(m.content || '')),
+            combinedInboundText || ''
+          ].filter(Boolean).join('\n'),
+          verifiedDoctorDirectory,
+          patientKnownFacts: Array.isArray(unifiedContext?.patient_known_facts) ? unifiedContext.patient_known_facts : [],
         });
         finalResponseText = auditResult.text;
       } else if (finalResponseText && channel !== 'whatsapp') {

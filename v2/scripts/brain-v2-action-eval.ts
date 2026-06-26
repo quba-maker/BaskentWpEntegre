@@ -8,6 +8,16 @@ interface ChatMessage {
   content: string;
 }
 
+interface AssistantEvaluation {
+  stepIndex: number;
+  status?: string;
+  score?: number;
+  summary?: string;
+  missingAnswers?: string[];
+  forbiddenHits?: string[];
+  qualityWarnings?: string[];
+}
+
 interface Step {
   text: string;
   burst?: boolean;
@@ -17,6 +27,10 @@ interface Scenario {
   id: string;
   title: string;
   steps: Step[];
+  sandboxForm?: {
+    formName?: string;
+    rawText: string;
+  };
   checks: Array<(messages: ChatMessage[]) => string | null>;
 }
 
@@ -34,7 +48,8 @@ process.env.TEST_USER_ROLE = process.env.TEST_USER_ROLE || "platform_admin";
 let testBotPromptAction: null | ((
   botGroupId: string,
   messages: { role: "user" | "assistant"; content: string }[],
-  channelId?: string
+  channelId?: string,
+  options?: { sandboxForm?: { formName?: string; rawText: string } | null }
 ) => Promise<{ success: boolean; reply: string; metadata?: any }>) = null;
 
 async function getTestBotPromptAction() {
@@ -93,10 +108,49 @@ function noPromptLeak(messages: ChatMessage[]): string | null {
   return bad ? `Prompt/bilgi arsivi sizintisi var: ${bad}` : null;
 }
 
+function noMechanicalLoop(messages: ChatMessage[]): string | null {
+  const starts = assistantMessages(messages)
+    .flatMap((text) => text.split(/\n+/))
+    .filter((line) => /^\s*(anlıyorum|anladım)\b/i.test(line.trim()));
+  return starts.length > 1 ? `Mekanik Anlıyorum/Anladım tekrarı var: ${starts.join(" | ")}` : null;
+}
+
+function noEarlyVisitPressure(messages: ChatMessage[]): string | null {
+  const bad = assistantMessages(messages).find((text) => {
+    const clean = normalize(text.replace(/\*/g, '').replace(/\s+/g, ' '));
+    return /ilerleyen\s+d[öo]nemde[\s\S]{0,160}(?:t[üu]rkiye|konya)[\s\S]{0,160}gelme\s+ihtimaliniz\s+olur\s+mu/.test(clean) ||
+      /t[üu]rkiye['’]ye[\s\S]{0,80}konya['’]ya\s+gelme\s+ihtimaliniz\s+olur\s+mu/.test(clean);
+  });
+  return bad ? `Gelme niyeti erken ve kalıp şekilde sorulmuş: ${bad}` : null;
+}
+
+function noKnownBadTurkish(messages: ChatMessage[]): string | null {
+  const bad = assistantMessages(messages).find((text) =>
+    /(?:^|[.!?]\s+)size\s+en\s+uygun/.test(text) ||
+    /mümkün\s+değildir\s+olmuyor|kişiniz|süreciniz\s+kapsamı|uzmanızı|tetkikleriniz\s+yapılması/i.test(text)
+  );
+  return bad ? `Bozuk Türkçe kalıbı var: ${bad}` : null;
+}
+
+function noBotIdentityDisclosure(messages: ChatMessage[]): string | null {
+  const bad = assistantMessages(messages).find((text) =>
+    /\b(?:yapay zekayım|botum|ben bot|ai model|dil modeli)\b/i.test(text)
+  );
+  return bad ? `Bot kimliği açık edilmiş: ${bad}` : null;
+}
+
 function expectLastContains(label: string, needles: string[]) {
   return (messages: ChatMessage[]) => {
     const last = lastAssistant(messages);
     return containsAny(last, needles) ? null : `${label} bekleniyordu; son cevap: ${last}`;
+  };
+}
+
+function expectLastContainsAll(label: string, groups: string[][]) {
+  return (messages: ChatMessage[]) => {
+    const last = lastAssistant(messages);
+    const missingIndex = groups.findIndex(group => !group.some(needle => containsAny(last, [needle])));
+    return missingIndex === -1 ? null : `${label} eksik; son cevap: ${last}`;
   };
 }
 
@@ -108,6 +162,24 @@ function expectAnyContains(label: string, needles: string[]) {
 }
 
 const scenarios: Scenario[] = [
+  {
+    id: "ilk-sikayet-bilgi-once",
+    title: "İlk şikayette bilgi önce, erken gelme baskısı yok",
+    steps: [
+      { text: "merhaba" },
+      { text: "bel fıtığım var, bilgi almak istiyorum" },
+    ],
+    checks: [
+      noHonorific,
+      noRepeatedIdentity,
+      noGenericEscape,
+      noPromptLeak,
+      noMechanicalLoop,
+      noKnownBadTurkish,
+      noEarlyVisitPressure,
+      expectLastContains("Bel fitigi bilgi cevabi", ["bel fıtığı", "muayene", "tetkik", "değerlendirme"]),
+    ],
+  },
   {
     id: "bel-fitigi-doktor-surec",
     title: "Bel fitigi: doktor + surec",
@@ -124,6 +196,8 @@ const scenarios: Scenario[] = [
       noRepeatedIdentity,
       noGenericEscape,
       noPromptLeak,
+      noMechanicalLoop,
+      noKnownBadTurkish,
       expectAnyContains("Bel fitigi doktor adi", ["Mustafa Kemal İLİK", "Beyin ve Sinir Cerrahisi"]),
       expectLastContains("Surec cevabi", ["muayene", "değerlendirme"]),
     ],
@@ -141,6 +215,8 @@ const scenarios: Scenario[] = [
     checks: [
       noGenericEscape,
       noPromptLeak,
+      noMechanicalLoop,
+      noKnownBadTurkish,
       expectLastContains("Fiyat politikasi", ["buradan net fiyat paylaşamıyorum"]),
       expectLastContains("Konaklama yaniti", ["konaklama", "otel", "anlaşmalı"]),
       expectLastContains("Dermatoloji doktor bilgisi", ["Dermatoloji", "Dr."]),
@@ -163,6 +239,8 @@ const scenarios: Scenario[] = [
       noHonorific,
       noGenericEscape,
       noPromptLeak,
+      noMechanicalLoop,
+      noKnownBadTurkish,
       expectLastContains("Israrli doktor adi talebi", ["Dermatoloji", "Dr."]),
       (messages) => /yanlış vermek istemem/i.test(lastAssistant(messages))
         ? `Son cevap halen doktor ismini yuvarliyor: ${lastAssistant(messages)}`
@@ -172,25 +250,67 @@ const scenarios: Scenario[] = [
   {
     id: "form-fertilite-prompt-leak",
     title: "Form lead: tekrar anne olmak istiyorum",
+    sandboxForm: {
+      formName: "Uluslararası Kadın Doğum Formu",
+      rawText: [
+        "WhatsApp number: +998991244018",
+        "Full name: Medine",
+        "Phone number: +998991244018",
+        "Hangi ülkede yaşıyorsunuz?: Özbeksitan",
+        "Türkiye'ye (Konya'ya) tedavi için gelme planınız nedir?: Malesef Yurdışına çıkamam ve Konya'ya gelemem.",
+        "Tedavi planlamanız ve ön görüşme için sizi ne zaman arayalım?: Öğleden sonra (12:00 - 18:00)",
+        "Şikayetiniz Nedir?: 39 yaşindayim ikki çocuğum var tekrar anne olmak istiyorum",
+      ].join("\n"),
+    },
     steps: [
-      {
-        text: [
-          "Merhaba! Formunuzu doldurdum ve işletmeniz hakkında daha fazla bilgi edinmek istiyorum.",
-          "WhatsApp number: +998991244018",
-          "Full name: Medine",
-          "Phone number: +998991244018",
-          "Hangi ülkede yaşıyorsunuz?: Özbeksitan",
-          "Türkiye'ye (Konya'ya) tedavi için gelme planınız nedir?: Malesef Yurdışına çıkamam ve Konya'ya gelemem.",
-          "Tedavi planlamanız ve ön görüşme için sizi ne zaman arayalım?: Öğleden sonra (12:00 - 18:00)",
-          "Şikayetiniz Nedir?: 39 yaşindayim ikki çocuğum var tekrar anne olmak istiyorum",
-        ].join("\n"),
-      },
+      { text: "Merhaba" },
     ],
     checks: [
       noPromptLeak,
       noGenericEscape,
-      expectLastContains("Dogurganlik/kadin dogum yonlendirmesi", ["Kadın Hastalıkları", "gebelik", "anne olmak"]),
+      noMechanicalLoop,
+      noKnownBadTurkish,
+      expectLastContains("Dogurganlik/kadin dogum yonlendirmesi", ["Kadın Hastalıkları", "Kadın Doğum", "gebelik", "anne olmak"]),
       expectLastContains("Gelememe bilgisi", ["gelemeyeceğinizi", "yurt dışına çıkamadığınızı", "Konya'ya gelemeyeceğinizi", "Konya’ya gelemeyeceğinizi"]),
+      (messages) => /^[a-zçğıöşü]/.test(lastAssistant(messages).trim())
+        ? `Cevap küçük harfle başlıyor: ${lastAssistant(messages)}`
+        : null,
+    ],
+  },
+  {
+    id: "form-yakini-baba-ulke-ayrimi",
+    title: "Form lead: baba hasta, başvuran Almanya, hasta Türkiye ayrımı",
+    sandboxForm: {
+      formName: "Gurbetçiler Form Randevu",
+      rawText: [
+        "Full name: Aysu Maysu",
+        "Phone number: +905535874260",
+        "Hangi ülkede yaşıyorsunuz?: Babam Türkiye'de ben Almanya'dayım",
+        "Yaşınız?: 76",
+        "Şikayetiniz Nedir?: Bel ve boyun fıtığı nedeniyle 3 yıldır yürüyemiyor babam. Ameliyat riskli, sinirlerinin zedelenebileceğini söylediler.",
+        "Şikayetiniz Ne Zaman Başladı?: 3 yıl önce",
+        "Size ne zaman randevu oluşturmamızı istersiniz?: Önce bilgi almak istiyorum, daha sonra gelebiliriz",
+        "Tedavi planlamanız ve ön görüşme için sizi ne zaman arayalım?: Öğleden sonra (12:00 - 18:00)",
+        "Önerilen Bölüm: Ortopedi",
+      ].join("\n"),
+    },
+    steps: [
+      { text: "Merhaba" },
+      { text: "Önce bilgi almak istiyorum daha sonra gelebilirim", burst: true },
+      { text: "Konaklama ve doktorla görüşmek benim için önemli", burst: true },
+    ],
+    checks: [
+      noPromptLeak,
+      noGenericEscape,
+      noMechanicalLoop,
+      noKnownBadTurkish,
+      expectAnyContains("Baba hasta ayrımı", ["babanız", "babanızın"]),
+      expectAnyContains("Başvuran ülke ayrımı", ["Almanya"]),
+      expectAnyContains("Hasta ülke ayrımı", ["Türkiye"]),
+      expectLastContains("Konaklama cevabı", ["konaklama", "otel", "anlaşmalı"]),
+      (messages) => /gelme ihtimaliniz olur mu/i.test(lastAssistant(messages))
+        ? `Gelme niyeti zaten varken tekrar sorulmuş: ${lastAssistant(messages)}`
+        : null,
     ],
   },
   {
@@ -205,10 +325,16 @@ const scenarios: Scenario[] = [
     checks: [
       noGenericEscape,
       noPromptLeak,
+      noMechanicalLoop,
+      noKnownBadTurkish,
       expectAnyContains("Fiyat politikasi", ["buradan net fiyat paylaşamıyorum"]),
       expectAnyContains("Ozbekistan baglami", ["Özbekistan", "O'zbekiston", "ülke"]),
+      expectLastContains("Hastalik adi teyidi korunmali", ["psoriatik", "artrit"]),
       (messages) => /\bHaman\b/i.test(lastAssistant(messages))
         ? `Haman isim gibi kullanılmamalı: ${lastAssistant(messages)}`
+        : null,
+      (messages) => /\bhamam\s+hizmet/i.test(lastAssistant(messages))
+        ? `Haman/Hemen ifadesi hamam hizmeti gibi yorumlanmış: ${lastAssistant(messages)}`
         : null,
     ],
   },
@@ -222,25 +348,107 @@ const scenarios: Scenario[] = [
     ],
     checks: [
       noGenericEscape,
+      noPromptLeak,
+      noMechanicalLoop,
+      noKnownBadTurkish,
       expectLastContains("Adres talebi yaniti", ["Hocacihan", "Saray Caddesi", "Selçuklu", "Konya"]),
       (messages) => /Rica ederiz|iyi günler dileriz/i.test(lastAssistant(messages))
         ? `Tesekkur kapanisi yapilmis: ${lastAssistant(messages)}`
         : null,
     ],
   },
+  {
+    id: "tekrarli-fiyat-guven-telefon-secenegi",
+    title: "Tekrarlı fiyat sorusunda kalıp tekrarı yerine güven onarımı ve görüşme seçeneği",
+    steps: [
+      { text: "Merhaba" },
+      { text: "check up fiyatı ne kadar" },
+      { text: "ama bana net fiyat lazım, yoksa nasıl karar vereyim" },
+      { text: "siz bana yardımcı olamayacaksınız galiba" },
+    ],
+    checks: [
+      noHonorific,
+      noRepeatedIdentity,
+      noGenericEscape,
+      noPromptLeak,
+      noMechanicalLoop,
+      noKnownBadTurkish,
+      expectAnyContains("İlk fiyat güvenli cümle", ["buradan net fiyat paylaşamıyorum"]),
+      expectLastContainsAll("Güven onarımı ve telefon seçeneği", [
+        ["haklısınız", "anlıyorum", "yardımcı"],
+        ["telefon", "görüşme", "arayabilir", "hasta danışmanı"],
+      ]),
+      (messages) => /hangi hizmet veya bölüm/i.test(lastAssistant(messages))
+        ? `Hizmet zaten belli olmasına rağmen tekrar soruldu: ${lastAssistant(messages)}`
+        : null,
+      (messages) => {
+        const pricePhraseCount = assistantMessages(messages)
+          .filter(text => containsAny(text, ["Fiyat bilgisi, hastanedeki değerlendirme"]))
+          .length;
+        return pricePhraseCount > 2 ? `Fiyat güvenli cümlesi mekanik şekilde tekrar etmiş: ${pricePhraseCount}` : null;
+      },
+    ],
+  },
+  {
+    id: "bot-ithami-guven-kurtarma",
+    title: "Bot ithamı ve güven kaybı doğal toparlanmalı",
+    steps: [
+      { text: "Merhaba" },
+      { text: "Dermatoloji doktorunuzun adı ne?" },
+      { text: "Niye söylemiyorsun sen bot musun?", burst: true },
+      { text: "Sana güvenmedim", burst: true },
+    ],
+    checks: [
+      noHonorific,
+      noGenericEscape,
+      noPromptLeak,
+      noBotIdentityDisclosure,
+      noMechanicalLoop,
+      noKnownBadTurkish,
+      expectLastContainsAll("Güven toparlama + doktor", [
+        ["haklı", "net olmadı", "doğrudan paylaşayım"],
+        ["Dermatoloji"],
+        ["Dr.", "Doç.", "Prof.", "Uzm."],
+      ]),
+    ],
+  },
+  {
+    id: "medya-rapor-guvenli-yanit",
+    title: "Rapor/görsel geldiğinde sessiz kalmadan güvenli yanıt",
+    steps: [
+      { text: "Dizim ağrıyor, protez dediler" },
+      { text: "MR görüntüsünü ve raporumu gönderiyorum, yorumlar mısınız?" },
+    ],
+    checks: [
+      noGenericEscape,
+      noPromptLeak,
+      noMechanicalLoop,
+      noKnownBadTurkish,
+      expectLastContains("Medya/belge güvenli cevabı", ["ulaştı", "tıbbi yorum", "ne sormak"]),
+      (messages) => /doktorumuz inceleyecek|ekibimiz değerlendirecek|rapora göre teşhis|teşhis koyabiliriz|teşhis ver/i.test(lastAssistant(messages))
+        ? `Medya için inceleme/tanı vaadi var: ${lastAssistant(messages)}`
+        : null,
+    ],
+  },
 ];
 
-async function ask(messages: ChatMessage[]): Promise<string> {
+async function ask(messages: ChatMessage[], scenario?: Scenario): Promise<{ reply: string; metadata?: any }> {
   const testBotPrompt = await getTestBotPromptAction();
-  const result = await testBotPrompt(BOT_GROUP_ID, messages);
+  const result = await testBotPrompt(
+    BOT_GROUP_ID,
+    messages,
+    undefined,
+    { sandboxForm: scenario?.sandboxForm || null }
+  );
   if (!result.success) {
     throw new Error(result.reply || "Sandbox test failed");
   }
-  return result.reply;
+  return { reply: result.reply, metadata: result.metadata };
 }
 
 async function runScenario(scenario: Scenario) {
   const messages: ChatMessage[] = [];
+  const evaluations: AssistantEvaluation[] = [];
   for (let i = 0; i < scenario.steps.length; i += 1) {
     const step = scenario.steps[i];
     messages.push({ role: "user", content: step.text });
@@ -248,17 +456,36 @@ async function runScenario(scenario: Scenario) {
     if (step.burst && next?.burst) {
       continue;
     }
-    const reply = await ask(messages);
+    const { reply, metadata } = await ask(messages, scenario);
+    if (metadata?.brainV2ResponseEvaluation) {
+      const evalResult = metadata.brainV2ResponseEvaluation;
+      evaluations.push({
+        stepIndex: i,
+        status: evalResult.status,
+        score: evalResult.score,
+        summary: evalResult.summary,
+        missingAnswers: evalResult.missingAnswers,
+        forbiddenHits: evalResult.forbiddenHits,
+        qualityWarnings: evalResult.qualityWarnings,
+      });
+    }
     messages.push({ role: "assistant", content: reply });
   }
 
-  const failures = scenario.checks.map((check) => check(messages)).filter(Boolean) as string[];
+  const evaluatorFailures = evaluations
+    .filter(item => item.status === 'fail')
+    .map(item => `Brain evaluator FAIL step ${item.stepIndex}: ${item.summary || ''} missing=${JSON.stringify(item.missingAnswers || [])} forbidden=${JSON.stringify(item.forbiddenHits || [])}`);
+  const failures = [
+    ...scenario.checks.map((check) => check(messages)).filter(Boolean) as string[],
+    ...evaluatorFailures,
+  ];
   return {
     id: scenario.id,
     title: scenario.title,
     passed: failures.length === 0,
     failures,
     transcript: messages,
+    evaluations,
   };
 }
 

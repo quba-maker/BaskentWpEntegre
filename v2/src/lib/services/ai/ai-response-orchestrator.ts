@@ -1219,6 +1219,22 @@ export class AIResponseOrchestrator {
         unifiedContext.patient_known_facts.push(`Geçmiş İlgilenilen Branşlar: ${topicSwitch.previousTopics.join(', ')}.`);
       }
 
+      if (unifiedContext?.latestForm && (!Array.isArray(unifiedContext.patient_known_facts) || unifiedContext.patient_known_facts.length === 0)) {
+        const resolvedFacts = ConversationKnownFactsResolver.resolve({
+          history: history
+            .filter((message: ChatMessage) => typeof message.content === 'string')
+            .map((message: ChatMessage) => ({
+              role: message.role,
+              content: message.content as string,
+            })),
+          opportunity: unifiedContext.opportunity,
+          profile: unifiedContext.profile,
+          latestForm: unifiedContext.latestForm,
+          conversation: unifiedContext.conversation,
+        });
+        unifiedContext.patient_known_facts = ConversationKnownFactsResolver.formatFacts(resolvedFacts);
+      }
+
       // 5. Approved Learning hints injection
       try {
         const { TenantLearningRuntimeResolver } = await import('@/lib/services/ai/tenant-learning-runtime-resolver');

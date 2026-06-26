@@ -32,6 +32,9 @@ export interface FinalOutboundAuditCtx {
   channel?: string;
   replyLanguage?: string;
   inboundText?: string;
+  conversationContextText?: string;
+  verifiedDoctorDirectory?: Array<{ department: string; doctors: string[] }>;
+  patientKnownFacts?: string[];
 }
 
 export interface FinalOutboundAuditResult {
@@ -361,8 +364,12 @@ function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { t
     [/ve\s+(\d+\s+y[ıi]ld[ıi]r)\s+y[üu]r[üu]yemedi[ğg]inizi/gi, 've babanızın $1 yürüyemediğini'],
     [/Kesin\s+de[ğg]erlendirme\s+i[çc]in\s+hastan[ıi]n[ıi]z\s+hastanemizde/gi, 'Kesin değerlendirme için hastanın hastanemizde'],
     [/Kesin\s+de[ğg]erlendirme\s+i[çc]in\s+hastan[ıi]n\s+hastanemizde\s+ilgili\s+uzman\s+hekim\s+taraf[ıi]ndan\s+muayene\s+edilmeniz/gi, 'Kesin değerlendirme için hastanemizde ilgili uzman hekim tarafından muayene edilmeniz'],
+    [/Kesin\s+de[ğg]erlendirme\s+i[çc]in\s+hastan[ıi]n\s+hastanemizde\s+ilgili\s+\*?uzman\s+hekim\*?\s+taraf[ıi]ndan\s+muayene\s+edilmesi/gi, 'Kesin değerlendirme için hastanemizde ilgili uzman hekim tarafından muayene edilmeniz'],
     [/Ge[çc]mi[şs]\s+olsun\s+dileklerimi\s+iletmek\s+isterim\.?/gi, 'Öncelikle geçmiş olsun.'],
+    [/([.!?])\s+size\s+en\s+uygun/gi, '$1 Size en uygun'],
     [/(^|\n)size\s+en\s+uygun/gi, '$1Size en uygun'],
+    [/(^|\n)en\s+uygun/gi, '$1Size en uygun'],
+    [/Bab[ıi]n[ıi]z/i, 'Babanız'],
     [/^form\s+başvurunuz/gi, 'Form başvurunuz'],
   ];
   for (const [pattern, replacement] of morphologyRewrites) {
@@ -394,26 +401,66 @@ function applyNaturalToneRewrites(text: string, ctx: FinalOutboundAuditCtx): { t
   const infoFirstInbound = /(?:[öo]nce\s+bilgi|bilgi\s+almak|fiyat|[üu]cret|[öo]deme|konaklama|kalacak\s+yer|doktorla\s+g[öo]r[üu][şs]mek)/i.test(ctx.inboundText || '');
   const explicitSchedulingInbound = /(?:arama|aranmak|telefon|randevu\s+(?:almak|olu[şs]turmak|planlamak)|saat\s+\d{1,2})/i.test(ctx.inboundText || '');
   if (infoFirstInbound && !explicitSchedulingInbound) {
+    let removedVisitQuestion = false;
     const ctaPatterns = [
       /\s*Sizi\s+hangi\s+g[üu]n\s+ve\s+saat\s+aral[ıi][ğg][ıi]nda\s+aramam\s+uygun\s+olur\??/gi,
       /\s*Hangi\s+g[üu]n\s+ve\s+saat\s+aral[ıi][ğg][ıi]\s+sizin\s+i[çc]in\s+uygun\s+olur\??/gi,
       /\s*Telefon\s+g[öo]r[üu][şs]mesi\s+i[çc]in\s+size\s+uygun\s+g[üu]n\s+ve\s+saat\s+aral[ıi][ğg][ıi]\s+nedir\??/gi,
+      /\s*[İI]lerleyen\s+d[öo]nemde\s+(?:T[üu]rkiye['’`]ye\s*(?:\/|veya|ya\s+da)\s*Konya['’`]ya|T[üu]rkiye’ye\s*(?:\/|veya|ya\s+da)\s*Konya’ya|T[üu]rkiye['’`]ye|T[üu]rkiye’ye|Konya['’`]ya|Konya’ya)\s+gelme\s+ihtimaliniz\s+olur\s+mu\??/gi,
     ];
     for (const pattern of ctaPatterns) {
       const next = result.replace(pattern, '').trim();
       if (next !== result) {
+        if (/gelme\s+ihtimaliniz\s+olur\s+mu/i.test(result)) removedVisitQuestion = true;
         result = next;
         rewrote = true;
       }
     }
+    const sentenceCleaned = result
+      .split(/(?<=[.!?])\s+/)
+      .filter(sentence => {
+        const clean = sentence.replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+        const cleanLower = clean
+          .replace(/İ/g, 'i')
+          .replace(/I/g, 'ı')
+          .toLocaleLowerCase('tr-TR');
+        const shouldDrop = /ilerleyen\s+d[öo]nemde[\s\S]{0,160}(?:t[üu]rkiye|konya)[\s\S]{0,160}gelme\s+ihtimaliniz\s+olur\s+mu/.test(cleanLower);
+        if (shouldDrop) removedVisitQuestion = true;
+        return !shouldDrop;
+      })
+      .join(' ')
+      .replace(/\n\s*\n\s*\n+/g, '\n\n')
+      .trim();
+    if (sentenceCleaned && sentenceCleaned !== result) {
+      result = sentenceCleaned;
+      rewrote = true;
+    }
+    const asksQuestion = /\?\s*$/.test(result);
+    const complaintLikeInbound = /(?:bel\s+f[ıi]t[ıi][ğg][ıi]|boyun\s+f[ıi]t[ıi][ğg][ıi]|a[ğg]r[ıi]|şikayet|sikayet|egzama|diz|kalp|psoria|artrit)/i.test(ctx.inboundText || '');
+    if (removedVisitQuestion && complaintLikeInbound && !asksQuestion) {
+      const followUp = /bel\s+f[ıi]t[ıi][ğg][ıi]|boyun\s+f[ıi]t[ıi][ğg][ıi]/i.test(ctx.inboundText || '')
+        ? 'Şikayetiniz ne kadar süredir devam ediyor, bacaklara vuran ağrı veya uyuşma var mı?'
+        : 'Şikayetiniz ne kadar süredir devam ediyor?';
+      result = `${result}\n\n${followUp}`.trim();
+      rewrote = true;
+    }
   }
 
-  const fertilityInbound = /tekrar\s+anne\s+olmak|çocu[ğg]um\s+var|cocugum\s+var|gebelik|t[üu]p\s+bebek/i.test(ctx.inboundText || '');
+  const fertilityContext = [
+    ctx.inboundText || '',
+    ctx.conversationContextText || '',
+    ...(ctx.patientKnownFacts || []),
+    result || '',
+  ].join('\n');
+  const fertilityInbound = /tekrar\s+anne\s+olmak|çocu[ğg]um\s+var|cocugum\s+var|gebelik|t[üu]p\s+bebek/i.test(fertilityContext);
   if (fertilityInbound) {
     const fertilityRewrites: Array<[RegExp, string]> = [
+      [/\*?39\s+ya[şs][ıi]nday[ıi]m,\s*iki\s+[çc]ocu[ğg]um\s+var,\s*tekrar\s+anne\s+olmak\s+istiyorum\*?\s+[şs]ikayetiniz\s+oldu[ğg]unu\s+belirtmi[şs]siniz\./gi, '39 yaşında olduğunuzu, iki çocuğunuz olduğunu ve tekrar anne olmak istediğinizi belirtmişsiniz.'],
+      [/\*?Kad[ıi]n\s+Hastal[ıi]klar[ıi]\s+ve\s+Do[ğg]um\*?\s+alan[ıi]nda\s+tekrar\s+anne\s+olmak\s+istedi[ğg]inizi\s+belirtmi[şs]siniz\.\s*[ÖO]ncelikle\s+bu\s+iste[ğg]iniz\s+i[çc]in\s+size\s+yard[ıi]mc[ıi]\s+olmak\s+isteriz\./gi, 'Tekrar anne olmak istediğinizi belirtmişsiniz. Gebelik planlaması Kadın Hastalıkları ve Doğum alanında değerlendirilir.'],
       [/Tekrar\s+anne\s+olmak\s+istedi[ğg]inizi\s+belirtmi[şs]siniz\.\s*[ÖO]ncelikle\s+ge[çc]mi[şs]\s+olsun\./gi, 'Tekrar anne olmak istediğinizi belirtmişsiniz. İlginiz için teşekkür ederiz.'],
       [/Formunuzda\s+şu\s+anda\s+yurt\s+d[ıi][şs][ıi]na\s+[çc][ıi]kamayaca[ğg][ıi]n[ıi]z[ıi]\s+belirtmi[şs]siniz\./gi, 'Formunuzda şu anda yurt dışına çıkamayacağınızı ve Konya’ya gelemeyeceğinizi belirtmişsiniz.'],
       [/Bu\s+tarz\s+durumlarda,\s+uzaktan\s+ve\s+yaln[ıi]zca\s+mevcut\s+bilgilerle\s+net\s+bir\s+de[ğg]erlendirme\s+yapmak\s+m[üu]mk[üu]n\s+olmamakta(?:d[ıi]r)?\./gi, 'Gebelik planlamasında yaş, gebelik geçmişi ve genel sağlık durumu birlikte değerlendirilir; bu nedenle uzaktan net bir planlama yapmak doğru olmaz.'],
+      [/Kesin\s+de[ğg]erlendirme\s+i[çc]in\s+hastan[ıi]n\s+hastanemizde\s+ilgili\s+\*?uzman\s+hekim\*?\s+taraf[ıi]ndan\s+muayene\s+edilmesi/gi, 'Kesin değerlendirme için hastanemizde ilgili uzman hekim tarafından muayene edilmeniz'],
     ];
     for (const [pattern, replacement] of fertilityRewrites) {
       const next = result.replace(pattern, replacement);
@@ -508,8 +555,139 @@ function applyPriceQuestionGuard(text: string, ctx: FinalOutboundAuditCtx): { te
   return { text: result, rewrote };
 }
 
+function formatVerifiedDoctorDirectoryForRecovery(directory?: Array<{ department: string; doctors: string[] }>): string | null {
+  if (!directory || directory.length === 0) return null;
+  const blocks = directory
+    .filter(block => block?.department && Array.isArray(block.doctors) && block.doctors.length > 0)
+    .slice(0, 3)
+    .map(block => {
+      const names = block.doctors.slice(0, 8).map(name => `• ${name}`).join('\n');
+      return `${block.department} için doğrulanmış hekim bilgisi:\n${names}`;
+    });
+  return blocks.length > 0 ? blocks.join('\n\n') : null;
+}
+
+function turkishLocative(location: string): string {
+  const clean = String(location || '').trim();
+  if (!clean) return '';
+  if (/(?:a|ı|o|u)$/i.test(clean)) return `${clean}’da`;
+  if (/(?:e|i|ö|ü)$/i.test(clean)) return `${clean}’de`;
+  return `${clean}’da`;
+}
+
+function relationGenitive(relationPossessive: string): string {
+  const clean = relationPossessive.trim().toLocaleLowerCase('tr-TR');
+  if (clean === 'babanız') return 'babanızın';
+  if (clean === 'anneniz') return 'annenizin';
+  if (clean === 'eşiniz') return 'eşinizin';
+  if (clean === 'yakınınız') return 'yakınınızın';
+  return `${relationPossessive}ın`;
+}
+
+function parseRelatedPersonFacts(facts?: string[]): {
+  relationLabel: string;
+  relationPossessive: string;
+  topic: string;
+  patientLocation?: string;
+  requesterLocation?: string;
+} | null {
+  if (!Array.isArray(facts) || facts.length === 0) return null;
+  const joined = facts.join('\n');
+  const related = facts.find(f => /Yak[ıi]n[ıi]\s*\(([^)]+)\)\s+konusu:/i.test(f));
+  if (!related) return null;
+  const relMatch = related.match(/Yak[ıi]n[ıi]\s*\(([^)]+)\)\s+konusu:\s*([^.;\n]+)/i);
+  if (!relMatch) return null;
+  const rawLabel = relMatch[1].trim();
+  const topic = relMatch[2].trim();
+  const relationPossessive = /baba/i.test(rawLabel) ? 'babanız'
+    : /anne/i.test(rawLabel) ? 'anneniz'
+    : /eşi|esi/i.test(rawLabel) ? 'eşiniz'
+    : 'yakınınız';
+  const patientLocation = (joined.match(/Hastan[ıi]n bulundu[ğg]u yer:\s*([^.\n]+)/i)?.[1] || related.match(/bulundu[ğg]u yer:\s*([^.;\n]+)/i)?.[1])?.trim();
+  const requesterLocation = joined.match(/Ba[şs]vuran ki[şs]inin bulundu[ğg]u yer:\s*([^.\n]+)/i)?.[1]?.trim();
+  const rawLocationText = joined.toLocaleLowerCase('tr-TR');
+  const inferredRequesterLocation = requesterLocation ||
+    (/\bben\b[^.\n]{0,90}\balmanya\b|\balmanya\b[^.\n]{0,90}\bben\b/i.test(rawLocationText) ? 'Almanya' :
+     /\bben\b[^.\n]{0,90}\bt[üu]rkiye\b|\bt[üu]rkiye\b[^.\n]{0,90}\bben\b/i.test(rawLocationText) ? 'Türkiye' :
+     /\bben\b[^.\n]{0,90}\bkazakistan\b|\bkazakistan\b[^.\n]{0,90}\bben\b/i.test(rawLocationText) ? 'Kazakistan' :
+     /\bben\b[^.\n]{0,90}\b[öo]zbekistan\b|\b[öo]zbekistan\b[^.\n]{0,90}\bben\b/i.test(rawLocationText) ? 'Özbekistan' : undefined);
+  const inferredPatientLocation = patientLocation ||
+    (/\b(?:babam|babası|baba|annem|annesi|anne|e[şs]im|e[şs]i)\b[^.\n]{0,90}\bt[üu]rkiye\b|\bt[üu]rkiye\b[^.\n]{0,90}\b(?:babam|babası|baba|annem|annesi|anne|e[şs]im|e[şs]i)\b/i.test(rawLocationText) ? 'Türkiye' :
+     /\b(?:babam|babası|baba|annem|annesi|anne|e[şs]im|e[şs]i)\b[^.\n]{0,90}\balmanya\b|\balmanya\b[^.\n]{0,90}\b(?:babam|babası|baba|annem|annesi|anne|e[şs]im|e[şs]i)\b/i.test(rawLocationText) ? 'Almanya' : undefined);
+  return {
+    relationLabel: rawLabel,
+    relationPossessive,
+    topic,
+    patientLocation: inferredPatientLocation,
+    requesterLocation: inferredRequesterLocation,
+  };
+}
+
+function applyKnownFactsRelationGuard(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
+  const related = parseRelatedPersonFacts(ctx.patientKnownFacts);
+  if (!related) return { text, rewrote: false };
+
+  const hasRelationInText = new RegExp(related.relationPossessive.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text);
+  const selfMismatch = /\b(?:şikayetiniz|yaşadığınız\s+şikayet|muayene\s+edilmeniz|belirttiğiniz\s+şikayetiniz)\b/i.test(text) && !hasRelationInText;
+  const asksForMoreComplaint = /şikayetinizi\s+biraz\s+daha\s+detayland[ıi]rabilir\s+misiniz/i.test(text) && !hasRelationInText;
+  const isFirstFormWelcome = /form\s+başvurunuz\s+bize\s+ulaştı/i.test(text);
+  const requesterLocationMissing = !!related.requesterLocation && !new RegExp(related.requesterLocation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text);
+  const patientLocationMissing = !!related.patientLocation && !new RegExp(related.patientLocation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text);
+  const relationSelfProcessMismatch = hasRelationInText && /\b(?:muayene\s+edilmeniz|size\s+en\s+uygun\s+takip|en\s+uygun\s+takip|tedavi\s+süreci\s+daha\s+sa[ğg]l[ıi]kl[ıi])\b/i.test(text);
+  const malformedRelationText = /Bab[ıi]n[ıi]z/i.test(text);
+  const relationContextMissing = isFirstFormWelcome && (requesterLocationMissing || patientLocationMissing);
+  const inbound = [ctx.conversationContextText || '', ctx.inboundText || ''].join('\n');
+  const asksAccommodation = /\b(?:konaklama|kalacak\s+yer\w*|otel|misafirhane|nerede\s+kal)\b/i.test(inbound);
+  const asksDoctorMeeting = /\b(?:doktorla\s+g[öo]r[üu][şs]|hekimle\s+g[öo]r[üu][şs]|doktor\s+g[öo]r[üu][şs]mesi|ön\s+g[öo]r[üu][şs]me)\b/i.test(inbound);
+  const relationSpecificFollowup = (asksAccommodation || asksDoctorMeeting) && (!hasRelationInText || requesterLocationMissing || patientLocationMissing);
+
+  if (!selfMismatch && !asksForMoreComplaint && !(isFirstFormWelcome && !hasRelationInText) && !relationContextMissing && !relationSelfProcessMismatch && !malformedRelationText && !relationSpecificFollowup) {
+    return { text, rewrote: false };
+  }
+
+  const locationLine = related.requesterLocation && related.patientLocation
+    ? `Sizin ${turkishLocative(related.requesterLocation)}, ${relationGenitive(related.relationPossessive)} ${turkishLocative(related.patientLocation)} olduğunu`
+    : [
+        related.requesterLocation ? `Sizin ${turkishLocative(related.requesterLocation)} olduğunuzu` : '',
+        related.patientLocation ? `${relationGenitive(related.relationPossessive)} ${turkishLocative(related.patientLocation)} olduğunu` : '',
+      ].filter(Boolean).join(', ');
+
+  if (asksAccommodation || asksDoctorMeeting) {
+    const parts = [
+      `${related.relationPossessive[0].toUpperCase()}${related.relationPossessive.slice(1)} için ${related.topic} konusunu ayrı tutuyorum.${locationLine ? ` ${locationLine} da not ediyorum.` : ''}`,
+    ];
+    if (asksAccommodation) {
+      parts.push('Konaklama tarafı için net söyleyeyim: hastaneye yakın konaklama seçenekleri ve anlaşmalı oteller konusunda ekibimiz danışmanlık yapabilir; garanti veya rezervasyon sözü veremem.');
+    }
+    if (asksDoctorMeeting) {
+      parts.push('Doktorla doğrudan ön görüşme sözü veremem; ancak bu talebi not edip randevu/koordinasyon sürecinde nasıl ilerlenebileceğini netleştirebiliriz.');
+    }
+    parts.push('Önce konaklama tarafını mı, doktor görüşmesi talebini mi netleştirelim?');
+    return { text: parts.join('\n\n'), rewrote: true };
+  }
+
+  const firstLine = `Merhaba, Başkent Üniversitesi Konya Hastanesi’nden ben Rüya, form başvurunuz bize ulaştı.`;
+  const subjectLine = `${related.relationPossessive[0].toUpperCase()}${related.relationPossessive.slice(1)} için ${related.topic} konusunda bilgi almak istediğinizi görüyorum. Öncelikle geçmiş olsun.`;
+  const contextLine = locationLine ? `${locationLine[0].toUpperCase()}${locationLine.slice(1)} ayrıca not ediyorum.` : '';
+  return {
+    text: [
+      firstLine,
+      subjectLine,
+      contextLine,
+      `Bu tür durumlarda uzaktan net değerlendirme yapmak mümkün değildir; ${related.relationPossessive} için hastanede ilgili uzman hekim muayenesi ve gerekirse tetkiklerle değerlendirme yapılır.`,
+      'Önce bilgi almak istediğinizi belirtmişsiniz. Süreç, doktor veya konaklama tarafında hangi başlığı netleştirelim?',
+    ].filter(Boolean).join('\n\n'),
+    rewrote: true,
+  };
+}
+
 function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
   const inbound = (ctx.inboundText || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase();
+  const contextText = [ctx.conversationContextText || '', ctx.inboundText || '']
+    .join('\n')
     .replace(/İ/g, 'i')
     .replace(/I/g, 'ı')
     .toLowerCase();
@@ -526,8 +704,19 @@ function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): {
   }
 
   const asksPrice = /\b(?:fiyat|[üu]cret|tutar|[öo]deme|ne\s+kadar|ta\s*12|ta12)\b/i.test(inbound);
+  const priceContext = /\b(?:fiyat|[üu]cret|tutar|[öo]deme|ne\s+kadar|ta\s*12|ta12)\b/i.test(contextText);
   const asksAccommodation = /\b(?:konaklama|kalacak\s+yer\w*|otel|misafirhane|nerede\s+kal|accommodation|stay|unterkunft)\b/i.test(inbound);
-  const asksDoctor = /\b(?:doktor|hekim|hoca|uzman|kadronuz|doktorunuzun|doktorunun|dermatoloji|kardiyoloji|kad[ıi]n\s+do[ğg]um)\b.*\b(?:isim|ismi|ismini|ad[ıi]|kim|kimler|liste|ara[şs]t[ıi]r)|\b(?:isim|ad[ıi])\s+s[öo]yle|\bara[şs]t[ıi]raca[ğg][ıi]m|\bara[şs]t[ıi]racam/i.test(inbound);
+  const asksAddress = /\b(?:adres|konum|harita|nerede|neredesiniz|location|address)\b/i.test(inbound);
+  const asksDoctorPattern = /\b(?:doktor|hekim|hoca|uzman|kadronuz|doktorunuzun|doktorunun|dermatoloji|kardiyoloji|kad[ıi]n\s+do[ğg]um)\b.*\b(?:isim|ismi|ismini|ad[ıi]|kim|kimler|liste|ara[şs]t[ıi]r)|\b(?:isim|ad[ıi])\s+s[öo]yle|\bara[şs]t[ıi]raca[ğg][ıi]m|\bara[şs]t[ıi]racam/i;
+  const asksDoctor = asksDoctorPattern.test(inbound);
+  const doctorContext = asksDoctor || asksDoctorPattern.test(contextText) || (ctx.verifiedDoctorDirectory || []).length > 0 && /\b(?:doktor|hekim|hoca|uzman|dermatoloji|kardiyoloji|kad[ıi]n\s+do[ğg]um|isim|ad[ıi]|g[üu]ven|bot)\b/i.test(contextText);
+
+  if (asksAddress) {
+    return {
+      text: 'Başkent Üniversitesi Konya Uygulama ve Araştırma Merkezi adresimiz: Hocacihan Mahallesi, Saray Caddesi No:1, Selçuklu / Konya.',
+      rewrote: true,
+    };
+  }
 
   if ([asksPrice, asksAccommodation, asksDoctor].filter(Boolean).length >= 2) {
     const parts: string[] = [];
@@ -548,6 +737,13 @@ function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): {
   }
 
   if (asksDoctor) {
+    const directoryText = formatVerifiedDoctorDirectoryForRecovery(ctx.verifiedDoctorDirectory);
+    if (directoryText) {
+      return {
+        text: directoryText,
+        rewrote: true,
+      };
+    }
     return {
       text: 'Doktor isimlerini öğrenmek istediğinizi görüyorum. Doğrulanmış hekim listesi varsa isimleri paylaşabilirim; hekimler hakkında kişisel başarı kıyaslaması yapamam.',
       rewrote: true,
@@ -561,7 +757,20 @@ function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): {
     };
   }
 
-  if (/\b(?:g[üu]ven|inanmad[ıi]m|bot|robot|anlam[ıi]yor|anlamad[ıi]n|emin\s+olam[ıi]yorum)\b/i.test(inbound)) {
+  if (/\b(?:g[üu]ven|inanmad[ıi]m|bot|robot|anlam[ıi]yor|anlamad[ıi]n|emin\s+olam[ıi]yorum|yard[ıi]mc[ıi]\s+olamayacaks[ıi]n[ıi]z)\b/i.test(inbound)) {
+    const directoryText = doctorContext ? formatVerifiedDoctorDirectoryForRecovery(ctx.verifiedDoctorDirectory) : null;
+    if (directoryText) {
+      return {
+        text: `Haklısınız, önceki cevabım yeterince net olmadı. Doktor isimlerini doğrudan paylaşayım.\n\n${directoryText}`,
+        rewrote: true,
+      };
+    }
+    if (priceContext) {
+      return {
+        text: 'Haklısınız, aynı fiyat cümlesini tekrarlamak yardımcı olmuyor. Buradan net fiyat paylaşamıyorum; isterseniz bu başlığı hasta danışmanıyla telefon görüşmesinde netleştirebiliriz. Size hangi gün ve saat aralığı uygun olur?',
+        rewrote: true,
+      };
+    }
     return {
       text: 'Haklısınız, cevabım yeterince net olmadı. Sorunuzu tekrar başa almadan buradan toparlayayım; hangi bilgiyi netleştirmemi istersiniz?',
       rewrote: true,
@@ -581,6 +790,82 @@ function applyGenericEscapeRecovery(text: string, ctx: FinalOutboundAuditCtx): {
   };
 }
 
+function applyTrustRepairGuard(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
+  const inbound = (ctx.inboundText || '')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase();
+  const contextText = [ctx.conversationContextText || '', ctx.inboundText || '', text || '']
+    .join('\n')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase();
+
+  const hasTrustSignal = /\b(?:g[üu]ven|inanmad[ıi]m|bot|robot|anlam[ıi]yor|anlamad[ıi]n|yard[ıi]mc[ıi]\s+olamayacaks[ıi]n[ıi]z|cevap\s+vermedin|cevaplamad[ıi]n|sorular[ıi]ma\s+cevap)\b/i.test(inbound);
+  if (!hasTrustSignal) return { text, rewrote: false };
+
+  const looksLikeWrongFallback =
+    /gelme\s+d[üu][şs][üu]ncenizi\s+not\s+ald[ıi]m/i.test(text) ||
+    /hangi\s+konuda\s+bilgi\s+almak\s+istiyorsunuz/i.test(text) ||
+    /size\s+sa[ğg]l[ıi]k\s+talebinizle\s+ilgili\s+yard[ıi]mc[ıi]\s+olay[ıi]m/i.test(text) ||
+    /ba[şs]ka\s+bir\s+sorunuz\s+var\s+m[ıi]/i.test(text);
+
+  const asksDoctorPattern = /\b(?:doktor|hekim|hoca|uzman|dermatoloji|kardiyoloji|kad[ıi]n\s+do[ğg]um)\b.*\b(?:isim|ismi|ismini|ad[ıi]|kim|kimler|liste|ara[şs]t[ıi]r)|\b(?:isim|ad[ıi])\s+s[öo]yle|\bara[şs]t[ıi]raca[ğg][ıi]m|\bara[şs]t[ıi]racam/i;
+  const directoryText = asksDoctorPattern.test(contextText)
+    ? formatVerifiedDoctorDirectoryForRecovery(ctx.verifiedDoctorDirectory)
+    : null;
+  if (directoryText) {
+    return {
+      text: `Haklısınız, önceki cevabım yeterince net olmadı. Doktor isimlerini doğrudan paylaşayım.\n\n${directoryText}`,
+      rewrote: true,
+    };
+  }
+
+  const priceContext = /\b(?:fiyat|[üu]cret|tutar|[öo]deme|ne\s+kadar|ta\s*12|ta12)\b/i.test(contextText);
+  const lacksTrustOwnership = !/\b(?:hakl[ıi]s[ıi]n[ıi]z|g[üu]ven|daha\s+net|somut)\b/i.test(text);
+  const lacksSafePricePhrase = priceContext && !/buradan\s+net\s+fiyat\s+payla[şs]am[ıi]yorum/i.test(text);
+
+  if (priceContext && (looksLikeWrongFallback || lacksTrustOwnership || lacksSafePricePhrase)) {
+    return {
+      text: 'Haklısınız, aynı fiyat cümlesini tekrar etmek size yardımcı olmuyor. Buradan net fiyat paylaşamıyorum; isterseniz bu başlığı hasta danışmanıyla telefon görüşmesinde netleştirebiliriz. Size hangi gün ve saat aralığı uygun olur?',
+      rewrote: true,
+    };
+  }
+
+  if (!looksLikeWrongFallback) return { text, rewrote: false };
+
+  return {
+    text: 'Haklısınız, önceki cevabım yeterince net olmadı. Sorunuzu tekrar başa almadan buradan toparlayayım; hangi bilgiyi netleştirelim?',
+    rewrote: true,
+  };
+}
+
+function applyMediaDocumentGuard(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
+  const inbound = [ctx.conversationContextText || '', ctx.inboundText || '']
+    .join('\n')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase();
+  const hasMediaSignal = /\b(?:mr|mrg|emar|rapor|g[öo]rsel|film|r[öo]ntgen|tomografi|tetkik|sonu[çc]|belge|foto[ğg]raf|resim)\b/i.test(inbound);
+  const asksComment = /\b(?:yorumlar\s+m[ıi]s[ıi]n[ıi]z|yorum\s+yapar|ne\s+d[üu][şs][üu]n|incele|bakabilir|de[ğg]erlendir)\b/i.test(inbound);
+  if (!hasMediaSignal && !asksComment) return { text, rewrote: false };
+
+  const saysSafeBoundary = /\b(?:t[ıi]bbi\s+yorum\s+yapamam|buradan\s+yorum\s+yapamam|net\s+de[ğg]erlendirme\s+yapamam)\b/i.test(text);
+  const saysReceived = /\b(?:ula[şs]t[ıi]|geldi|ald[ıi]m|rapor|g[öo]rsel|belge|tetkik)\b/i.test(text);
+  const createsWrongExpectation = /\b(?:buradan\s+iletebilirsiniz|g[öo]nderebilirsiniz|doktorumuz\s+inceleyecek|ekibimiz\s+de[ğg]erlendirecek|rapora\s+g[öo]re\s+te[şs]his)\b/i.test(text);
+  if (saysSafeBoundary && saysReceived && !createsWrongExpectation) {
+    return { text, rewrote: false };
+  }
+
+  return {
+    text: [
+      'Görseliniz veya raporunuz ulaştıysa buradan tıbbi yorum yapamam; kesin değerlendirme hastanede ilgili uzman hekim muayenesiyle yapılır.',
+      'Bu görsel ya da raporla ilgili özellikle neyi sormak istiyorsunuz?',
+    ].join('\n\n'),
+    rewrote: true,
+  };
+}
+
 function applyExplicitQuestionCoverageGuard(text: string, ctx: FinalOutboundAuditCtx): { text: string; rewrote: boolean } {
   const inbound = (ctx.inboundText || '')
     .replace(/İ/g, 'i')
@@ -591,6 +876,12 @@ function applyExplicitQuestionCoverageGuard(text: string, ctx: FinalOutboundAudi
 
   const asksAddress = /\b(?:adres|konum|harita|nerede|neredesiniz|location|address)\b/i.test(inbound);
   if (asksAddress) {
+    if (!/\bHocacihan\b|\bSaray\s+Caddesi\b|\bSel[çc]uklu\b/i.test(result)) {
+      return {
+        text: 'Başkent Üniversitesi Konya Uygulama ve Araştırma Merkezi adresimiz: Hocacihan Mahallesi, Saray Caddesi No:1, Selçuklu / Konya.',
+        rewrote: true,
+      };
+    }
     const next = result
       .replace(/\s*Size\s+daha\s+do[ğg]ru\s+yard[ıi]mc[ıi]\s+olabilmem\s+i[çc]in\s+ad[ıi]n[ıi]z[ıi]?\s+[öo][ğg]renebilir\s+miyim\??/gi, '')
       .replace(/\s*Ad[ıi]n[ıi]z[ıi]?\s+[öo][ğg]renebilir\s+miyim\??/gi, '')
@@ -655,9 +946,41 @@ function applyCountryAcknowledgementGuard(text: string, ctx: FinalOutboundAuditC
   const country = extractCountryMention(ctx.inboundText);
   if (!country) return { text, rewrote: false };
 
+  const contextText = [ctx.conversationContextText || '', ctx.inboundText || '', text || '']
+    .join('\n')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLocaleLowerCase('tr-TR');
+  const medicalTerm = /psor(?:y|i)azi|psoriaz|psoryaz|psoriatik|psoriatic|artrit/.test(contextText);
+  const replyKeepsMedicalTerm = /psor(?:y|i)azi|psoriaz|psoryaz|psoriatik|psoriatic|artrit/.test(
+    (text || '').replace(/İ/g, 'i').replace(/I/g, 'ı').toLocaleLowerCase('tr-TR')
+  );
+  if (medicalTerm && !replyKeepsMedicalTerm) {
+    return {
+      text: `${country}'da yaşadığınızı not aldım. Yazdığınız hastalık adını psoriatik artrit olarak mı anlamalıyım? Netleştirirseniz süreç ve ilgili bölüm konusunda daha doğru yönlendireyim.`,
+      rewrote: true,
+    };
+  }
+  const serviceMisread = /\bhamam\s+hizmet/i.test(contextText);
+  if (serviceMisread) {
+    return {
+      text: medicalTerm
+        ? `${country}'da yaşadığınızı not aldım. Yazdığınız hastalık adını psoriatik artrit olarak mı anlamalıyım? Netleştirirseniz süreç ve ilgili bölüm konusunda daha doğru yönlendireyim.`
+        : `${country}'da yaşadığınızı not aldım. Aynı yerden devam edelim; sağlık talebinizle ilgili hangi bilgiyi netleştirelim?`,
+      rewrote: true,
+    };
+  }
+
   const asksForNameOnly = /ad[ıi]n[ıi]z[ıi]?\s+(?:[öo][ğg]renebilir|payla[şs][ıi]r|yazar)|ad[ıi]n[ıi]z\s+nedir/i.test(text);
   const generic = /hangi\s+bilgiyi\s+netle[şs]tireyim|hangi\s+konuda\s+bilgi\s+almak/i.test(text);
   const languagePreferencePrompt = /istedi[ğg]iniz\s+dilde|hangi\s+dil\s+(?:sizin\s+i[çc]in\s+)?(?:daha\s+)?rahat|[öo]zbek[çc]e|rus[çc]a|ingilizce/i.test(text);
+  const genericOrRestarting = generic || languagePreferencePrompt || /hangi\s+bilgiyi\s+netle[şs]tirelim|sa[ğg]l[ıi]k\s+talebiniz\s+nedir|hangi\s+b[öo]l[üu]m|hangi\s+[şs]ikayet/i.test(text);
+  if (genericOrRestarting && medicalTerm) {
+    return {
+      text: `${country}'da yaşadığınızı not aldım. Yazdığınız hastalık adını psoriatik artrit olarak mı anlamalıyım? Netleştirirseniz süreç ve ilgili bölüm konusunda daha doğru yönlendireyim.`,
+      rewrote: true,
+    };
+  }
   if (!asksForNameOnly && !generic && !languagePreferencePrompt && new RegExp(country.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(text)) {
     return { text, rewrote: false };
   }
@@ -741,6 +1064,12 @@ export class FinalOutboundBodyAuditor {
         rewrote = true;
       }
 
+      const relationGuard = applyKnownFactsRelationGuard(result, ctx);
+      if (relationGuard.rewrote) {
+        result = relationGuard.text;
+        rewrote = true;
+      }
+
       // Step 4: If a continuing callback-time answer somehow becomes a repeated
       // self-introduction, recover it to the slot confirmation the user expects.
       if (/^\s*(?:ben\s+)?r[üu]ya\b|ba[şs]kent\s+[üu]niversitesi/i.test(result)) {
@@ -775,6 +1104,12 @@ export class FinalOutboundBodyAuditor {
         rewrote = true;
       }
 
+      const mediaGuard = applyMediaDocumentGuard(result, ctx);
+      if (mediaGuard.rewrote) {
+        result = mediaGuard.text;
+        rewrote = true;
+      }
+
       const countryGuard = applyCountryAcknowledgementGuard(result, ctx);
       if (countryGuard.rewrote) {
         result = countryGuard.text;
@@ -784,6 +1119,21 @@ export class FinalOutboundBodyAuditor {
       const genericEscape = applyGenericEscapeRecovery(result, ctx);
       if (genericEscape.rewrote) {
         result = genericEscape.text;
+        rewrote = true;
+      }
+
+      const trustRepair = applyTrustRepairGuard(result, ctx);
+      if (trustRepair.rewrote) {
+        result = trustRepair.text;
+        rewrote = true;
+      }
+
+      // Run relation guard once more at the end. Some coverage/trust recovery
+      // rewrites intentionally rebuild the answer; they must not erase
+      // applicant/patient separation from form context.
+      const finalRelationGuard = applyKnownFactsRelationGuard(result, ctx);
+      if (finalRelationGuard.rewrote) {
+        result = finalRelationGuard.text;
         rewrote = true;
       }
 

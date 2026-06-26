@@ -29,11 +29,15 @@ const healthcareTone: QubaToneProfile = {
     'Size sağlık talebinizle ilgili yardımcı olayım.',
     'Sizin için uygun görünüyor',
     'Bu doğrultuda',
+    'Anlıyorum.',
+    'Anladım.',
+    'Geliş ihtimaliniz olur mu?',
   ],
   preferredClosers: [
     'Bu konuda hangi bilgiyi netleştirelim?',
     'İsterseniz buradan adım adım netleştirelim.',
     'Sizin için en önemli başlık hangisi?',
+    'Önce bu başlığı netleştirelim; ardından planlamayı birlikte yaparız.',
   ],
 };
 
@@ -53,9 +57,14 @@ export const healthcareSectorPack: QubaSectorPack = {
       description: 'Özellikle yurt dışından gelen hastalarda güven, doktor, süreç, fiyat ve konaklama endişesini sahiplen.',
     },
     {
+      type: 'recover_objection',
+      priority: 88,
+      description: 'Hasta güven kaybı, pahalı/uzak/konaklama/fiyat itirazı veya “yardımcı olamayacaksınız” dediğinde kalıp tekrar etme; önce endişeyi sahiplen, sonra gerçekçi seçenek sun.',
+    },
+    {
       type: 'qualify_lead',
       priority: 80,
-      description: 'Şikayet, ülke, geliş niyeti, geliş dönemi ve iletişim tercihlerini doğal akışta öğren.',
+      description: 'Şikayet, ülke, geliş niyeti, geliş dönemi ve iletişim tercihlerini doğal akışta öğren; gelme niyetini hasta sinyal vermeden erken sıkıştırma.',
     },
     {
       type: 'schedule_callback',
@@ -81,7 +90,7 @@ export const healthcareSectorPack: QubaSectorPack = {
       title: 'Fiyat paylaşımı',
       severity: 'hard',
       appliesWhen: ['fiyat', 'ücret', 'tutar', 'paket fiyatı', 'ödeme', 'TA12'],
-      instruction: 'Net, yaklaşık, aralık veya indirimli fiyat verme. Fiyat sorulmadıysa fiyat konusunu açma.',
+      instruction: 'Net, yaklaşık, aralık veya indirimli fiyat verme. Fiyat sorulmadıysa fiyat konusunu açma. Hasta aynı fiyat sorusunu ısrarla tekrar ederse aynı kalıbı tekrar etme; açıklamanın nedenini kısa sahiplen ve telefon görüşmesini seçenek olarak sun.',
       safeResponse: 'Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.',
       forbiddenClaims: ['yaklaşık fiyat', 'paket fiyatı', 'indirim', 'şu kadar tutar'],
     },
@@ -108,6 +117,15 @@ export const healthcareSectorPack: QubaSectorPack = {
       severity: 'hard',
       appliesWhen: ['form lead', 'form doldurdum', 'başvuru'],
       instruction: 'Form yalnızca doğrulanmış form kaydı varsa var kabul edilir. Devam eden konuşmada ilk karşılama şablonuna dönülmez.',
+    },
+    {
+      id: 'healthcare_media_context',
+      title: 'Medya ve belge',
+      severity: 'hard',
+      appliesWhen: ['görsel', 'fotoğraf', 'rapor', 'MR', 'tetkik', 'belge'],
+      instruction: 'Görsel, rapor veya belge gelirse sessiz kalma; ulaştığını söyle, buradan tıbbi yorum yapamayacağını belirt, kullanıcının ne sormak istediğini doğal şekilde sor.',
+      safeResponse: 'Görseliniz/belgeniz ulaştı. Buradan tıbbi yorum yapamam; bu belgeyle ilgili özellikle neyi sormak istiyorsunuz?',
+      forbiddenClaims: ['doktorumuz inceleyecek', 'ekibimiz değerlendirecek', 'rapora göre teşhis'],
     },
   ],
   actions: [

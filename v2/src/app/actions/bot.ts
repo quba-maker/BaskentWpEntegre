@@ -2,6 +2,7 @@
 
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
+import { ConversationKnownFactsResolver } from "@/lib/services/ai/conversation-known-facts-resolver";
 
 
 // ==========================================
@@ -13,6 +14,122 @@ import { logAudit } from "@/lib/audit";
 /** When true, writes also sync to V1 settings table for backward compatibility */
 function isV1DualWriteEnabled(): boolean {
   return process.env.USE_V1_DUAL_WRITE === 'true';
+}
+
+type SandboxFormInput = {
+  formName?: string;
+  rawText?: string;
+};
+
+function normalizeSandboxFormKey(label: string): string {
+  const clean = (label || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/\u0307/g, '')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  if (/^(full_name|name|ad_soyad|adiniz_soyadiniz)$/.test(clean)) return 'full_name';
+  if (/whatsapp/.test(clean)) return 'whatsapp_number';
+  if (/phone|telefon/.test(clean)) return 'phone_number';
+  if (/hangi_ulkede|nerede_yas|ulke|country/.test(clean)) return 'country';
+  if (/date_of_birth|dogum/.test(clean)) return 'date_of_birth';
+  if (/(^|_)yas(?:iniz)?($|_)/.test(clean)) return 'age';
+  if (/ne_zaman_basladi|sikayetiniz_ne_zaman|sure/.test(clean)) return 'sikayet_suresi';
+  if (/sikayetiniz_nedir|sikayet|complaint|talep/.test(clean)) return 'sikayet';
+  if (/randevu.*ister|ne_zaman_randevu|gelme_plani|konya_ya_tedavi|ne_zaman_gel/.test(clean)) return 'randevu_tercihi';
+  if (/sizi_ne_zaman_arayalim|ne_zaman_arayalim|arama_saati|aranma|on_gorusme|ön_görüşme/.test(clean)) return 'ne_zaman_arayalim';
+  if (/tetkik|rapor|mr|mrg|guncel_tetkik/.test(clean)) return 'tetkik_var_mi';
+  if (/onerilen_bolum|bolum|department/.test(clean)) return 'onerilen_bolum';
+  return clean || 'field';
+}
+
+function parseSandboxForm(rawText?: string): Record<string, any> | null {
+  const text = String(rawText || '').trim();
+  if (!text) return null;
+
+  const data: Record<string, any> = {};
+  const raw: Record<string, string> = {};
+
+  for (const rawLine of text.split(/\n+/)) {
+    const line = rawLine.trim();
+    if (!line || /^merhaba!?/i.test(line) || /^formunuzu doldurdum/i.test(line)) continue;
+    const separatorIndex = line.search(/[:：]/);
+    if (separatorIndex <= 0) continue;
+    const label = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+    if (!label || !value) continue;
+    const key = normalizeSandboxFormKey(label);
+    data[key] = value;
+    raw[label] = value;
+  }
+
+  if (Object.keys(data).length === 0) return null;
+
+  if (data.randevu_tercihi && !data.ne_zaman_gelmek_istiyorsunuz) {
+    data.ne_zaman_gelmek_istiyorsunuz = data.randevu_tercihi;
+  }
+  if (data.sikayet && !data.complaint) data.complaint = data.sikayet;
+  data._raw_labels = raw;
+  data._sandbox_form = true;
+  return data;
+}
+
+function buildSandboxUnifiedContext(input?: SandboxFormInput | null) {
+  const data = parseSandboxForm(input?.rawText);
+  if (!data) return null;
+
+  const createdAt = new Date().toISOString();
+  const latestForm = {
+    id: 'sandbox-form',
+    name: input?.formName?.trim() || 'Sandbox Test Formu',
+    created_at: createdAt,
+    data,
+  };
+
+  const context = {
+    latestForm,
+    opportunity: {
+      id: 'sandbox-opportunity',
+      created_at: createdAt,
+      patient_name: data.full_name || undefined,
+      country: data.country || undefined,
+      department: data.onerilen_bolum || undefined,
+      metadata: {
+        patient_name: data.full_name || undefined,
+        complaint: data.sikayet || data.complaint || undefined,
+        travel_date: data.ne_zaman_gelmek_istiyorsunuz || data.randevu_tercihi || undefined,
+        sandbox_form: true,
+      },
+    },
+    conversation: {
+      id: 'sandbox-conversation',
+      created_at: createdAt,
+      patient_name: data.full_name || undefined,
+      country: data.country || undefined,
+      department: data.onerilen_bolum || undefined,
+      metadata: {
+        sandbox_form: true,
+      },
+    },
+  };
+
+  const resolvedFacts = ConversationKnownFactsResolver.resolve({
+    history: [],
+    latestForm: context.latestForm,
+    opportunity: context.opportunity,
+    conversation: context.conversation,
+  });
+
+  return {
+    ...context,
+    patient_known_facts: ConversationKnownFactsResolver.formatFacts(resolvedFacts),
+  };
 }
 
 
@@ -432,7 +549,10 @@ export async function getRecentBotConversations(limit: number = 8) {
 export async function testBotPrompt(
   botGroupId: string,
   messages: { role: 'user' | 'assistant'; content: string }[],
-  channelId?: string
+  channelId?: string,
+  options?: {
+    sandboxForm?: SandboxFormInput | null;
+  }
 ) {
   return withActionGuard(
     { actionName: 'testBotPrompt' },
@@ -555,6 +675,7 @@ export async function testBotPrompt(
         content: m.content
       }));
       const lastMessage = messages[messages.length - 1];
+      const sandboxUnifiedContext = buildSandboxUnifiedContext(options?.sandboxForm || null);
 
       const { BrainV2ShadowPlanner } = await import("@/lib/services/ai/brain-v2-shadow-planner");
       const { QubaBrainCompiler, resolveQubaBrainRolloutMode, shouldApplyQubaBrainSandboxDirective } = await import("@/lib/brain/core");
@@ -567,7 +688,10 @@ export async function testBotPrompt(
         history: historyMessages,
         brain: mockBrain as any,
         channel: 'whatsapp',
-        now: new Date()
+        now: new Date(),
+        latestForm: sandboxUnifiedContext?.latestForm,
+        opportunity: sandboxUnifiedContext?.opportunity,
+        conversation: sandboxUnifiedContext?.conversation
       });
       const brainV2SandboxDirective = BrainV2ShadowPlanner.buildSandboxPromptDirective(brainV2ShadowPlan);
       const sandboxSystemPrompt = `${rawSystemPrompt}${qubaBrainDirective}${brainV2SandboxDirective}`;
@@ -589,7 +713,8 @@ export async function testBotPrompt(
         channel: 'whatsapp',
         channelId,
         sandbox: true,
-        history: historyMessages
+        history: historyMessages,
+        unifiedContext: sandboxUnifiedContext || undefined
       });
 
       let finalReply = response.text || '⚠️ Model yanıt üretmedi.';
@@ -615,6 +740,13 @@ export async function testBotPrompt(
           channel: 'whatsapp',
           replyLanguage: response.replyLanguage,
           inboundText: auditorInboundText || lastMessage?.content || '',
+          conversationContextText: historyMessages
+            .slice(-10)
+            .filter(m => m.role === 'user')
+            .map(m => m.content || '')
+            .join('\n'),
+          verifiedDoctorDirectory: brainV2ShadowPlan.verifiedFacts.doctorDirectory,
+          patientKnownFacts: sandboxUnifiedContext?.patient_known_facts || [],
         });
         finalReply = auditResult.text;
       }
@@ -649,6 +781,9 @@ export async function testBotPrompt(
           qubaBrainRolloutMode,
           qubaBrainProfile,
           brainV2ShadowPlanApplied: true,
+          sandboxFormApplied: !!sandboxUnifiedContext?.latestForm,
+          sandboxForm: sandboxUnifiedContext?.latestForm || null,
+          sandboxPatientKnownFacts: sandboxUnifiedContext?.patient_known_facts || [],
           brainV2ShadowPlan,
           brainV2ResponseEvaluation
         }

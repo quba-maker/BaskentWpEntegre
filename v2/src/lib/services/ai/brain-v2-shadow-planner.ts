@@ -54,7 +54,9 @@ type IntentFlag =
   | 'address_question'
   | 'form_payload'
   | 'language_or_country_signal'
-  | 'concern_objection';
+  | 'concern_objection'
+  | 'trust_repair'
+  | 'media_or_document';
 
 const PRICE_POLICY =
   'Fiyat bilgisi, hastanedeki değerlendirme ve planlanacak sürece göre değiştiği için buradan net fiyat paylaşamıyorum.';
@@ -120,6 +122,14 @@ function hasAddressQuestion(clean: string): boolean {
 
 function hasConcern(clean: string): boolean {
   return /\b(suphe|şüphe|guven|güven|inanmadim|inanmadım|emin degil|emin değil|kararsiz|kararsız|pahali|pahalı|uzak|endise|endişe)\b/.test(clean);
+}
+
+function hasTrustRepairSignal(clean: string): boolean {
+  return /\b(bot musun|botsun|yapay zeka|guvenemedim|güvenemedim|inanmadim|inanmadım|yardimci olamayacaksiniz|yardımcı olamayacaksınız|beni anlamiyorsun|beni anlamıyorsun|sorularima cevap vermedin|sorularıma cevap vermedin)\b/.test(clean);
+}
+
+function hasMediaOrDocumentSignal(clean: string): boolean {
+  return /\b(gorsel|görsel|fotograf|fotoğraf|resim|rapor|belge|dosya|mr|mrg|em[ae]r|radyoloji|tetkik|sonuc|sonuç|image|photo|document|report)\b/.test(clean);
 }
 
 function hasCountryOrLanguageSignal(clean: string): boolean {
@@ -246,6 +256,14 @@ export class BrainV2ShadowPlanner {
     const history = params.history || [];
     const analysisText = buildRecentUserWindow(inboundText, history);
     const clean = normalizeText(analysisText);
+    const recentUserContextText = [
+      ...history
+        .slice(-10)
+        .filter(m => m.role === 'user')
+        .map(m => m.content || ''),
+      inboundText
+    ].join('\n');
+    const recentUserContextClean = normalizeText(recentUserContextText);
     const hasCurrentFormPayload = hasStructuredFormPayload(inboundText);
     const hasAnyFormPayload = hasCurrentFormPayload || history.some(m => hasStructuredFormPayload(m.content || '')) || !!params.latestForm;
 
@@ -266,12 +284,16 @@ export class BrainV2ShadowPlanner {
 
     const allDoctors = DoctorDirectoryResolver.getDoctors(params.brain);
     const doctorNameAsk = isDoctorNameRequestText(analysisText, history.some(m => m.role === 'user' && isDoctorNameRequestText(m.content || '', false)));
-    const doctorProfileAsk = isDoctorProfileQuestionText(analysisText, allDoctors);
+    const trustRepairSignal = hasTrustRepairSignal(clean);
+    const recentDoctorNameAsk = isDoctorNameRequestText(recentUserContextText, true);
+    const recentPriceQuestion = hasPriceQuestion(recentUserContextClean);
+    const doctorProfileAsk = !hasCurrentFormPayload && isDoctorProfileQuestionText(analysisText, allDoctors);
+    const explicitAccommodationQuestion = hasAccommodationQuestion(clean);
 
-    pushFlag('price_question', hasPriceQuestion(clean) || multiIntents.includes('price_question') || routerIntents.includes('price_question'));
-    pushFlag('doctor_names', doctorNameAsk || multiIntents.includes('doctor_names') || routerIntents.includes('doctor_lookup'));
+    pushFlag('price_question', hasPriceQuestion(clean) || (trustRepairSignal && recentPriceQuestion) || multiIntents.includes('price_question') || routerIntents.includes('price_question'));
+    pushFlag('doctor_names', doctorNameAsk || (trustRepairSignal && recentDoctorNameAsk) || multiIntents.includes('doctor_names') || routerIntents.includes('doctor_lookup'));
     pushFlag('doctor_profile', doctorProfileAsk);
-    pushFlag('accommodation_question', hasAccommodationQuestion(clean) || multiIntents.includes('logistics_question'));
+    pushFlag('accommodation_question', explicitAccommodationQuestion || (!hasCurrentFormPayload && multiIntents.includes('logistics_question')));
     pushFlag('process_question', hasProcessQuestion(clean) || multiIntents.includes('process_question') || routerIntents.includes('process_question'));
     pushFlag('appointment_or_call_request', hasAppointmentOrCall(clean) || routerIntents.includes('call_scheduling_request'));
     pushFlag('visit_intent', hasVisitIntent(clean) || routerIntents.includes('arrival_date_answer'));
@@ -279,9 +301,18 @@ export class BrainV2ShadowPlanner {
     pushFlag('form_payload', hasCurrentFormPayload);
     pushFlag('language_or_country_signal', hasCountryOrLanguageSignal(clean));
     pushFlag('concern_objection', hasConcern(clean) || multiIntents.includes('concern_objection') || routerIntents.includes('distance_objection'));
+    pushFlag('trust_repair', trustRepairSignal);
+    pushFlag('media_or_document', hasMediaOrDocumentSignal(clean));
+
+    const previousAssistantText = history
+      .filter(m => m.role === 'assistant')
+      .slice(-4)
+      .map(m => m.content || '')
+      .join('\n');
+    const priceAlreadyAnswered = /buradan\s+net\s+fiyat\s+payla[şs]am[ıi]yorum|fiyat\s+bilgisi,\s*hastanedeki\s+de[ğg]erlendirme/i.test(previousAssistantText);
 
     const detectedIntents = unique([...routerIntents.filter(i => i !== 'generic_other'), ...multiIntents, ...flags]);
-    const departments = detectDepartments(analysisText, history, params.conversation);
+    const departments = detectDepartments(`${analysisText}\n${trustRepairSignal ? recentUserContextText : ''}`, history, params.conversation);
     const scopedDoctors = departments.length > 0
       ? departments.flatMap(dept => DoctorDirectoryResolver.getDoctors(params.brain, dept))
       : allDoctors;
@@ -311,6 +342,9 @@ export class BrainV2ShadowPlanner {
     if (flags.includes('visit_intent')) mustAnswer.push('geliş bilgisini tekrar sormadan mevcut planı kullan');
     if (flags.includes('address_question')) mustAnswer.push('adres/konum talebini teşekkür kapanışı yapmadan yanıtla');
     if (flags.includes('language_or_country_signal')) mustAnswer.push('ülke/dil bilgisini kabul et; aynı bilgiyi tekrar sorma');
+    if (flags.includes('trust_repair')) mustAnswer.push('güven kırılmasını kalıp cevapla değil, kısa sahiplenme ve somut yardım seçeneğiyle toparla');
+    if (flags.includes('media_or_document')) mustAnswer.push('görsel/rapor/belge ulaştıysa tıbbi yorum vaadi vermeden ne sorduğunu netleştir');
+    if (flags.includes('price_question') && priceAlreadyAnswered) mustAnswer.push('fiyat sorusu tekrarlandıysa aynı kalıbı tekrarlama; danışmanla telefon görüşmesini seçenek olarak sun');
 
     const missingInformation: string[] = [];
     if (flags.includes('doctor_names') && departments.length === 0) missingInformation.push('doktor adı için bölüm');
@@ -333,6 +367,9 @@ export class BrainV2ShadowPlanner {
     if (flags.includes('price_question')) riskFlags.push('price_amount_forbidden');
     if (flags.includes('doctor_names') && doctorDirectory.length === 0) riskFlags.push('doctor_directory_missing_or_unscoped');
     if (flags.includes('accommodation_question')) riskFlags.push('accommodation_no_guarantee');
+    if (flags.includes('trust_repair')) riskFlags.push('trust_repair_needed');
+    if (flags.includes('media_or_document')) riskFlags.push('media_no_diagnosis_or_review_promise');
+    if (flags.includes('price_question') && priceAlreadyAnswered) riskFlags.push('repeated_price_needs_handoff_option');
     if (/form doldur/i.test(analysisText) && !hasAnyFormPayload) riskFlags.push('user_claims_form_without_verified_form');
     if (/\b(7\s*14|7[./]14)\b/.test(clean)) riskFlags.push('ambiguous_date_needs_clarification');
     if (/\b(hangi konuda bilgi almak istiyorsunuz|size saglik talebinizle ilgili yardimci olayim)\b/.test(clean)) riskFlags.push('generic_escape_phrase_seen');
@@ -344,6 +381,12 @@ export class BrainV2ShadowPlanner {
       recommendedFollowUp = 'Doktor isimlerini paylaş; hekim hakkında kişisel yorum istenirse yorum/başarı kıyaslaması yapma.';
     } else if (flags.includes('accommodation_question')) {
       recommendedFollowUp = 'Konaklama sorusunu doğrudan yanıtla; tekrar "hangi başlık" diye sorma.';
+    } else if (flags.includes('price_question') && priceAlreadyAnswered) {
+      recommendedFollowUp = 'Fiyat kalıbını tekrar etmek yerine, bu detayları hasta danışmanıyla telefon görüşmesinde netleştirebileceğini söyle ve uygunsa gün/saat sor.';
+    } else if (flags.includes('trust_repair')) {
+      recommendedFollowUp = 'Önce güven kırılmasını sahiplen; sonra sorulan somut başlığı yanıtla veya danışman görüşmesini seçenek olarak sun.';
+    } else if (flags.includes('media_or_document')) {
+      recommendedFollowUp = 'Belgenin/görselin ulaştığını söyle; tıbbi yorum yapmadan kullanıcının ne öğrenmek istediğini sor.';
     } else if (flags.includes('appointment_or_call_request') && missingInformation.length > 0) {
       recommendedFollowUp = 'Randevu/arama için eksik olan gün, saat veya saat dilimini tek kısa soruyla netleştir.';
     } else if (flags.includes('price_question')) {

@@ -1111,8 +1111,19 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
       opportunity: unifiedContext?.opportunity,
       profile: unifiedContext?.profile,
       latestForm: unifiedContext?.latestForm,
-      conversation: unifiedContext?.conversation
+      conversation: unifiedContext?.conversation,
+      patient_known_facts: unifiedContext?.patient_known_facts
     });
+    const relatedFormSubject = Array.isArray(resolvedFactsForGuide.relatedPersons)
+      ? resolvedFactsForGuide.relatedPersons.find((rp: any) => rp?.topic)
+      : null;
+    const relatedLabel = relatedFormSubject?.relation === 'father' ? 'babası'
+      : relatedFormSubject?.relation === 'mother' ? 'annesi'
+      : relatedFormSubject?.relation === 'spouse' ? 'eşi'
+      : relatedFormSubject ? 'yakını' : '';
+    const formSubjectInstruction = relatedFormSubject
+      ? `KRİTİK FORM ÖZNESİ: Bu başvuru doğrudan başvuranın kendisi için değil, ${relatedLabel} için görünüyor. Başvuranı hasta ile karıştırma; "${relatedLabel} için ${relatedFormSubject.topic}" çizgisinde konuş. Başvuranın bulunduğu yer ve hastanın bulunduğu yer ayrıysa ikisini de koru.`
+      : '';
 
     if (isMultiIntent && isHealthcare) {
       const multiIntentGuidance = MultiIntentConsultantComposer.buildPromptGuidance(lastUserMessage || '');
@@ -1148,7 +1159,7 @@ Aşağıdaki saat/tarih bilgileri hasta ile bot/hasta danışmanı arasında pla
         if (!hasVerifiedFormContext) {
           welcomeInstruction = `FORM BAĞLAMI YOK: Kullanıcı yalnızca selam verdiyse veya form kaydı sistemde yoksa "doldurduğunuz form", "formunuzda", "başvurunuz" gibi ifadeler kullanma. Kullanıcı "form doldurmuştum" derse ilk form karşılama şablonuna dönme; doğal cevap ver: "Bu konuşmada form kaydı görünmüyor. Şikayetinizi ve geliş planınızı buradan yazarsanız yardımcı olayım."`;
         } else if (isFirstAssistantTurn && unifiedContext?.formAlreadyAddressed !== true) {
-          welcomeInstruction = `İlk mesaj karşılama kuralları: Hasta ilk selamı verdi. YAP: Hastanın selamına sıcak bir şekilde karşılık ver, başvurunun/formun ulaştığını belirt${compPhrase} ve geçmiş olsun dile. UYARI: Karşılamayı kesinlikle "iletişime geçiyoruz" veya "sizinle irtibata geçmekteyiz" şeklinde yapma, kullanıcı zaten bize kendisi yazmış durumdadır. Doğal bir form karşılama selamlaması yap.`;
+          welcomeInstruction = `İlk mesaj karşılama kuralları: Hasta ilk selamı verdi. YAP: Hastanın selamına sıcak bir şekilde karşılık ver, başvurunun/formun ulaştığını belirt${compPhrase} ve geçmiş olsun dile. ${formSubjectInstruction} UYARI: Karşılamayı kesinlikle "iletişime geçiyoruz" veya "sizinle irtibata geçmekteyiz" şeklinde yapma, kullanıcı zaten bize kendisi yazmış durumdadır. Doğal bir form karşılama selamlaması yap.`;
         } else {
           welcomeInstruction = `Devam eden konuşma kuralları: KESİNLİKLE kendini tanıtma, kurum adını söyleme veya karşılama/selamlama şablonlarını KESİNLİKLE kullanma. Doğrudan hastanın form doldurdum beyanını/sorusunu onaylayarak konuya gir (Örn: "Evet, form kaydınızı görüyorum. ..."). Mevcut konuşmadaki bölüm, ülke, geliş dönemi ve telefon bilgilerini koru; ilk form karşılama metnine dönme ve devam eden konuşmada "Sağlıklı günler dileriz" kapanışı kullanma.`;
         }
