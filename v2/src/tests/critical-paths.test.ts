@@ -113,6 +113,18 @@ test("SECURITY: Hardcoded secret olmamalı", async () => {
   }
 });
 
+test("AUTH: middleware ve session local fallback secret aynı olmalı", async () => {
+  const fs = await import("fs");
+  const path = await import("path");
+  const sessionPath = path.resolve(__dirname, "../lib/auth/session.ts");
+  const middlewarePath = path.resolve(__dirname, "../middleware.ts");
+
+  const sessionContent = fs.readFileSync(sessionPath, "utf-8");
+  const middlewareContent = fs.readFileSync(middlewarePath, "utf-8");
+  assert(sessionContent.includes('process.env.AUTH_SECRET || "fallback_secret_for_build_only"'), "Session local fallback secret değişmiş");
+  assert(middlewareContent.includes('process.env.AUTH_SECRET || "fallback_secret_for_build_only"'), "Middleware local fallback secret session ile aynı olmalı");
+});
+
 test("SECURITY: Null tenant bypass olmamalı", async () => {
   const fs = await import("fs");
   const path = await import("path");
@@ -15019,6 +15031,17 @@ test("Başkent v89 T137: Yeni V2 Brain uses independent gate engine in sandbox",
   assert(botActionCode.includes("qubaV2GateEngineApplied"), "Sandbox metadata should expose V2 gate usage");
   assert(playgroundCode.includes("Bağımsız V2 Kapıları"), "Test panel should show the independent V2 gate diagnostics");
   assert(playgroundCode.includes("Parçalı SaaS alanları + bağımsız V2 kapılar"), "Test panel should explain V2 uses independent gates");
+});
+
+test("Başkent v89 T138: sandbox returns V2 diagnostics even when Gemini key is missing", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
+
+  assert(botActionCode.includes("const missingGeminiApiKey = !process.env.GEMINI_API_KEY"), "Sandbox should track missing Gemini key without returning before diagnostics");
+  assert(botActionCode.includes("Yerel sandbox debug bilgileri üretildi"), "Missing key reply should explain diagnostics were still produced");
+  assert(botActionCode.includes("missingGeminiApiKey,"), "Sandbox metadata should expose missing Gemini key state");
+  assert(botActionCode.indexOf("QubaV2GateEngine.build") < botActionCode.indexOf("if (!missingGeminiApiKey)"), "V2 gate result should be built before model availability gates the LLM call");
 });
 
 

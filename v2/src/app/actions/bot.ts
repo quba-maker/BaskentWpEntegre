@@ -595,10 +595,7 @@ export async function testBotPrompt(
   return withActionGuard(
     { actionName: 'testBotPrompt' },
     async (ctx) => {
-      const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-      if (!GEMINI_API_KEY) {
-        return { success: false, reply: '⚠️ GEMINI_API_KEY tanımlı değil.', metadata: null };
-      }
+      const missingGeminiApiKey = !process.env.GEMINI_API_KEY;
       if (!botGroupId) {
         return { success: false, reply: '⚠️ Bot Group ID gerekli.', metadata: null };
       }
@@ -767,20 +764,24 @@ export async function testBotPrompt(
         }
       };
 
-      const response = await AIResponseOrchestrator.run({
-        tenantId: ctx.tenantId,
-        phoneNumber: 'sandbox_test_user',
-        inboundText: lastMessage?.content || '',
-        brain: sandboxBrain as any,
-        channel: 'whatsapp',
-        channelId,
-        sandbox: true,
-        history: historyMessages,
-        unifiedContext: sandboxUnifiedContext || undefined
-      });
+      let response: any = null;
+      let finalReply = '⚠️ GEMINI_API_KEY tanımlı değil. Yerel sandbox debug bilgileri üretildi; model cevabı için geçerli anahtar gerekli.';
+      if (!missingGeminiApiKey) {
+        response = await AIResponseOrchestrator.run({
+          tenantId: ctx.tenantId,
+          phoneNumber: 'sandbox_test_user',
+          inboundText: lastMessage?.content || '',
+          brain: sandboxBrain as any,
+          channel: 'whatsapp',
+          channelId,
+          sandbox: true,
+          history: historyMessages,
+          unifiedContext: sandboxUnifiedContext || undefined
+        });
 
-      let finalReply = response.text || '⚠️ Model yanıt üretmedi.';
-      if (response.text) {
+        finalReply = response.text || '⚠️ Model yanıt üretmedi.';
+      }
+      if (response?.text) {
         const recentUserWindow: string[] = [];
         for (let i = historyMessages.length - 1; i >= 0; i--) {
           const msg = historyMessages[i];
@@ -829,11 +830,11 @@ export async function testBotPrompt(
         success: true,
         reply: finalReply,
         metadata: {
-          model: response.modelUsed || aiModel,
+          model: response?.modelUsed || aiModel,
           promptVersion: activePrompt.version,
           botGroupId,
           channelId: channelId || null,
-          latencyMs: response.latencyMs,
+          latencyMs: response?.latencyMs || 0,
           sandboxMode: true,
           toolExecution: 'sandbox',
           responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
@@ -845,6 +846,7 @@ export async function testBotPrompt(
           sandboxPromptSource: sandboxBrainMode === 'v2' ? 'v2_quba_brain' : 'legacy_system_prompt',
           legacySystemPromptChars: rawSystemPrompt.length,
           sandboxSystemPromptChars: sandboxSystemPrompt.length,
+          missingGeminiApiKey,
           qubaBrainProfile,
           qubaV2GateEngineApplied: sandboxBrainMode === 'v2',
           qubaV2GateResult,

@@ -6,7 +6,7 @@ import { jwtVerify } from "jose";
 // ==========================================
 
 const SECRET = new TextEncoder().encode(
-  process.env.AUTH_SECRET || ""
+  process.env.AUTH_SECRET || "fallback_secret_for_build_only"
 );
 
 // Giriş gerektirmeyen public route'lar
