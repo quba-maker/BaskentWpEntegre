@@ -14727,13 +14727,14 @@ test("Başkent v87 T129: Bot setup wizard stores tenant Brain config separately 
   assert(migrateCode.includes("channel_prompts ADD COLUMN IF NOT EXISTS metadata"), "Migration should ensure prompt metadata column");
 });
 
-test("Başkent v87 T130: Bot setup wizard keeps Brain live rollout explicit", () => {
+test("Başkent v87 T130: Bot setup wizard keeps Brain live rollout protected from accidental activation", () => {
   const fs = require("fs");
   const path = require("path");
   const promptTabCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-prompt-tab.tsx"), "utf-8");
 
   assert(promptTabCode.includes('useState(existingSetup.rolloutMode || "sandbox")'), "Setup wizard should default rollout to sandbox");
-  assert(promptTabCode.includes('<option value="active">Canlı aktif</option>'), "Active rollout should be explicit and visible");
+  assert(!promptTabCode.includes('<option value="active">Canlı aktif</option>'), "Daily setup wizard should not expose accidental live activation");
+  assert(promptTabCode.includes('const persistedRolloutMode = rolloutMode === "disabled" ? "disabled" : "sandbox"'), "Saving from setup UI should keep V2 Brain in sandbox");
   assert(promptTabCode.includes("revealBotIdentity: false"), "Setup wizard should keep bot identity hidden by default");
 });
 
@@ -14804,15 +14805,16 @@ test("Başkent v87 T131: Brain Core blocks active live directive when setup is i
   assert(readyProfile.rollout.liveDirectiveEnabled === true, JSON.stringify(readyProfile.rollout));
 });
 
-test("Başkent v87 T132: Bot test panel exposes readiness score and live blockers", () => {
+test("Başkent v87 T132: Bot test panel keeps readiness and live blockers behind technical details", () => {
   const fs = require("fs");
   const path = require("path");
   const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
 
-  assert(playgroundCode.includes("CANLIYA HAZIRLIK"), "Test panel should show readiness progress");
+  assert(playgroundCode.includes("Teknik detay"), "Test panel should hide technical readiness details by default");
   assert(playgroundCode.includes("CANLI BLOKER"), "Test panel should show active rollout blockers");
   assert(playgroundCode.includes("qubaReadiness.score"), "Test panel should render readiness score");
   assert(playgroundCode.includes("qubaBrainProfile?.readiness"), "Test panel should consume compiler readiness");
+  assert(!playgroundCode.includes("CANLIYA HAZIRLIK"), "Main panel should not expose a second readiness progress block");
 });
 
 test("Başkent v88 T133: Brain v2 response evaluator catches doctor-name escape replies", () => {
@@ -14947,6 +14949,11 @@ test("Başkent v88 T134e: Sandbox can test V2 Brain separately from legacy promp
   assert(playgroundCode.includes("Eski Sistem"), "Panel should offer the current legacy system test");
   assert(playgroundCode.includes("Yeni V2 Brain"), "Panel should offer the segmented V2 Brain test");
   assert(playgroundCode.includes("sandboxBrainMode"), "Panel should pass the selected mode into the sandbox action");
+  assert(!playgroundCode.includes("Karma güvenli test"), "Panel should not expose the old confusing hybrid label");
+  assert(!playgroundCode.includes("Saf SaaS Brain"), "Panel should not expose the old confusing pure label");
+  assert(!playgroundCode.includes("TEST EDİLEN SİSTEM"), "Panel should avoid duplicate status tiles");
+  assert(!playgroundCode.includes("CANLI ETKİ"), "Panel should avoid duplicate live-impact tiles");
+  assert(!playgroundCode.includes("FORM BAĞLAMI"), "Panel should avoid duplicate form-context tiles");
 });
 
 test("Başkent v88 T134f: Bot test uses a real channel id and UI exposes legacy vs SaaS Brain setup", () => {
@@ -14957,8 +14964,11 @@ test("Başkent v88 T134f: Bot test uses a real channel id and UI exposes legacy 
 
   assert(pageCode.includes("selectedBotTestChannel"), "Bot page should resolve an actual channel for sandbox tests");
   assert(pageCode.includes("id: selectedBotTestChannel?.id || ''"), "Sandbox should not pass bot group id as channel id");
+  assert(promptTabCode.includes("Çalışma Modu"), "Prompt UI should use a simple two-mode selector");
   assert(promptTabCode.includes("Mevcut Sistem"), "Prompt UI should expose the legacy/current system path");
   assert(promptTabCode.includes("Yeni SaaS V2 Brain"), "Prompt UI should expose the new segmented SaaS Brain path");
+  assert(promptTabCode.includes("!isBrainMode &&"), "Legacy prompt editor should only render in legacy mode");
+  assert(promptTabCode.includes("isBrainMode &&"), "Structured Brain editor should only render in V2 mode");
   assert(promptTabCode.includes("applyBaskentBrainDraft"), "Prompt UI should provide a Başkent Brain draft filler");
   assert(promptTabCode.includes("Başkent alanlarını doldur"), "Prompt UI should let admins populate structured Brain fields");
   assert(promptTabCode.includes("buildBaskentHealthcareServiceCatalogDraft"), "Başkent draft should include a structured service catalog");

@@ -213,7 +213,6 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const qubaBlockers: string[] = Array.isArray(qubaReadiness?.blockers) ? qubaReadiness.blockers : [];
   const qubaRecommendations: string[] = Array.isArray(qubaReadiness?.recommendations) ? qubaReadiness.recommendations : [];
   const qubaSetupHealthy = qubaReadiness ? qubaReadiness.status === "ready" : qubaMissingSetup.length === 0;
-  const qubaLiveEnabled = Boolean(qubaBrainProfile?.rollout?.liveDirectiveEnabled);
   const qubaSandboxEnabled = Boolean(qubaBrainProfile?.rollout?.sandboxDirectiveEnabled);
   const rolloutLabelMap: Record<string, string> = {
     disabled: "Kapalı",
@@ -266,50 +265,29 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
         )}
       </div>
 
-      <div className="shrink-0 max-h-[310px] overflow-y-auto border-b" style={{ borderColor: "var(--q-border-default)" }}>
-      {/* Active test mode */}
-      <div className="shrink-0 px-4 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
-        <div className="grid grid-cols-3 gap-2">
-          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-            <div className="text-[9px] font-bold text-gray-400 mb-0.5">TEST EDİLEN SİSTEM</div>
-            <div className="text-[11px] font-bold truncate" style={{ color: "var(--q-text-primary)" }}>
-              {selectedSystemLabel}
-            </div>
-          </div>
-          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-            <div className="text-[9px] font-bold text-gray-400 mb-0.5">CANLI ETKİ</div>
-            <div
-              className="text-[11px] font-bold truncate"
-              style={{ color: qubaLiveEnabled ? "var(--q-green, #22c55e)" : "var(--q-text-primary)" }}
-            >
-              {qubaLiveEnabled ? "Brain açık" : "Canlı korunur"}
-            </div>
-          </div>
-          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-            <div className="text-[9px] font-bold text-gray-400 mb-0.5">FORM BAĞLAMI</div>
-            <div
-              className="text-[11px] font-bold truncate"
-              style={{ color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-primary)" }}
-            >
-              {sandboxFormEnabled ? "Formlu" : "Formsuz"}
-            </div>
-          </div>
-        </div>
-        {sandboxBrainMode === 'v2' && !qubaSandboxEnabled && (
-          <div className="mt-2 rounded-lg border px-3 py-2 text-[10px] leading-relaxed bg-yellow-50" style={{ borderColor: "rgba(245,158,11,0.25)", color: "var(--q-yellow, #f59e0b)" }}>
-            Yeni V2 Brain test ediliyor. Bu mod canlı hastayı etkilemez; sadece test alanında eski prompt yerine parçalı alanları konuşturur.
-          </div>
-        )}
-        <div className="mt-2 rounded-xl border p-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-          <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="shrink-0 max-h-[310px] overflow-y-auto border-b bg-white" style={{ borderColor: "var(--q-border-default)" }}>
+        <div className="px-4 py-3 space-y-3">
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Test edilecek sistem</div>
-              <div className="text-[9px] text-gray-400">İki sistem de canlıya göndermez; sadece test cevabı üretir.</div>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Test edilecek sistem</div>
+              <div className="mt-0.5 text-xs font-bold" style={{ color: "var(--q-text-primary)" }}>
+                {selectedSystemLabel} · {sandboxFormEnabled ? "Formlu test" : "Formsuz test"}
+              </div>
+              <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
+                Güvenli test: Gerçek hastaya mesaj gönderilmez. Seçilen sistem canlıdaki kapılarla denenir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.
+              </p>
             </div>
-            <span className="text-[9px] font-bold rounded-md border px-1.5 py-0.5 text-gray-500" style={{ borderColor: "var(--q-border-default)" }}>
-              {sandboxBrainMode === 'v2' ? "Parçalı V2" : "Mevcut"}
-            </span>
+            <button
+              type="button"
+              onClick={() => setShowBrainDetails(prev => !prev)}
+              className="flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1.5 text-[10px] font-bold text-gray-500 hover:bg-gray-50"
+              style={{ borderColor: "var(--q-border-default)" }}
+            >
+              {showBrainDetails ? "Detayı gizle" : "Teknik detay"}
+              <ChevronDown className={`h-3 w-3 transition-transform ${showBrainDetails ? "rotate-180" : ""}`} />
+            </button>
           </div>
+
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -317,14 +295,14 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
                 setSandboxBrainMode('legacy');
                 setDebugMeta(null);
               }}
-              className="rounded-lg border px-2.5 py-2 text-left transition-all hover:bg-white"
+              className="rounded-xl border px-3 py-2.5 text-left transition-all hover:bg-gray-50"
               style={{
-                borderColor: sandboxBrainMode === 'legacy' ? "rgba(0,122,255,0.35)" : "var(--q-border-default)",
-                backgroundColor: sandboxBrainMode === 'legacy' ? "rgba(0,122,255,0.06)" : "#fff",
+                borderColor: sandboxBrainMode === 'legacy' ? "rgba(0,122,255,0.45)" : "var(--q-border-default)",
+                backgroundColor: sandboxBrainMode === 'legacy' ? "rgba(0,122,255,0.07)" : "#fff",
               }}
             >
-              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Eski Sistem</div>
-              <div className="text-[9px] leading-relaxed text-gray-400">Mevcut sistem promptu + canlı kapılar</div>
+              <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Eski Sistem</div>
+              <div className="text-[9px] leading-relaxed text-gray-400">Mevcut prompt + canlı kapılar</div>
             </button>
             <button
               type="button"
@@ -332,284 +310,236 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
                 setSandboxBrainMode('v2');
                 setDebugMeta(null);
               }}
-              className="rounded-lg border px-2.5 py-2 text-left transition-all hover:bg-white"
+              className="rounded-xl border px-3 py-2.5 text-left transition-all hover:bg-gray-50"
               style={{
-                borderColor: sandboxBrainMode === 'v2' ? "rgba(34,197,94,0.35)" : "var(--q-border-default)",
-                backgroundColor: sandboxBrainMode === 'v2' ? "rgba(34,197,94,0.08)" : "#fff",
+                borderColor: sandboxBrainMode === 'v2' ? "rgba(34,197,94,0.45)" : "var(--q-border-default)",
+                backgroundColor: sandboxBrainMode === 'v2' ? "rgba(34,197,94,0.09)" : "#fff",
               }}
             >
-              <div className="text-[10px] font-bold" style={{ color: "var(--q-text-primary)" }}>Yeni V2 Brain</div>
+              <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Yeni V2 Brain</div>
               <div className="text-[9px] leading-relaxed text-gray-400">Parçalı SaaS alanları + canlı kapılar</div>
             </button>
           </div>
-        </div>
-      </div>
 
-      {/* Live automation state */}
-      {showBrainDetails && (
-      <div className="shrink-0 px-4 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4" style={{ color: inboundAutomation?.liveSending ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }} />
-            <div>
-              <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Canlı Cevap Durumu</div>
-              <div className="text-[10px] text-gray-400">Test modu ayrı, gerçek hasta gönderimi ayrı izlenir.</div>
-            </div>
-          </div>
-          {recentAutomation && (
-            <span className="rounded-full border px-2 py-1 text-[9px] font-bold text-gray-500" style={{ borderColor: "var(--q-border-default)" }}>
-              Son 24s
-            </span>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-            <div className="text-[9px] font-bold text-gray-400 mb-0.5">FORM İLK KARŞILAMA</div>
-            <div
-              className="text-[11px] font-bold"
-              style={{ color: formAutomation?.liveSending ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }}
-            >
-              {formAutomation
-                ? (formAutomation.liveSending ? "Canlı gönderir" : formAutomation.enabled ? "Dry-run / göndermez" : "Kapalı")
-                : "Yükleniyor"}
-            </div>
-          </div>
-          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-            <div className="text-[9px] font-bold text-gray-400 mb-0.5">HASTA MESAJINA CEVAP</div>
-            <div
-              className="text-[11px] font-bold"
-              style={{ color: inboundAutomation?.liveSending ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }}
-            >
-              {inboundAutomation
-                ? (inboundAutomation.liveSending ? "Canlı cevaplar" : inboundAutomation.enabled ? "Dry-run / göndermez" : "Kapalı")
-                : "Yükleniyor"}
-            </div>
-          </div>
-        </div>
-        {recentAutomation && (
-          <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
-            <div className="rounded-lg border bg-gray-50 px-2.5 py-2" style={{ borderColor: "var(--q-border-default)" }}>
-              <div className="font-bold text-gray-400">BOTTA</div>
-              <div className="font-semibold text-gray-700">{recentAutomation.botConversations || 0}</div>
-            </div>
-            <div className="rounded-lg border bg-gray-50 px-2.5 py-2" style={{ borderColor: "var(--q-border-default)" }}>
-              <div className="font-bold text-gray-400">MANUELDE</div>
-              <div className="font-semibold text-gray-700">{recentAutomation.humanConversations || 0}</div>
-            </div>
-            <div className="rounded-lg border bg-gray-50 px-2.5 py-2" style={{ borderColor: "var(--q-border-default)" }}>
-              <div className="font-bold text-gray-400">DEVİR SEBEBİ</div>
-              <div className="font-semibold text-gray-700">
-                {(recentAutomation.appEchoTakeovers || 0) > 0
-                  ? `${recentAutomation.appEchoTakeovers} manuel echo`
-                  : (recentAutomation.circuitBreakerStops || 0) > 0
-                    ? `${recentAutomation.circuitBreakerStops} kalite durdu`
-                    : "Yok"}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-      )}
-
-      {/* Sandbox Alert Info Banner */}
-      <div className="shrink-0 px-4 py-2 bg-blue-50/50 border-b flex items-start gap-2 text-[10px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
-        <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
-          <p className="leading-relaxed">
-          <strong>Güvenli test:</strong> Gerçek hastaya mesaj gönderilmez. Seçilen sistem canlıdaki kapılarla denenir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.
-        </p>
-      </div>
-
-      {/* Live-like form context */}
-      <div className="shrink-0 px-4 py-3 bg-white border-b space-y-2" style={{ borderColor: "var(--q-border-default)" }}>
-        <div className="flex flex-col gap-2">
-          <div className="flex items-start gap-2">
-            <FileText className="w-4 h-4" style={{ color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-secondary)" }} />
-            <div>
-              <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Formlu Test</div>
-              <div className="text-[10px] text-gray-400">Canlıdaki form lead akışını test alanında simüle eder.</div>
-            </div>
-          </div>
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={loadSampleForm}
               type="button"
-              className="px-2.5 py-2.5 rounded-xl border text-[10px] font-bold hover:bg-gray-50"
-              style={{ borderColor: "rgba(0,122,255,0.25)", color: "var(--q-blue, #007aff)", backgroundColor: "rgba(0,122,255,0.04)" }}
+              onClick={() => {
+                setSandboxFormEnabled(false);
+                setShowBrainDetails(false);
+                setSandboxFormText("");
+              }}
+              className="rounded-xl border px-3 py-2 text-left transition-all hover:bg-gray-50"
+              style={{
+                borderColor: !sandboxFormEnabled ? "rgba(0,122,255,0.35)" : "var(--q-border-default)",
+                backgroundColor: !sandboxFormEnabled ? "rgba(0,122,255,0.06)" : "#fff",
+              }}
             >
-              Örnek Formla Aç
+              <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Formsuz Test</div>
+              <div className="text-[9px] leading-relaxed text-gray-400">Direkt WhatsApp hastası</div>
             </button>
-            <label
-              className="flex items-center justify-center gap-2 px-2.5 py-2.5 rounded-xl border text-[10px] font-bold cursor-pointer"
+            <button
+              type="button"
+              onClick={loadSampleForm}
+              className="rounded-xl border px-3 py-2 text-left transition-all hover:bg-gray-50"
               style={{
                 borderColor: sandboxFormEnabled ? "rgba(0,122,255,0.35)" : "var(--q-border-default)",
-                color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-secondary)",
                 backgroundColor: sandboxFormEnabled ? "rgba(0,122,255,0.06)" : "#fff",
               }}
             >
+              <div className="flex items-center gap-1.5 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
+                <FileText className="h-3.5 w-3.5" />
+                Örnek Formla Aç
+              </div>
+              <div className="text-[9px] leading-relaxed text-gray-400">Canlı form lead akışı</div>
+            </button>
+          </div>
+
+          {sandboxFormEnabled && (
+            <div className="space-y-2 rounded-xl border bg-gray-50 p-2" style={{ borderColor: "var(--q-border-default)" }}>
               <input
-                type="checkbox"
-                checked={sandboxFormEnabled}
-                onChange={e => {
-                  setSandboxFormEnabled(e.target.checked);
-                  setShowBrainDetails(false);
-                }}
-                className="w-3.5 h-3.5"
-              />
-              {sandboxFormEnabled ? "Form Açık" : "Formsuz Test"}
-            </label>
-          </div>
-        </div>
-        {sandboxFormEnabled && (
-          <div className="space-y-2">
-            <input
-              value={sandboxFormName}
-              onChange={e => setSandboxFormName(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border text-xs"
-              style={{ borderColor: "var(--q-border-default)" }}
-              placeholder="Form adı"
-            />
-            <textarea
-              value={sandboxFormText}
-              onChange={e => setSandboxFormText(e.target.value)}
-              rows={4}
-              className="w-full px-3 py-2 rounded-xl border text-xs resize-y"
-              style={{ borderColor: "var(--q-border-default)" }}
-              placeholder={"Canlı form metnini buraya yapıştırın.\nÖrn: Full name: ...\nŞikayetiniz Nedir?: ...\nNerede yaşıyorsunuz?: ..."}
-            />
-            <div className="text-[10px] text-gray-400">
-              Açıkken ilk “merhaba” cevabı form karşılaması gibi; kapalıyken doğrudan WhatsApp hastası gibi test edilir.
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Quba Brain Setup Health */}
-      <div className="shrink-0 px-4 py-3 bg-white space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
-            <ListChecks className="w-4 h-4" style={{ color: qubaSetupHealthy ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }} />
-            <span>Brain Kurulum Sağlığı</span>
-            {qubaReadiness && (
-              <span
-                className="px-1.5 py-0.5 rounded text-[9px] uppercase"
-                style={{
-                  backgroundColor: qubaReadiness.status === "ready" ? "rgba(34,197,94,0.10)" : "rgba(245,158,11,0.12)",
-                  color: qubaReadiness.status === "ready" ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)",
-                }}
-              >
-                {qubaReadiness.status} · {qubaReadiness.score}/100
-              </span>
-            )}
-            {qubaRolloutMode && (
-              <span
-                className="px-1.5 py-0.5 rounded text-[9px] uppercase"
-                style={{
-                  backgroundColor: qubaRolloutMode === "active" ? "rgba(34,197,94,0.10)" : "rgba(59,130,246,0.10)",
-                  color: qubaRolloutMode === "active" ? "var(--q-green, #22c55e)" : "var(--q-blue, #007aff)",
-                }}
-              >
-                {qubaRolloutMode}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {brainDiagnosticsLoading && (
-              <span className="flex items-center gap-1 text-[10px] text-gray-400">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Kontrol ediliyor
-              </span>
-            )}
-            {(qubaBrainProfile || brainDiagnosticsError) && (
-              <button
-                type="button"
-                onClick={() => setShowBrainDetails(prev => !prev)}
-                className="flex items-center gap-1 rounded-full border px-2 py-1 text-[9px] font-bold text-gray-500 hover:bg-gray-50"
+                value={sandboxFormName}
+                onChange={e => setSandboxFormName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border text-xs"
                 style={{ borderColor: "var(--q-border-default)" }}
-              >
-                {showBrainDetails ? "Detayları Gizle" : "Detayları Göster"}
-                <ChevronDown className={`h-3 w-3 transition-transform ${showBrainDetails ? "rotate-180" : ""}`} />
-              </button>
-            )}
-          </div>
+                placeholder="Form adı"
+              />
+              <textarea
+                value={sandboxFormText}
+                onChange={e => setSandboxFormText(e.target.value)}
+                rows={4}
+                className="w-full px-3 py-2 rounded-xl border text-xs resize-y"
+                style={{ borderColor: "var(--q-border-default)" }}
+                placeholder={"Canlı form metnini buraya yapıştırın.\nÖrn: Full name: ...\nŞikayetiniz Nedir?: ...\nNerede yaşıyorsunuz?: ..."}
+              />
+            </div>
+          )}
         </div>
 
-        {brainDiagnosticsError && showBrainDetails ? (
-          <div className="text-[11px] text-red-500 bg-red-50 border rounded-lg px-3 py-2" style={{ borderColor: "rgba(239,68,68,0.2)" }}>
-            {brainDiagnosticsError}
-          </div>
-        ) : qubaBrainProfile && showBrainDetails ? (
-          <div className="max-h-[150px] overflow-y-auto pr-1 space-y-2">
-            <div className="grid grid-cols-2 gap-2 text-[10px]">
-              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-                <div className="font-bold text-gray-400 mb-0.5">SEKTÖR</div>
-                <div className="font-semibold text-gray-700">{qubaBrainProfile.industry || "Belirsiz"}</div>
-              </div>
-              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-                <div className="font-bold text-gray-400 mb-0.5">KURUM</div>
-                <div className="font-semibold text-gray-700 truncate">{qubaBrainProfile.identity?.organizationName || "Eksik"}</div>
-              </div>
-              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-                <div className="font-bold text-gray-400 mb-0.5">DOKTOR LİSTESİ</div>
-                <div className="font-semibold text-gray-700">{qubaBrainProfile.knowledge?.doctorDirectoryAvailable ? "Var" : "Yok / algılanmadı"}</div>
-              </div>
-              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-                <div className="font-bold text-gray-400 mb-0.5">CANLI DİREKTİF</div>
-                <div className="font-semibold text-gray-700">{qubaBrainProfile.rollout?.liveDirectiveEnabled ? "Açık" : "Kapalı"}</div>
-              </div>
-              <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-                <div className="font-bold text-gray-400 mb-0.5">PROMPT SAĞLIĞI</div>
-                <div className="font-semibold text-gray-700">
-                  {qubaPromptBudget?.status ? `${qubaPromptBudget.status} · ${Number(qubaPromptBudget.totalStaticChars || 0).toLocaleString()} krk.` : "Ölçülmedi"}
-                </div>
-              </div>
-            </div>
-            {qubaReadiness && (
-              <div>
-                <div className="text-[9px] font-bold text-gray-400 mb-1">CANLIYA HAZIRLIK</div>
-                <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${Math.max(0, Math.min(100, qubaReadiness.score || 0))}%`,
-                      backgroundColor: qubaReadiness.status === "ready" ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)",
-                    }}
-                  />
-                </div>
-              </div>
-            )}
+        {showBrainDetails && (
+          <div className="border-t bg-gray-50 px-4 py-3 space-y-3" style={{ borderColor: "var(--q-border-default)" }}>
             <div>
-              <div className="text-[9px] font-bold text-gray-400 mb-1">YETENEKLER</div>
-              {renderCompactList(qubaCapabilities, "Henüz algılanmadı")}
+              <div className="mb-2 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4" style={{ color: inboundAutomation?.liveSending ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }} />
+                <div>
+                  <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Canlı Cevap Durumu</div>
+                  <div className="text-[10px] text-gray-400">Test modu ayrı, gerçek hasta gönderimi ayrı izlenir.</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl border px-3 py-2 bg-white" style={{ borderColor: "var(--q-border-default)" }}>
+                  <div className="text-[9px] font-bold text-gray-400 mb-0.5">FORM İLK KARŞILAMA</div>
+                  <div
+                    className="text-[11px] font-bold"
+                    style={{ color: formAutomation?.liveSending ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }}
+                  >
+                    {formAutomation
+                      ? (formAutomation.liveSending ? "Canlı gönderir" : formAutomation.enabled ? "Dry-run / göndermez" : "Kapalı")
+                      : "Yükleniyor"}
+                  </div>
+                </div>
+                <div className="rounded-xl border px-3 py-2 bg-white" style={{ borderColor: "var(--q-border-default)" }}>
+                  <div className="text-[9px] font-bold text-gray-400 mb-0.5">HASTA MESAJINA CEVAP</div>
+                  <div
+                    className="text-[11px] font-bold"
+                    style={{ color: inboundAutomation?.liveSending ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }}
+                  >
+                    {inboundAutomation
+                      ? (inboundAutomation.liveSending ? "Canlı cevaplar" : inboundAutomation.enabled ? "Dry-run / göndermez" : "Kapalı")
+                      : "Yükleniyor"}
+                  </div>
+                </div>
+              </div>
+              {recentAutomation && (
+                <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
+                  <div className="rounded-lg border bg-white px-2.5 py-2" style={{ borderColor: "var(--q-border-default)" }}>
+                    <div className="font-bold text-gray-400">BOTTA</div>
+                    <div className="font-semibold text-gray-700">{recentAutomation.botConversations || 0}</div>
+                  </div>
+                  <div className="rounded-lg border bg-white px-2.5 py-2" style={{ borderColor: "var(--q-border-default)" }}>
+                    <div className="font-bold text-gray-400">MANUELDE</div>
+                    <div className="font-semibold text-gray-700">{recentAutomation.humanConversations || 0}</div>
+                  </div>
+                  <div className="rounded-lg border bg-white px-2.5 py-2" style={{ borderColor: "var(--q-border-default)" }}>
+                    <div className="font-bold text-gray-400">DEVİR SEBEBİ</div>
+                    <div className="font-semibold text-gray-700">
+                      {(recentAutomation.appEchoTakeovers || 0) > 0
+                        ? `${recentAutomation.appEchoTakeovers} manuel echo`
+                        : (recentAutomation.circuitBreakerStops || 0) > 0
+                          ? `${recentAutomation.circuitBreakerStops} kalite durdu`
+                          : "Yok"}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-            {(qubaBlockers.length > 0 || qubaRecommendations.length > 0) && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <div>
-                  <div className="text-[9px] font-bold text-gray-400 mb-1">CANLI BLOKER</div>
-                  {renderCompactList(qubaBlockers)}
-                </div>
-                <div>
-                  <div className="text-[9px] font-bold text-gray-400 mb-1">ÖNERİ</div>
-                  {renderCompactList(qubaRecommendations)}
-                </div>
+
+            <div>
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>
+                <ListChecks className="w-4 h-4" style={{ color: qubaSetupHealthy ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }} />
+                <span>Brain Kurulum Sağlığı</span>
+                {qubaReadiness && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[9px] uppercase"
+                    style={{
+                      backgroundColor: qubaReadiness.status === "ready" ? "rgba(34,197,94,0.10)" : "rgba(245,158,11,0.12)",
+                      color: qubaReadiness.status === "ready" ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)",
+                    }}
+                  >
+                    {qubaReadiness.status} · {qubaReadiness.score}/100
+                  </span>
+                )}
+                {qubaRolloutMode && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[9px] uppercase"
+                    style={{
+                      backgroundColor: qubaRolloutMode === "active" ? "rgba(34,197,94,0.10)" : "rgba(59,130,246,0.10)",
+                      color: qubaRolloutMode === "active" ? "var(--q-green, #22c55e)" : "var(--q-blue, #007aff)",
+                    }}
+                  >
+                    {rolloutLabel}
+                  </span>
+                )}
+                {brainDiagnosticsLoading && (
+                  <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Kontrol ediliyor
+                  </span>
+                )}
               </div>
-            )}
-            {(qubaMissingSetup.length > 0 || qubaWarnings.length > 0) && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <div>
-                  <div className="text-[9px] font-bold text-gray-400 mb-1">EKSİK KURULUM</div>
-                  {renderCompactList(qubaMissingSetup)}
+
+              {brainDiagnosticsError ? (
+                <div className="text-[11px] text-red-500 bg-red-50 border rounded-lg px-3 py-2" style={{ borderColor: "rgba(239,68,68,0.2)" }}>
+                  {brainDiagnosticsError}
                 </div>
-                <div>
-                  <div className="text-[9px] font-bold text-gray-400 mb-1">UYARILAR</div>
-                  {renderCompactList(qubaWarnings)}
+              ) : qubaBrainProfile ? (
+                <div className="max-h-[150px] overflow-y-auto pr-1 space-y-2">
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div className="rounded-lg border px-2.5 py-2 bg-white" style={{ borderColor: "var(--q-border-default)" }}>
+                      <div className="font-bold text-gray-400 mb-0.5">SEKTÖR</div>
+                      <div className="font-semibold text-gray-700">{qubaBrainProfile.industry || "Belirsiz"}</div>
+                    </div>
+                    <div className="rounded-lg border px-2.5 py-2 bg-white" style={{ borderColor: "var(--q-border-default)" }}>
+                      <div className="font-bold text-gray-400 mb-0.5">KURUM</div>
+                      <div className="font-semibold text-gray-700 truncate">{qubaBrainProfile.identity?.organizationName || "Eksik"}</div>
+                    </div>
+                    <div className="rounded-lg border px-2.5 py-2 bg-white" style={{ borderColor: "var(--q-border-default)" }}>
+                      <div className="font-bold text-gray-400 mb-0.5">DOKTOR LİSTESİ</div>
+                      <div className="font-semibold text-gray-700">{qubaBrainProfile.knowledge?.doctorDirectoryAvailable ? "Var" : "Yok / algılanmadı"}</div>
+                    </div>
+                    <div className="rounded-lg border px-2.5 py-2 bg-white" style={{ borderColor: "var(--q-border-default)" }}>
+                      <div className="font-bold text-gray-400 mb-0.5">CANLI DİREKTİF</div>
+                      <div className="font-semibold text-gray-700">{qubaBrainProfile.rollout?.liveDirectiveEnabled ? "Açık" : "Kapalı"}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-bold text-gray-400 mb-1">YETENEKLER</div>
+                    {renderCompactList(qubaCapabilities, "Henüz algılanmadı")}
+                  </div>
+                  {(qubaBlockers.length > 0 || qubaRecommendations.length > 0) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-[9px] font-bold text-gray-400 mb-1">CANLI BLOKER</div>
+                        {renderCompactList(qubaBlockers)}
+                      </div>
+                      <div>
+                        <div className="text-[9px] font-bold text-gray-400 mb-1">ÖNERİ</div>
+                        {renderCompactList(qubaRecommendations)}
+                      </div>
+                    </div>
+                  )}
+                  {(qubaMissingSetup.length > 0 || qubaWarnings.length > 0) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-[9px] font-bold text-gray-400 mb-1">EKSİK KURULUM</div>
+                        {renderCompactList(qubaMissingSetup)}
+                      </div>
+                      <div>
+                        <div className="text-[9px] font-bold text-gray-400 mb-1">UYARILAR</div>
+                        {renderCompactList(qubaWarnings)}
+                      </div>
+                    </div>
+                  )}
+                  {qubaPromptBudget?.status && (
+                    <div>
+                      <div className="text-[9px] font-bold text-gray-400 mb-1">PROMPT SAĞLIĞI</div>
+                      <p className="text-[10px] text-gray-400">
+                        {qubaPromptBudget.status} · {Number(qubaPromptBudget.totalStaticChars || 0).toLocaleString()} krk.
+                      </p>
+                    </div>
+                  )}
+                  {sandboxBrainMode === 'v2' && !qubaSandboxEnabled && (
+                    <p className="text-[10px] text-gray-400">
+                      Yeni V2 Brain test ediliyor; bu mod canlı hastayı etkilemez.
+                    </p>
+                  )}
                 </div>
-              </div>
-            )}
+              ) : (
+                <p className="text-[11px] text-gray-400">Brain profili henüz yüklenmedi.</p>
+              )}
+            </div>
           </div>
-        ) : (
-          <p className="text-[11px] text-gray-400">Brain profili henüz yüklenmedi.</p>
         )}
-      </div>
       </div>
 
       {/* Chat Messages Log */}

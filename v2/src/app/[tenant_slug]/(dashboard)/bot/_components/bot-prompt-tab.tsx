@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Save, FileText, Layers, SlidersHorizontal, ShieldCheck, FlaskConical, RadioTower } from "lucide-react";
+import { Save, FileText, Layers, SlidersHorizontal, ShieldCheck } from "lucide-react";
 import type { BotData } from "@/app/actions/bot";
 
 // ==========================================
@@ -200,10 +200,11 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
     setSaving(true);
     const serviceCatalog = parseServiceCatalog(servicesText);
     const actionPolicy = buildPrimaryAction(primaryAction);
+    const persistedRolloutMode = rolloutMode === "disabled" ? "disabled" : "sandbox";
     const qubaBrainSetup = {
       ...(existingSetup || {}),
       industry: industry || undefined,
-      rolloutMode,
+      rolloutMode: persistedRolloutMode,
       identity: {
         ...(existingSetup.identity || {}),
         organizationName: organizationName.trim() || undefined,
@@ -243,34 +244,8 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
     setPreferredClosers(buildBaskentPreferredClosersDraft());
   }
 
-  const rolloutCards = [
-    {
-      value: "disabled",
-      title: "Eski düzen",
-      badge: "Canlı güvenli",
-      description: "Sadece mevcut Sistem Prompt ve bilgi bankası kullanılır. Yeni Brain direktifi testte de canlıda da kapalıdır.",
-    },
-    {
-      value: "sandbox",
-      title: "Yeni Brain testi",
-      badge: "Önerilen",
-      description: "Canlı Başkent akışı eski düzende kalır. Sağdaki Bot Test Alanı yeni SaaS Brain davranışını dener.",
-    },
-    {
-      value: "shadow",
-      title: "Gölge izleme",
-      badge: "Risk yok",
-      description: "Canlı cevap eski düzenden gider; yeni Brain sadece kalite/plan değerlendirmesi üretir.",
-    },
-    {
-      value: "active",
-      title: "Yeni Brain canlı",
-      badge: "Onaylı geçiş",
-      description: "Brain kurulumu hazırsa yeni SaaS direktifi canlı cevaplara da eklenir.",
-    },
-  ];
-
-  const selectedRollout = rolloutCards.find(item => item.value === rolloutMode) || rolloutCards[1];
+  const isBrainMode = rolloutMode !== "disabled";
+  const activeEditorTitle = isBrainMode ? "Yeni V2 Brain" : "Eski Sistem";
 
   return (
     <div className="space-y-6">
@@ -287,22 +262,22 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
               </div>
               <div>
                 <h3 className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>
-                  Geçiş Kontrolü
+                  Çalışma Modu
                 </h3>
                 <p className="text-xs leading-relaxed max-w-2xl" style={{ color: "var(--q-text-secondary)" }}>
-                  Başkent canlı botu korunur; yeni SaaS Brain katmanı önce sağdaki test alanında denenir. Canlıya geçiş yalnızca bu mod burada değiştirilip kaydedilirse olur.
+                  Hangi yapıyı düzenlemek ve sağdaki test alanında denemek istediğinizi seçin. Canlı hastaya mesaj gönderimi bu ekrandan yapılmaz.
                 </p>
               </div>
             </div>
             <div
               className="px-3 py-2 rounded-xl border text-xs font-semibold"
               style={{
-                borderColor: rolloutMode === "active" ? "rgba(34,197,94,0.25)" : "rgba(59,130,246,0.25)",
-                backgroundColor: rolloutMode === "active" ? "rgba(34,197,94,0.08)" : "rgba(59,130,246,0.08)",
-                color: rolloutMode === "active" ? "var(--q-green, #22c55e)" : "var(--q-blue, #007aff)",
+                borderColor: isBrainMode ? "rgba(34,197,94,0.25)" : "rgba(59,130,246,0.25)",
+                backgroundColor: isBrainMode ? "rgba(34,197,94,0.08)" : "rgba(59,130,246,0.08)",
+                color: isBrainMode ? "var(--q-green, #22c55e)" : "var(--q-blue, #007aff)",
               }}
             >
-              Aktif mod: {selectedRollout.title}
+              Düzenlenen: {activeEditorTitle}
             </div>
           </div>
 
@@ -322,17 +297,17 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
                 <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-gray-100" style={{ color: "var(--q-text-secondary)" }}>Canlı çekirdek</span>
               </div>
               <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-                Eski Sistem Prompt ve bilgi bankasıyla çalışır. Başkent’in mevcut canlı düzenidir.
+                Mevcut Sistem Prompt ve bilgi bankası. Başkent’in bugünkü güvenli düzeni.
               </p>
             </button>
             <button
               type="button"
-              onClick={() => setRolloutMode(rolloutMode === "disabled" ? "sandbox" : rolloutMode)}
+              onClick={() => setRolloutMode("sandbox")}
               className="text-left rounded-2xl border p-4 transition-all hover:bg-gray-50"
               style={{
-                borderColor: rolloutMode !== "disabled" ? "var(--q-green, #22c55e)" : "var(--q-border-default)",
-                backgroundColor: rolloutMode !== "disabled" ? "rgba(34,197,94,0.08)" : "#fff",
-                boxShadow: rolloutMode !== "disabled" ? "0 0 0 1px rgba(34,197,94,0.12)" : "none",
+                borderColor: isBrainMode ? "var(--q-green, #22c55e)" : "var(--q-border-default)",
+                backgroundColor: isBrainMode ? "rgba(34,197,94,0.08)" : "#fff",
+                boxShadow: isBrainMode ? "0 0 0 1px rgba(34,197,94,0.12)" : "none",
               }}
             >
               <div className="flex items-center justify-between gap-2 mb-1">
@@ -340,81 +315,21 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
                 <span className="text-[10px] font-bold px-2 py-1 rounded-md" style={{ backgroundColor: "rgba(34,197,94,0.10)", color: "var(--q-green, #22c55e)" }}>Parçalı test</span>
               </div>
               <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-                Firma davranışı alanlara bölünür. Önce sandbox, sonra gölge izleme, en son onayla canlıya alınır.
+                Yeni müşteri mantığı: kurum, ton, hizmet, aksiyon ve kaçınılacak kalıplar ayrı alanlardan yönetilir.
               </p>
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-            {rolloutCards.map(card => {
-              const isSelected = rolloutMode === card.value;
-              return (
-                <button
-                  key={card.value}
-                  type="button"
-                  onClick={() => setRolloutMode(card.value)}
-                  className="text-left rounded-xl border p-3 transition-all hover:bg-gray-50"
-                  style={{
-                    borderColor: isSelected ? "var(--q-blue, #007aff)" : "var(--q-border-default)",
-                    backgroundColor: isSelected ? "rgba(0,122,255,0.06)" : "#fff",
-                    boxShadow: isSelected ? "0 0 0 1px rgba(0,122,255,0.12)" : "none",
-                  }}
-                >
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="text-xs font-bold" style={{ color: "var(--q-text-primary)" }}>
-                      {card.title}
-                    </span>
-                    <span
-                      className="text-[9px] font-bold px-1.5 py-0.5 rounded-md"
-                      style={{
-                        backgroundColor: isSelected ? "rgba(0,122,255,0.10)" : "rgba(0,0,0,0.04)",
-                        color: isSelected ? "var(--q-blue, #007aff)" : "var(--q-text-secondary)",
-                      }}
-                    >
-                      {card.badge}
-                    </span>
-                  </div>
-                  <p className="text-[10px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-                    {card.description}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            <div className="rounded-xl border p-3 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-              <div className="flex items-center gap-2 text-[11px] font-bold mb-1" style={{ color: "var(--q-text-primary)" }}>
-                <FileText className="w-3.5 h-3.5" />
-                Eski canlı çekirdek
-              </div>
-              <p className="text-[10px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-                Sistem Prompt, fiyat politikası ve verified arşiv korunur. Başkent’in mevcut güvenli davranışı burada durur.
-              </p>
-            </div>
-            <div className="rounded-xl border p-3 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-              <div className="flex items-center gap-2 text-[11px] font-bold mb-1" style={{ color: "var(--q-text-primary)" }}>
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-                Yeni SaaS Brain
-              </div>
-              <p className="text-[10px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-                Sektör, kurum, ton, aksiyon, hizmet ve kaçınılacak kalıplar yeni müşteri kurulumunda buradan yönetilir.
-              </p>
-            </div>
-            <div className="rounded-xl border p-3 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
-              <div className="flex items-center gap-2 text-[11px] font-bold mb-1" style={{ color: "var(--q-text-primary)" }}>
-                <FlaskConical className="w-3.5 h-3.5" />
-                Sağ panel testi
-              </div>
-              <p className="text-[10px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-                Seçili moda göre formlu/formsuz hasta akışı simüle edilir; gerçek hastaya mesaj gitmez.
-              </p>
-            </div>
+          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+            <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
+              Sağdaki test alanında da aynı iki seçenek vardır. Orada seçtiğiniz sistem sadece test cevabını etkiler; gerçek hasta akışı korunur.
+            </p>
           </div>
         </div>
       </div>
 
       {/* System Prompt Editor */}
+      {!isBrainMode && (
       <div
         className="rounded-2xl border p-5"
         style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}
@@ -466,8 +381,10 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
           {prompt.length.toLocaleString()} karakter
         </p>
       </div>
+      )}
 
       {/* Brain Setup Wizard */}
+      {isBrainMode && (
       <div
         className="rounded-2xl border p-5"
         style={{ borderColor: "var(--q-border-default)", backgroundColor: "#fff" }}
@@ -487,11 +404,11 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
           <span
             className="text-[10px] font-bold px-2 py-1 rounded-lg uppercase"
             style={{
-              backgroundColor: rolloutMode === "active" ? "rgba(34,197,94,0.10)" : "rgba(59,130,246,0.10)",
-              color: rolloutMode === "active" ? "var(--q-green, #22c55e)" : "var(--q-blue, #007aff)",
+              backgroundColor: "rgba(59,130,246,0.10)",
+              color: "var(--q-blue, #007aff)",
             }}
           >
-            {rolloutMode}
+            test alanı
           </span>
         </div>
 
@@ -515,9 +432,9 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
         </div>
 
         <div className="mb-4 rounded-xl border px-3 py-2 flex items-start gap-2 bg-blue-50/50" style={{ borderColor: "rgba(59,130,246,0.18)" }}>
-          <RadioTower className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "var(--q-blue, #007aff)" }} />
+          <ShieldCheck className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "var(--q-blue, #007aff)" }} />
           <p className="text-[11px] leading-relaxed" style={{ color: "var(--q-text-secondary)" }}>
-            Şu an seçili mod <strong style={{ color: "var(--q-text-primary)" }}>{selectedRollout.title}</strong>. Başkent için güvenli çalışma: önce <strong>sandbox</strong> test, sonra gerekirse <strong>shadow</strong>, son onayla <strong>active</strong>.
+            Yeni V2 Brain şu an sadece test alanı için hazırlanır. Başkent canlı geçişi ayrıca onaylandıktan sonra yapılacak.
           </p>
         </div>
 
@@ -532,15 +449,7 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
               <option value="general">Genel İşletme</option>
             </select>
           </div>
-          <div>
-            <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>Rollout</label>
-            <select value={rolloutMode} onChange={e => setRolloutMode(e.target.value)} className="w-full px-3 py-2 rounded-xl border text-xs" style={{ borderColor: "var(--q-border-default)" }}>
-              <option value="disabled">Kapalı</option>
-              <option value="sandbox">Sadece test alanı</option>
-              <option value="shadow">Gölge izleme</option>
-              <option value="active">Canlı aktif</option>
-            </select>
-          </div>
+          <input type="hidden" value={rolloutMode} readOnly />
           <div>
             <label className="text-xs font-semibold mb-1 block" style={{ color: "var(--q-text-secondary)" }}>Kurum adı</label>
             <input value={organizationName} onChange={e => setOrganizationName(e.target.value)} className="w-full px-3 py-2 rounded-xl border text-xs" style={{ borderColor: "var(--q-border-default)" }} placeholder="Örn: Başkent Üniversitesi Konya Hastanesi" />
@@ -622,6 +531,7 @@ export function BotPromptTab({ bot, onSavePrompt }: BotPromptTabProps) {
           </div>
         </div>
       </div>
+      )}
 
       {/* Knowledge Base */}
       <div
