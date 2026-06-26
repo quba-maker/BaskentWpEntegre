@@ -196,6 +196,10 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const qubaBrainMeta = debugMeta?.qubaBrainProfile ? debugMeta : brainMeta;
   const qubaBrainProfile = qubaBrainMeta?.qubaBrainProfile;
   const qubaBrainDiagnostics = qubaBrainProfile?.diagnostics;
+  const liveAutomation = qubaBrainMeta?.liveAutomation;
+  const formAutomation = liveAutomation?.formAutopilot;
+  const inboundAutomation = liveAutomation?.inboundAutopilot;
+  const recentAutomation = liveAutomation?.recent24h;
   const qubaRolloutMode = qubaBrainMeta?.qubaBrainRolloutMode || qubaBrainProfile?.rollout?.mode;
   const qubaCapabilities: string[] = Array.isArray(qubaBrainDiagnostics?.capabilities) ? qubaBrainDiagnostics.capabilities : [];
   const qubaWarnings: string[] = Array.isArray(qubaBrainDiagnostics?.warnings) ? qubaBrainDiagnostics.warnings : [];
@@ -257,7 +261,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
         )}
       </div>
 
-      <div className="shrink-0 max-h-[230px] overflow-y-auto border-b" style={{ borderColor: "var(--q-border-default)" }}>
+      <div className="shrink-0 max-h-[310px] overflow-y-auto border-b" style={{ borderColor: "var(--q-border-default)" }}>
       {/* Active test mode */}
       <div className="shrink-0 px-4 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="grid grid-cols-3 gap-2">
@@ -289,6 +293,70 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
         {!qubaSandboxEnabled && (
           <div className="mt-2 rounded-lg border px-3 py-2 text-[10px] leading-relaxed bg-yellow-50" style={{ borderColor: "rgba(245,158,11,0.25)", color: "var(--q-yellow, #f59e0b)" }}>
             Yeni Brain direktifi testte kapalı. Yeni mimariyi denemek için solda “Yeni Brain testi” modunu seçip kaydedin.
+          </div>
+        )}
+      </div>
+
+      {/* Live automation state */}
+      <div className="shrink-0 px-4 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4" style={{ color: inboundAutomation?.liveSending ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }} />
+            <div>
+              <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Canlı Cevap Durumu</div>
+              <div className="text-[10px] text-gray-400">Test modu ayrı, gerçek hasta gönderimi ayrı izlenir.</div>
+            </div>
+          </div>
+          {recentAutomation && (
+            <span className="rounded-full border px-2 py-1 text-[9px] font-bold text-gray-500" style={{ borderColor: "var(--q-border-default)" }}>
+              Son 24s
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+            <div className="text-[9px] font-bold text-gray-400 mb-0.5">FORM İLK KARŞILAMA</div>
+            <div
+              className="text-[11px] font-bold"
+              style={{ color: formAutomation?.liveSending ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }}
+            >
+              {formAutomation
+                ? (formAutomation.liveSending ? "Canlı gönderir" : formAutomation.enabled ? "Dry-run / göndermez" : "Kapalı")
+                : "Yükleniyor"}
+            </div>
+          </div>
+          <div className="rounded-xl border px-3 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
+            <div className="text-[9px] font-bold text-gray-400 mb-0.5">HASTA MESAJINA CEVAP</div>
+            <div
+              className="text-[11px] font-bold"
+              style={{ color: inboundAutomation?.liveSending ? "var(--q-green, #22c55e)" : "var(--q-yellow, #f59e0b)" }}
+            >
+              {inboundAutomation
+                ? (inboundAutomation.liveSending ? "Canlı cevaplar" : inboundAutomation.enabled ? "Dry-run / göndermez" : "Kapalı")
+                : "Yükleniyor"}
+            </div>
+          </div>
+        </div>
+        {recentAutomation && (
+          <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
+            <div className="rounded-lg border bg-gray-50 px-2.5 py-2" style={{ borderColor: "var(--q-border-default)" }}>
+              <div className="font-bold text-gray-400">BOTTA</div>
+              <div className="font-semibold text-gray-700">{recentAutomation.botConversations || 0}</div>
+            </div>
+            <div className="rounded-lg border bg-gray-50 px-2.5 py-2" style={{ borderColor: "var(--q-border-default)" }}>
+              <div className="font-bold text-gray-400">MANUELDE</div>
+              <div className="font-semibold text-gray-700">{recentAutomation.humanConversations || 0}</div>
+            </div>
+            <div className="rounded-lg border bg-gray-50 px-2.5 py-2" style={{ borderColor: "var(--q-border-default)" }}>
+              <div className="font-bold text-gray-400">DEVİR SEBEBİ</div>
+              <div className="font-semibold text-gray-700">
+                {(recentAutomation.appEchoTakeovers || 0) > 0
+                  ? `${recentAutomation.appEchoTakeovers} manuel echo`
+                  : (recentAutomation.circuitBreakerStops || 0) > 0
+                    ? `${recentAutomation.circuitBreakerStops} kalite durdu`
+                    : "Yok"}
+              </div>
+            </div>
           </div>
         )}
       </div>

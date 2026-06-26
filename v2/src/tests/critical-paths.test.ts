@@ -14889,10 +14889,26 @@ test("Başkent v88 T134c: Bot test panel keeps the composer visible on dashboard
   const pageCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/page.tsx"), "utf-8");
 
   assert(playgroundCode.includes("xl:h-[calc(100vh-48px)]"), "Test panel should use viewport height on desktop");
-  assert(playgroundCode.includes("max-h-[230px] overflow-y-auto"), "Setup/form/health area should not push chat composer out of view");
+  assert(playgroundCode.includes("max-h-[310px] overflow-y-auto"), "Setup/form/health area should not push chat composer out of view");
   assert(playgroundCode.includes("max-h-[150px] overflow-y-auto"), "Expanded health details should stay internally scrollable");
   assert(pageCode.includes("xl:grid-cols-[minmax(0,1fr)_420px]"), "Dashboard should reserve a stable right panel width");
   assert(pageCode.includes("xl:sticky xl:top-4"), "Right test panel should stay pinned while editing setup fields");
+});
+
+test("Başkent v88 T134d: Bot test panel separates sandbox from live automation state", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
+  const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
+
+  assert(botActionCode.includes("liveAutomation"), "Diagnostics should return live automation state");
+  assert(botActionCode.includes("form_autopilot_for_open_meta_window"), "Diagnostics should read form autopilot state");
+  assert(botActionCode.includes("inbound_autopilot_settings"), "Diagnostics should read inbound autopilot state");
+  assert(botActionCode.includes("autopilot_disabled"), "Diagnostics should count recent app/manual takeovers");
+  assert(playgroundCode.includes("Canlı Cevap Durumu"), "Panel should show live automation state");
+  assert(playgroundCode.includes("FORM İLK KARŞILAMA"), "Panel should distinguish form greeting automation");
+  assert(playgroundCode.includes("HASTA MESAJINA CEVAP"), "Panel should distinguish inbound reply automation");
+  assert(playgroundCode.includes("Dry-run / göndermez"), "Panel should clearly show dry-run as non-sending");
 });
 
 test("Başkent v88 T135: Live orchestrator writes Brain v2 shadow evaluation as non-blocking safe audit", () => {

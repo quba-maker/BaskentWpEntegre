@@ -892,6 +892,80 @@ export async function getBotBrainDiagnostics(
       const qubaBrainProfile = QubaBrainCompiler.compile(mockBrain as any);
       const qubaBrainRolloutMode = resolveQubaBrainRolloutMode(mockBrain as any);
 
+      const moduleRows = await ctx.db.executeSafe({
+        text: `
+          SELECT module_name, is_active, config
+          FROM ai_module_settings
+          WHERE tenant_id = $1
+            AND module_name IN ('form_autopilot_for_open_meta_window', 'inbound_autopilot_settings')
+        `,
+        values: [ctx.tenantId]
+      }) as any[];
+
+      const readModuleConfig = (moduleName: string) => {
+        const row = moduleRows.find((item: any) => item.module_name === moduleName);
+        const rawConfig = row?.config;
+        const config = typeof rawConfig === 'string'
+          ? JSON.parse(rawConfig || '{}')
+          : (rawConfig || {});
+        return {
+          moduleActive: Boolean(row?.is_active),
+          enabled: Boolean(config.enabled),
+          dryRun: config.dry_run !== undefined ? Boolean(config.dry_run) : true,
+          rolloutPercentage: Number(config.rollout_percentage ?? 0),
+          departmentMode: config.department_mode || 'all',
+        };
+      };
+
+      const [conversationStats, automationAuditStats] = await Promise.all([
+        ctx.db.executeSafe({
+          text: `
+            SELECT status, autopilot_enabled, COUNT(*)::int AS count
+            FROM conversations
+            WHERE tenant_id = $1
+              AND COALESCE(last_message_at, updated_at, created_at) >= NOW() - INTERVAL '24 hours'
+            GROUP BY status, autopilot_enabled
+          `,
+          values: [ctx.tenantId]
+        }) as Promise<any[]>,
+        ctx.db.executeSafe({
+          text: `
+            SELECT action, COUNT(*)::int AS count
+            FROM ai_audit_logs
+            WHERE tenant_id = $1
+              AND created_at >= NOW() - INTERVAL '24 hours'
+              AND action IN ('autopilot_disabled', 'autopilot_skip', 'CIRCUIT_BREAKER_TRIPPED')
+            GROUP BY action
+          `,
+          values: [ctx.tenantId]
+        }) as Promise<any[]>
+      ]);
+
+      const getConversationCount = (status: string, autopilotEnabled: boolean) =>
+        Number(conversationStats.find((row: any) => row.status === status && row.autopilot_enabled === autopilotEnabled)?.count || 0);
+      const getAuditCount = (action: string) =>
+        Number(automationAuditStats.find((row: any) => row.action === action)?.count || 0);
+
+      const formAutopilot = readModuleConfig('form_autopilot_for_open_meta_window');
+      const inboundAutopilot = readModuleConfig('inbound_autopilot_settings');
+      const liveAutomation = {
+        formAutopilot: {
+          ...formAutopilot,
+          liveSending: formAutopilot.moduleActive && formAutopilot.enabled && !formAutopilot.dryRun,
+        },
+        inboundAutopilot: {
+          ...inboundAutopilot,
+          liveSending: inboundAutopilot.moduleActive && inboundAutopilot.enabled && !inboundAutopilot.dryRun,
+        },
+        recent24h: {
+          botConversations: getConversationCount('bot', true),
+          humanConversations: getConversationCount('human', false),
+          appEchoTakeovers: getAuditCount('autopilot_disabled'),
+          circuitBreakerStops: getAuditCount('CIRCUIT_BREAKER_TRIPPED'),
+          autopilotSkips: getAuditCount('autopilot_skip'),
+        }
+      };
+
       return {
         success: true,
         metadata: {
@@ -901,6 +975,7 @@ export async function getBotBrainDiagnostics(
           qubaBrainCoreApplied: shouldApplyQubaBrainSandboxDirective(qubaBrainRolloutMode),
           qubaBrainLiveEnabled: shouldApplyQubaBrainLiveDirective(qubaBrainRolloutMode),
           qubaBrainProfile,
+          liveAutomation,
         }
       };
     }
