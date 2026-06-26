@@ -231,7 +231,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   };
 
   return (
-    <div className="mt-8 mb-8 flex min-h-0 h-[650px] flex-col border rounded-2xl bg-[#f8f9fa] overflow-hidden" style={{ borderColor: "var(--q-border-default)" }}>
+    <div className="mb-8 flex min-h-[640px] h-[calc(100vh-120px)] max-h-[820px] flex-col border rounded-2xl bg-[#f8f9fa] overflow-hidden" style={{ borderColor: "var(--q-border-default)" }}>
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b bg-white" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="flex items-center gap-2">
@@ -253,7 +253,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
         )}
       </div>
 
-      <div className="shrink-0 max-h-[360px] overflow-y-auto">
+      <div className="shrink-0 max-h-[300px] overflow-y-auto">
       {/* Active test mode */}
       <div className="shrink-0 px-5 py-3 bg-white border-b" style={{ borderColor: "var(--q-border-default)" }}>
         <div className="grid grid-cols-3 gap-2">
@@ -293,7 +293,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
       <div className="shrink-0 px-5 py-2.5 bg-blue-50/50 border-b flex items-start gap-2 text-[11px]" style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}>
         <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <p className="leading-relaxed">
-          <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve araçlar dry-run çalışır. <span className="opacity-75">Yeni test mesajı gelirse sayaç sıfırlanır; peş peşe mesajlar tek konuşma gibi değerlendirilir.</span>
+          <strong>Sandbox Modu:</strong> Mesajlar DB&apos;ye yazılmaz, gerçek kullanıcılara gönderilmez ve araçlar dry-run çalışır. <span className="opacity-75">Yanıt gecikmesi canlıya yakın simüle edilir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.</span>
         </p>
       </div>
 

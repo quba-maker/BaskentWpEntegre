@@ -14699,7 +14699,7 @@ test("Başkent v87 T129: Bot setup wizard stores tenant Brain config separately 
   assert(botActionCode.includes("jsonb_set(COALESCE(metadata"), "Quba Brain setup should be stored in channel_prompts.metadata");
   assert(botActionCode.includes("promptMetadata?.qubaBrain?.industry"), "Compiled sandbox diagnostics should prefer setup industry");
   assert(pageCode.includes("qubaBrainSetup"), "Bot page should pass setup payload to updateBot");
-  assert(promptTabCode.includes("Bot Kurulum Sihirbazı"), "Prompt tab should expose setup wizard");
+  assert(promptTabCode.includes("Yeni SaaS Brain Kurulumu"), "Prompt tab should expose setup wizard");
   assert(promptTabCode.includes("rolloutMode"), "Setup wizard should expose rollout mode");
   assert(promptTabCode.includes("parseServiceCatalog"), "Setup wizard should support service catalog input");
   assert(migrateCode.includes("channel_prompts ADD COLUMN IF NOT EXISTS metadata"), "Migration should ensure prompt metadata column");
