@@ -172,6 +172,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
 
   const loadSampleForm = () => {
     setSandboxFormEnabled(true);
+    setShowBrainDetails(false);
     setSandboxFormName("Gurbetçiler Form Randevu");
     setSandboxFormText([
       "Full name: Aysu Maysu",
@@ -278,7 +279,10 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
               <input
                 type="checkbox"
                 checked={sandboxFormEnabled}
-                onChange={e => setSandboxFormEnabled(e.target.checked)}
+                onChange={e => {
+                  setSandboxFormEnabled(e.target.checked);
+                  setShowBrainDetails(false);
+                }}
                 className="w-3.5 h-3.5"
               />
               {sandboxFormEnabled ? "Form Açık" : "Formsuz Test"}
@@ -364,7 +368,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
             {brainDiagnosticsError}
           </div>
         ) : qubaBrainProfile && showBrainDetails ? (
-          <>
+          <div className="max-h-[240px] overflow-y-auto pr-1 space-y-2">
             <div className="grid grid-cols-2 gap-2 text-[10px]">
               <div className="rounded-lg border px-2.5 py-2 bg-gray-50" style={{ borderColor: "var(--q-border-default)" }}>
                 <div className="font-bold text-gray-400 mb-0.5">SEKTÖR</div>
@@ -431,7 +435,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
                 </div>
               </div>
             )}
-          </>
+          </div>
         ) : (
           <p className="text-[11px] text-gray-400">Brain profili henüz yüklenmedi.</p>
         )}
