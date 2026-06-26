@@ -248,31 +248,38 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
 
       {/* Live-like form context */}
       <div className="px-5 py-3 bg-white border-b space-y-3" style={{ borderColor: "var(--q-border-default)" }}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-start gap-2">
             <FileText className="w-4 h-4" style={{ color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-secondary)" }} />
             <div>
               <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>Formlu Test</div>
               <div className="text-[10px] text-gray-400">Canlıdaki form lead akışını test alanında simüle eder.</div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <button
               onClick={loadSampleForm}
               type="button"
-              className="px-2.5 py-1.5 rounded-lg border text-[10px] font-bold hover:bg-gray-50"
+              className="px-2.5 py-2 rounded-lg border text-[10px] font-bold hover:bg-gray-50"
               style={{ borderColor: "var(--q-border-default)", color: "var(--q-blue, #007aff)" }}
             >
-              Örnek Form
+              Örnek Formla Aç
             </button>
-            <label className="flex items-center gap-2 text-[11px] font-bold text-gray-600 cursor-pointer">
+            <label
+              className="flex items-center justify-center gap-2 px-2.5 py-2 rounded-lg border text-[10px] font-bold cursor-pointer"
+              style={{
+                borderColor: sandboxFormEnabled ? "rgba(0,122,255,0.35)" : "var(--q-border-default)",
+                color: sandboxFormEnabled ? "var(--q-blue, #007aff)" : "var(--q-text-secondary)",
+                backgroundColor: sandboxFormEnabled ? "rgba(0,122,255,0.06)" : "#fff",
+              }}
+            >
               <input
                 type="checkbox"
                 checked={sandboxFormEnabled}
                 onChange={e => setSandboxFormEnabled(e.target.checked)}
-                className="w-4 h-4"
+                className="w-3.5 h-3.5"
               />
-              Aç
+              {sandboxFormEnabled ? "Form Açık" : "Formsuz Test"}
             </label>
           </div>
         </div>
