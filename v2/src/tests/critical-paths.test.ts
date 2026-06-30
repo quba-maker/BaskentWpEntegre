@@ -14262,13 +14262,15 @@ test("Başkent v84 T114: Brain v2 shadow plan separates form lead from direct in
   assert(formLead.detectedIntents.includes("form_payload"), JSON.stringify(formLead.detectedIntents));
 });
 
-test("Başkent v84 T115: Bot test UI exposes Brain v2 shadow diagnostics", () => {
+test("Başkent v84 T115: Bot test UI exposes V3 prompt diagnostics without old V2 chooser", () => {
   const fs = require("fs");
   const path = require("path");
   const code = fs.readFileSync(path.join(process.cwd(), "src/app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf8");
   assert(code.includes("brainV2ShadowPlan"), "Bot test playground should read brainV2ShadowPlan metadata");
-  assert(code.includes("Brain v2 Gölge Planı"), "Bot test playground should show shadow plan section");
-  assert(code.includes("Sadece test cevabına uygulanır"), "UI should clearly say the plan is sandbox-only");
+  assert(code.includes("V3 Tek Prompt aktif"), "Bot test playground should show the V3 single-prompt state");
+  assert(code.includes("Kullanılan AI ayarı"), "Bot test playground should show the effective AI settings from the main settings tab");
+  assert(code.includes("Sadece test cevabına uygulanır"), "UI should clearly say technical planning is sandbox-only");
+  assert(!code.includes("Brain v2 Gölge Planı"), "Old V2 shadow wording should not return to the simplified V3 panel");
 });
 
 test("Başkent v84 T116: Brain v2 sandbox directive injects must-answer topics without touching live worker", () => {
@@ -14686,7 +14688,7 @@ test("Başkent v86 T126: Quba Brain Core rollout is explicit and live activation
   assert(shouldApplyQubaBrainLiveDirective(activeMode) === true, "only active applies live directive");
 });
 
-test("Başkent v86 T127: Bot test panel exposes Brain setup health before live rollout", () => {
+test("Başkent v86 T127: Bot test panel exposes live automation health without V2 setup clutter", () => {
   const fs = require("fs");
   const path = require("path");
   const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
@@ -14696,7 +14698,9 @@ test("Başkent v86 T127: Bot test panel exposes Brain setup health before live r
   assert(botActionCode.includes("getBotBrainDiagnostics"), "Server action should expose Brain diagnostics without calling the model");
   assert(botActionCode.includes("shouldApplyQubaBrainLiveDirective"), "Diagnostics should expose live directive state");
   assert(botPageCode.includes("onGetBrainDiagnostics={getBotBrainDiagnostics}"), "Bot page should wire diagnostics into test playground");
-  assert(playgroundCode.includes("Brain Kurulum Sağlığı"), "Test panel should show setup health");
+  assert(playgroundCode.includes("V3 Tek Prompt aktif"), "Test panel should show the V3 single-prompt state");
+  assert(playgroundCode.includes("Kullanılan AI ayarı"), "Test panel should show the model/settings used by sandbox");
+  assert(!playgroundCode.includes("Brain Kurulum Sağlığı"), "Old V2 setup health card should not clutter the V3 test panel");
   assert(playgroundCode.includes("DOKTOR LİSTESİ"), "Test panel should surface doctor directory detection");
   assert(playgroundCode.includes("CANLI DİREKTİF"), "Test panel should show whether Brain Core is live-active");
   assert(playgroundCode.includes("PROMPT SAĞLIĞI"), "Test panel should show prompt budget health before live rollout");
@@ -14752,7 +14756,7 @@ test("Başkent v86 T128: Brain diagnostics do not hardcode every tenant as healt
   assert(!botActionCode.includes("Default mock industry context"), "Healthcare-only mock industry comment should not remain");
 });
 
-test("Başkent v87 T129: Bot setup wizard stores tenant Brain config separately from prompt text", () => {
+test("Başkent v87 T129: Bot prompt tab stores V3 prompt and knowledge separately", () => {
   const fs = require("fs");
   const path = require("path");
   const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
@@ -14764,9 +14768,11 @@ test("Başkent v87 T129: Bot setup wizard stores tenant Brain config separately 
   assert(botActionCode.includes("jsonb_set(COALESCE(metadata"), "Quba Brain setup should be stored in channel_prompts.metadata");
   assert(botActionCode.includes("promptMetadata?.qubaBrain?.industry"), "Compiled sandbox diagnostics should prefer setup industry");
   assert(pageCode.includes("qubaBrainSetup"), "Bot page should pass setup payload to updateBot");
-  assert(promptTabCode.includes("Yeni SaaS Brain Kurulumu"), "Prompt tab should expose setup wizard");
-  assert(promptTabCode.includes("rolloutMode"), "Setup wizard should expose rollout mode");
-  assert(promptTabCode.includes("parseServiceCatalog"), "Setup wizard should support service catalog input");
+  assert(promptTabCode.includes("V3 Ana Prompt"), "Prompt tab should expose the V3 single prompt editor");
+  assert(promptTabCode.includes("Bilgi Bankası"), "Prompt tab should expose knowledge as a separate area");
+  assert(promptTabCode.includes("Fiyatlar"), "Prompt tab should keep price policy separate from the main prompt");
+  assert(promptTabCode.includes("Kurallar"), "Prompt tab should keep verified rules separate from the main prompt");
+  assert(!promptTabCode.includes("Yeni SaaS Brain Kurulumu"), "Old segmented V2 setup wizard should not be shown in the simplified V3 UI");
   assert(migrateCode.includes("channel_prompts ADD COLUMN IF NOT EXISTS metadata"), "Migration should ensure prompt metadata column");
 });
 
@@ -14925,7 +14931,7 @@ test("Başkent v88 T133b: Brain v2 response evaluator flags numeric price leakag
   assert(evaluation.forbiddenHits.some((item: string) => item.includes("rakam")), JSON.stringify(evaluation));
 });
 
-test("Başkent v88 T134: Bot test panel exposes Brain v2 response evaluation", () => {
+test("Başkent v88 T134: Bot test panel exposes V3 response quality evaluation", () => {
   const fs = require("fs");
   const path = require("path");
   const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
@@ -14933,7 +14939,7 @@ test("Başkent v88 T134: Bot test panel exposes Brain v2 response evaluation", (
 
   assert(botActionCode.includes("BrainV2ResponseEvaluator.evaluate"), "testBotPrompt should evaluate the final sandbox reply");
   assert(botActionCode.includes("brainV2ResponseEvaluation"), "testBotPrompt metadata should expose Brain v2 response evaluation");
-  assert(playgroundCode.includes("Brain v2 Yanıt Kalitesi"), "Test panel should show response quality score");
+  assert(playgroundCode.includes("V3 Yanıt Kalitesi"), "Test panel should show V3 response quality score");
   assert(playgroundCode.includes("brainEvaluation.score"), "Test panel should render Brain v2 score");
 });
 
@@ -14946,7 +14952,7 @@ test("Başkent v88 T134b: Bot test input remains stable and automation-friendly"
   assert(playgroundCode.includes("className=\"shrink-0 relative z-20 p-3 border-t bg-white flex items-center gap-2"), "Input bar should stay as a stable bottom control");
   assert(playgroundCode.includes("aria-label=\"Sandbox test mesajı\""), "Sandbox input should be accessible to UI automation");
   assert(playgroundCode.includes("name=\"sandboxTestMessage\""), "Sandbox input should expose a stable field name");
-  assert(playgroundCode.indexOf("{/* Brain v2 Response Evaluation */}") < playgroundCode.indexOf("{/* Input Bar */}"), "Diagnostics should render above the input bar");
+  assert(playgroundCode.indexOf("{/* V3 Response Evaluation */}") < playgroundCode.indexOf("{/* Input Bar */}"), "Diagnostics should render above the input bar");
 });
 
 test("Başkent v88 T134c: Bot test panel keeps the composer visible on dashboard screens", () => {
@@ -14978,19 +14984,21 @@ test("Başkent v88 T134d: Bot test panel separates sandbox from live automation 
   assert(playgroundCode.includes("Dry-run / göndermez"), "Panel should clearly show dry-run as non-sending");
 });
 
-test("Başkent v88 T134e: Sandbox can test V2 Brain separately from legacy prompt", () => {
+test("Başkent v88 T134e: Sandbox exposes only the simplified V3 test path", () => {
   const fs = require("fs");
   const path = require("path");
   const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
   const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
 
-  assert(botActionCode.includes("SandboxBrainMode"), "Test action should accept an explicit Brain source mode");
+  assert(botActionCode.includes("SandboxBrainMode"), "Server may keep internal mode support for compatibility");
   assert(botActionCode.includes("buildPureQubaSandboxPrompt"), "Test action should build a pure Brain prompt without legacy system prompt");
-  assert(botActionCode.includes("legacy_system_prompt"), "Legacy mode should use the current system prompt without V2 Brain overlay");
-  assert(botActionCode.includes("v2_quba_brain"), "V2 Brain mode should be exposed in sandbox metadata");
   assert(playgroundCode.includes("Test edilecek sistem"), "Panel should label the selected test system");
-  assert(playgroundCode.includes("Eski Sistem"), "Panel should offer the current legacy system test");
-  assert(playgroundCode.includes("Yeni V2 Brain"), "Panel should offer the segmented V2 Brain test");
+  assert(playgroundCode.includes("V3 Tek Prompt aktif"), "Panel should show V3 as the only visible test path");
+  assert(playgroundCode.includes("Kullanılan AI ayarı"), "Panel should use the main AI settings instead of a separate test-model selector");
+  assert(!playgroundCode.includes("Eski Sistem"), "Panel should not offer the old legacy system test");
+  assert(!playgroundCode.includes("Yeni V2 Brain"), "Panel should not offer the segmented V2 Brain test");
+  assert(!playgroundCode.includes("V3_TEST_MODELS"), "Panel should not keep a separate test model list");
+  assert(!playgroundCode.includes("sandboxModelOverride:"), "Panel should not override the model selected in AI settings");
   assert(playgroundCode.includes("sandboxBrainMode"), "Panel should pass the selected mode into the sandbox action");
   assert(!playgroundCode.includes("Karma güvenli test"), "Panel should not expose the old confusing hybrid label");
   assert(!playgroundCode.includes("Saf SaaS Brain"), "Panel should not expose the old confusing pure label");
@@ -14999,7 +15007,7 @@ test("Başkent v88 T134e: Sandbox can test V2 Brain separately from legacy promp
   assert(!playgroundCode.includes("FORM BAĞLAMI"), "Panel should avoid duplicate form-context tiles");
 });
 
-test("Başkent v88 T134f: Bot test uses a real channel id and UI exposes legacy vs SaaS Brain setup", () => {
+test("Başkent v88 T134f: Bot test uses a real channel id and shared AI settings", () => {
   const fs = require("fs");
   const path = require("path");
   const pageCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/page.tsx"), "utf-8");
@@ -15007,14 +15015,13 @@ test("Başkent v88 T134f: Bot test uses a real channel id and UI exposes legacy 
 
   assert(pageCode.includes("selectedBotTestChannel"), "Bot page should resolve an actual channel for sandbox tests");
   assert(pageCode.includes("id: selectedBotTestChannel?.id || ''"), "Sandbox should not pass bot group id as channel id");
-  assert(promptTabCode.includes("Çalışma Modu"), "Prompt UI should use a simple two-mode selector");
-  assert(promptTabCode.includes("Mevcut Sistem"), "Prompt UI should expose the legacy/current system path");
-  assert(promptTabCode.includes("Yeni SaaS V2 Brain"), "Prompt UI should expose the new segmented SaaS Brain path");
-  assert(promptTabCode.includes("!isBrainMode &&"), "Legacy prompt editor should only render in legacy mode");
-  assert(promptTabCode.includes("isBrainMode &&"), "Structured Brain editor should only render in V2 mode");
-  assert(promptTabCode.includes("applyBaskentBrainDraft"), "Prompt UI should provide a Başkent Brain draft filler");
-  assert(promptTabCode.includes("Başkent alanlarını doldur"), "Prompt UI should let admins populate structured Brain fields");
-  assert(promptTabCode.includes("buildBaskentHealthcareServiceCatalogDraft"), "Başkent draft should include a structured service catalog");
+  assert(pageCode.includes("currentAiSettings={{"), "Bot page should pass the saved AI settings into sandbox");
+  assert(pageCode.includes("model: selectedBot.profile?.aiModel"), "Sandbox should use the model from AI settings");
+  assert(pageCode.includes("responseDelaySeconds: selectedBot.profile?.responseDelaySeconds"), "Sandbox should use the response delay from AI settings");
+  assert(promptTabCode.includes("V3 Ana Prompt"), "Prompt UI should expose the V3 prompt editor");
+  assert(promptTabCode.includes("Bilgi Bankası"), "Prompt UI should expose knowledge fields beside the V3 prompt");
+  assert(!promptTabCode.includes("Çalışma Modu"), "Old two-mode selector should not be shown in V3 UI");
+  assert(!promptTabCode.includes("Yeni SaaS V2 Brain"), "Old V2 Brain setup should not be shown in V3 UI");
 });
 
 test("Başkent v88 T135: Live orchestrator writes Brain v2 shadow evaluation as non-blocking safe audit", () => {
@@ -15047,7 +15054,7 @@ test("Başkent v88 T136: AI audit schema supports action-based logs without requ
   assert(drizzleCode.includes("ALTER COLUMN tool_name DROP NOT NULL"), "Drizzle migration should relax legacy tool_name requirement");
 });
 
-test("Başkent v89 T137: Yeni V2 Brain uses independent gate engine in sandbox", () => {
+test("Başkent v89 T137: V3 sandbox hides old independent V2 gate controls", () => {
   const fs = require("fs");
   const path = require("path");
   const gateCode = fs.readFileSync(path.resolve(__dirname, "../lib/brain/core/v2-gate-engine.ts"), "utf-8");
@@ -15060,8 +15067,11 @@ test("Başkent v89 T137: Yeni V2 Brain uses independent gate engine in sandbox",
   assert(!gateCode.includes("MultiIntentConsultantComposer"), "Independent V2 gate engine must not import legacy multi-intent composer");
   assert(botActionCode.includes("QubaV2GateEngine.build"), "Sandbox V2 path should build the independent gate result");
   assert(botActionCode.includes("qubaV2GateEngineApplied"), "Sandbox metadata should expose V2 gate usage");
-  assert(playgroundCode.includes("Bağımsız V2 Kapıları"), "Test panel should show the independent V2 gate diagnostics");
-  assert(playgroundCode.includes("Parçalı SaaS alanları + bağımsız V2 kapılar"), "Test panel should explain V2 uses independent gates");
+  assert(playgroundCode.includes("V3 Hafif Kontrol"), "Test panel should show lightweight V3 technical diagnostics");
+  assert(playgroundCode.includes("Kontrol rolü:"), "Test panel should explain the diagnostic role");
+  assert(playgroundCode.includes("Cevap yazmaz"), "Diagnostics should not be framed as a patient-facing answer writer");
+  assert(!playgroundCode.includes("Bağımsız V2 Kapıları"), "Old V2 gate label should not be shown in V3 UI");
+  assert(!playgroundCode.includes("Parçalı SaaS alanları + bağımsız V2 kapılar"), "Old V2 explanation should not be shown in V3 UI");
 });
 
 test("Başkent v89 T138: sandbox returns V2 diagnostics even when Gemini key is missing", () => {

@@ -464,6 +464,12 @@ export default function BotManagementPage() {
                 color: selectedBot.color || '#6366f1',
                 description: selectedBotTestChannel ? `${selectedBotTestChannel.provider} test kanalı` : 'Kanal bağlanmadan sandbox test',
               }}
+              currentAiSettings={{
+                model: selectedBot.profile?.aiModel || 'gemini-3.5-flash',
+                responseStyle: selectedBot.profile?.responseStyle || 'balanced',
+                responseDelaySeconds: selectedBot.profile?.responseDelaySeconds ?? 5,
+                maxResponseTokens: selectedBot.profile?.maxResponseTokens || 1000,
+              }}
               botGroupId={selectedBot.id}
               onTestPrompt={testBotPrompt}
               onGetBrainDiagnostics={getBotBrainDiagnostics}

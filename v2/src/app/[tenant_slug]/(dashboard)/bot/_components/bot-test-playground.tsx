@@ -11,6 +11,12 @@ import { type BotChannel } from "./shared";
 interface BotTestPlaygroundProps {
   activeChannel: BotChannel;
   botGroupId: string;
+  currentAiSettings?: {
+    model?: string | null;
+    responseStyle?: string | null;
+    responseDelaySeconds?: number | null;
+    maxResponseTokens?: number | null;
+  };
   onTestPrompt: (
     botGroupId: string,
     messages: { role: 'user' | 'assistant'; content: string }[],
@@ -29,30 +35,20 @@ interface BotTestPlaygroundProps {
   ) => Promise<{ success: boolean; metadata?: any; error?: string }>;
 }
 
-const V3_TEST_MODELS = [
-  {
-    id: "gemini-3.5-flash",
-    label: "Gemini 3.5 Flash",
-    note: "Başkent kalite tercihi",
-  },
-  {
-    id: "gemini-2.5-flash",
-    label: "Gemini 2.5 Flash",
-    note: "Ekonomik denge",
-  },
-  {
-    id: "gemini-2.5-flash-lite",
-    label: "Gemini 2.5 Flash Lite",
-    note: "En ekonomik",
-  },
-  {
-    id: "gemini-2.5-pro",
-    label: "Gemini 2.5 Pro",
-    note: "Güçlü ama pahalı",
-  },
-];
+const MODEL_LABELS: Record<string, string> = {
+  "gemini-3.5-flash": "Gemini 3.5 Flash",
+  "gemini-2.5-flash": "Gemini 2.5 Flash",
+  "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite",
+  "gemini-2.5-pro": "Gemini 2.5 Pro",
+};
 
-export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onGetBrainDiagnostics }: BotTestPlaygroundProps) {
+const STYLE_LABELS: Record<string, string> = {
+  short: "Kısa",
+  balanced: "Dengeli",
+  detailed: "Detaylı",
+};
+
+export function BotTestPlayground({ activeChannel, botGroupId, currentAiSettings, onTestPrompt, onGetBrainDiagnostics }: BotTestPlaygroundProps) {
   const [testMsg, setTestMsg] = useState("");
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [testing, setTesting] = useState(false);
@@ -62,8 +58,6 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   const [sandboxFormEnabled, setSandboxFormEnabled] = useState(false);
   const [sandboxFormName, setSandboxFormName] = useState("Sandbox Test Formu");
   const [sandboxFormText, setSandboxFormText] = useState("");
-  const [sandboxBrainMode, setSandboxBrainMode] = useState<'legacy' | 'v2'>('legacy');
-  const [testModel, setTestModel] = useState("gemini-3.5-flash");
   const [showBrainDetails, setShowBrainDetails] = useState(false);
   const [brainDiagnosticsLoading, setBrainDiagnosticsLoading] = useState(false);
   const [brainDiagnosticsError, setBrainDiagnosticsError] = useState<string | null>(null);
@@ -88,8 +82,6 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
     setSandboxFormEnabled(false);
     setSandboxFormName("Sandbox Test Formu");
     setSandboxFormText("");
-    setSandboxBrainMode('legacy');
-    setTestModel("gemini-3.5-flash");
     setShowBrainDetails(false);
     setBrainDiagnosticsError(null);
     setWaitingForDelay(false);
@@ -136,7 +128,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   }, []);
 
   const getResponseDelayMs = () => {
-    const rawSeconds = Number(debugMeta?.responseDelaySeconds ?? 5);
+    const rawSeconds = Number(debugMeta?.responseDelaySeconds ?? currentAiSettings?.responseDelaySeconds ?? 5);
     const safeSeconds = Number.isFinite(rawSeconds) ? Math.max(2, Math.min(30, rawSeconds)) : 5;
     return safeSeconds * 1000;
   };
@@ -163,7 +155,6 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
               ? { formName: sandboxFormName, rawText: sandboxFormText }
               : null,
             sandboxBrainMode: 'legacy',
-            sandboxModelOverride: testModel,
           }
         );
         if (result) {
@@ -250,6 +241,10 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
   };
   const rolloutLabel = rolloutLabelMap[String(qubaRolloutMode || "")] || "Yükleniyor";
   const selectedSystemLabel = "V3 Tek Prompt";
+  const selectedModel = currentAiSettings?.model || debugMeta?.model || "gemini-3.5-flash";
+  const selectedStyle = currentAiSettings?.responseStyle || debugMeta?.responseStyle || "balanced";
+  const selectedDelay = currentAiSettings?.responseDelaySeconds ?? debugMeta?.responseDelaySeconds ?? 5;
+  const selectedMaxTokens = currentAiSettings?.maxResponseTokens ?? debugMeta?.maxResponseTokens ?? 1000;
   const renderCompactList = (items?: string[], emptyLabel = "Yok") => {
     const safeItems = Array.isArray(items) ? items.filter(Boolean).slice(0, 6) : [];
     if (safeItems.length === 0) {
@@ -302,7 +297,7 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
                 {selectedSystemLabel} · {sandboxFormEnabled ? "Formlu test" : "Formsuz test"}
               </div>
               <p className="mt-1 text-[10px] leading-relaxed text-gray-400">
-                Güvenli test: Gerçek hastaya mesaj gönderilmez. V3 Tek Prompt, bilgi bankası ve seçtiğiniz modelle denenir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.
+                Güvenli test: Gerçek hastaya mesaj gönderilmez. V3 Ana Prompt, Bilgi Bankası ve sol taraftaki AI Ayarları ile denenir; yeni test mesajı gelirse sayaç sıfırlanır ve mesajlar birlikte değerlendirilir.
               </p>
             </div>
             <button
@@ -319,34 +314,29 @@ export function BotTestPlayground({ activeChannel, botGroupId, onTestPrompt, onG
           <div className="rounded-xl border bg-green-50/60 px-3 py-2" style={{ borderColor: "rgba(34,197,94,0.22)" }}>
             <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>V3 Tek Prompt aktif</div>
             <div className="text-[9px] leading-relaxed text-gray-500">
-              Bu panelde tek ana prompt ve seçilen model denenir; canlıya mesaj gitmez.
+              Bu panelde tek ana prompt ve sol AI Ayarları denenir; canlıya mesaj gitmez.
             </div>
           </div>
 
-          <div>
-            <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">Test modeli</div>
-            <div className="grid grid-cols-2 gap-2">
-              {V3_TEST_MODELS.map(model => {
-                const isActive = testModel === model.id;
-                return (
-                  <button
-                    key={model.id}
-                    type="button"
-                    onClick={() => {
-                      setTestModel(model.id);
-                      setDebugMeta(null);
-                    }}
-                    className="rounded-xl border px-3 py-2.5 text-left transition-all hover:bg-gray-50"
-                    style={{
-                      borderColor: isActive ? "rgba(34,197,94,0.45)" : "var(--q-border-default)",
-                      backgroundColor: isActive ? "rgba(34,197,94,0.09)" : "#fff",
-                    }}
-                  >
-                    <div className="text-[11px] font-bold" style={{ color: "var(--q-text-primary)" }}>{model.label}</div>
-                    <div className="text-[9px] leading-relaxed text-gray-400">{model.note}</div>
-                  </button>
-                );
-              })}
+          <div className="rounded-xl border bg-white p-3" style={{ borderColor: "var(--q-border-default)" }}>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">Kullanılan AI ayarı</div>
+            <div className="grid grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded-lg bg-gray-50 px-2.5 py-2">
+                <div className="font-bold text-gray-400">MODEL</div>
+                <div className="font-semibold text-gray-700">{MODEL_LABELS[selectedModel] || selectedModel}</div>
+              </div>
+              <div className="rounded-lg bg-gray-50 px-2.5 py-2">
+                <div className="font-bold text-gray-400">STİL</div>
+                <div className="font-semibold text-gray-700">{STYLE_LABELS[selectedStyle] || selectedStyle}</div>
+              </div>
+              <div className="rounded-lg bg-gray-50 px-2.5 py-2">
+                <div className="font-bold text-gray-400">GECİKME</div>
+                <div className="font-semibold text-gray-700">{selectedDelay} sn</div>
+              </div>
+              <div className="rounded-lg bg-gray-50 px-2.5 py-2">
+                <div className="font-bold text-gray-400">YANIT LİMİTİ</div>
+                <div className="font-semibold text-gray-700">{selectedMaxTokens} token</div>
+              </div>
             </div>
           </div>
 

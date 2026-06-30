@@ -660,7 +660,7 @@ export async function testBotPrompt(
 
       // 4. Fetch AI Profile for this group
       const profileResult = await ctx.db.executeSafe({
-        text: `SELECT cap.ai_model, cap.max_response_tokens, cap.business_hours_json, cap.aggression_level, cap.response_delay_seconds, cap.response_style
+        text: `SELECT cap.ai_model, cap.max_messages, cap.max_response_tokens, cap.business_hours_json, cap.aggression_level, cap.response_delay_seconds, cap.response_style
                FROM channel_ai_profiles cap
                JOIN channel_groups cg ON cap.group_id = cg.id
                WHERE group_id = $1 AND cg.tenant_id = $2 LIMIT 1`,
@@ -709,7 +709,7 @@ export async function testBotPrompt(
           },
           settings: {
             aiModel,
-            maxMessages: 20,
+            maxMessages: profile?.max_messages ?? 20,
             maxResponseTokens: maxTokens,
             workingHours: profile?.business_hours_json || { enabled: false },
             aggressionLevel: profile?.aggression_level || 'medium',
@@ -919,7 +919,7 @@ export async function getBotBrainDiagnostics(
         ? activePrompt.metadata
         : {};
       const profileResult = await ctx.db.executeSafe({
-        text: `SELECT cap.ai_model, cap.max_response_tokens, cap.business_hours_json, cap.aggression_level, cap.response_delay_seconds, cap.response_style
+        text: `SELECT cap.ai_model, cap.max_messages, cap.max_response_tokens, cap.business_hours_json, cap.aggression_level, cap.response_delay_seconds, cap.response_style
                FROM channel_ai_profiles cap
                JOIN channel_groups cg ON cap.group_id = cg.id
                WHERE group_id = $1 AND cg.tenant_id = $2 LIMIT 1`,
@@ -965,7 +965,7 @@ export async function getBotBrainDiagnostics(
           },
           settings: {
             aiModel,
-            maxMessages: 20,
+            maxMessages: profile?.max_messages ?? 20,
             maxResponseTokens: maxTokens,
             workingHours: profile?.business_hours_json || { enabled: false },
             aggressionLevel: profile?.aggression_level || 'medium',

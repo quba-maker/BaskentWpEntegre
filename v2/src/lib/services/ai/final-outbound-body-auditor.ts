@@ -787,16 +787,14 @@ function applyKnownFactsRelationGuard(text: string, ctx: FinalOutboundAuditCtx):
     return { text: parts.join('\n\n'), rewrote: true };
   }
 
-  const firstLine = `Form kaydınızdaki bilgileri görüyorum.`;
-  const subjectLine = `${related.relationPossessive[0].toUpperCase()}${related.relationPossessive.slice(1)} için ${related.topic} konusunda bilgi almak istediğinizi görüyorum. Öncelikle geçmiş olsun.`;
+  const subjectLine = `${related.relationPossessive[0].toUpperCase()}${related.relationPossessive.slice(1)} için ${related.topic} konusunda bilgi almak istediğinizi görüyorum. Geçmiş olsun.`;
   const contextLine = locationLine ? `${locationLine[0].toUpperCase()}${locationLine.slice(1)} ayrıca not ediyorum.` : '';
   return {
     text: [
-      firstLine,
       subjectLine,
       contextLine,
-      `Bu tür durumlarda uzaktan net değerlendirme yapmak mümkün değildir; ${related.relationPossessive} için hastanede ilgili uzman hekim muayenesi ve gerekirse tetkiklerle değerlendirme yapılır.`,
-      'Önce bilgi almak istediğinizi belirtmişsiniz. Süreç, doktor veya konaklama tarafında hangi başlığı netleştirelim?',
+      `Bu tür durumlarda uzaktan kesin değerlendirme yapmak doğru olmaz; ${related.relationPossessive} için uzman hekim muayenesiyle süreç daha güvenli şekilde netleşir.`,
+      'Önce bilgi almak istediğinizi not ediyorum. İsterseniz süreci kısaca anlatayım; doktor, konaklama veya arama planı tarafında merak ettiğiniz noktayı da buradan yanıtlayabilirim.',
     ].filter(Boolean).join('\n\n'),
     rewrote: true,
   };
