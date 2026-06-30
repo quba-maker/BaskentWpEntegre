@@ -461,10 +461,10 @@ export class FirstContactDecisionResolver {
             SELECT conversation_id, result_summary->>'leadId' as lead_id
             FROM ai_audit_logs
             WHERE tenant_id = $1
-              AND conversation_id = ANY($2::uuid[])
+              AND conversation_id = ANY($2::text[])
               AND action IN ('FORM_AUTOPILOT_ELIGIBLE', 'FORM_AUTOPILOT_DRY_RUN', 'FORM_AUTOPILOT_SENT')
           `,
-          values: [tenantId, conversationIds]
+          values: [tenantId, conversationIds.map(String)]
         }) as any[];
         for (const log of logs) {
           if (log.conversation_id && log.lead_id) {

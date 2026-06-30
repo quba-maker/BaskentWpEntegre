@@ -4363,6 +4363,7 @@ test("P0.14 UX 7: getForms karar hesaplama batch çalışır ve N+1 oluşturmaz"
   const originalExecuteSafe = (global as any).mockDb.executeSafe;
 
   let queryCount = 0;
+  let auditQueryText = "";
   const dbTracker = {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     executeSafe: async (query: any, _params?: any[]) => {
@@ -4376,6 +4377,7 @@ test("P0.14 UX 7: getForms karar hesaplama batch çalışır ve N+1 oluşturmaz"
         return [];
       }
       if (normalizedText.includes("ai_audit_logs")) {
+        auditQueryText = normalizedText;
         return [];
       }
       return [];
@@ -4383,8 +4385,8 @@ test("P0.14 UX 7: getForms karar hesaplama batch çalışır ve N+1 oluşturmaz"
   };
 
   const leads = [
-    { id: '1', phone_number: '+905555555551', raw_data: {}, form_name: 'Form 1' },
-    { id: '2', phone_number: '+905555555552', raw_data: {}, form_name: 'Form 2' },
+    { id: '1', phone_number: '+905555555551', raw_data: {}, form_name: 'Form 1', linked_conv_id: '11111111-1111-1111-1111-111111111111' },
+    { id: '2', phone_number: '+905555555552', raw_data: {}, form_name: 'Form 2', linked_conv_id: '22222222-2222-2222-2222-222222222222' },
     { id: '3', phone_number: '+905555555553', raw_data: {}, form_name: 'Form 3' },
     { id: '4', phone_number: '+905555555554', raw_data: {}, form_name: 'Form 4' },
     { id: '5', phone_number: '+905555555555', raw_data: {}, form_name: 'Form 5' }
@@ -4394,6 +4396,8 @@ test("P0.14 UX 7: getForms karar hesaplama batch çalışır ve N+1 oluşturmaz"
     const decisions = await FirstContactDecisionResolver.resolveBulkFormLeadDecisions("tenant-123", leads, dbTracker);
     assert(Object.keys(decisions).length === 5, "5 decision hesaplanmış olmalı");
     assert(queryCount <= 3, `Query sayısı N+1 olmamalı (toplam sorgu: ${queryCount})`);
+    assert(auditQueryText.includes("conversation_id = ANY($2::text[])"), "Audit conversation_id karşılaştırması text[] kullanmalı");
+    assert(!auditQueryText.includes("conversation_id = ANY($2::uuid[])"), "Audit conversation_id uuid[] cast kullanmamalı");
   } finally {
     (global as any).mockDb.executeSafe = originalExecuteSafe;
   }
