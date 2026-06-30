@@ -179,6 +179,27 @@ test("PROVIDER: requiresWhatsAppPhoneNumberId doğru çalışmalı", () => {
   assert(requiresWhatsAppPhoneNumberId("360dialog_whatsapp") === false, "360dialog_whatsapp Phone ID gerektirmemeli");
   assert(requiresWhatsAppPhoneNumberId(null) === true, "null Phone ID gerektirmeli");
 });
+test("PROVIDER: 360dialog API key header kopyalama boşluklarından arındırılmalı", async () => {
+  const { ThreeSixtyDialogService } = require("../lib/services/providers/three-sixty-dialog.service");
+  const originalFetch = global.fetch;
+  let sentApiKey = "";
+
+  global.fetch = (async (_url: string, init?: RequestInit) => {
+    sentApiKey = String((init?.headers as any)?.["D360-API-KEY"] || "");
+    return {
+      ok: true,
+      json: async () => ({ messages: [{ id: "wamid.test" }] })
+    } as Response;
+  }) as any;
+
+  try {
+    await ThreeSixtyDialogService.sendTemplate(" Bearer\nabc 123 \t", "905551112233", "tr_karsilama", "tr");
+    assert(sentApiKey === "abc123", "360dialog header temiz raw API key ile gitmeli");
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 // ==========================================
 // 6. SAAS SECURITY & WEBHOOK ROTATION TESTS (Faz 1B)
 // ==========================================

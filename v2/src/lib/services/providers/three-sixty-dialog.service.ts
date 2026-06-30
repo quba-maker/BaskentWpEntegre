@@ -3,6 +3,11 @@ import { logger } from "@/lib/core/logger";
 export class ThreeSixtyDialogService {
   private static log = logger.withContext({ module: 'ThreeSixtyDialog' });
 
+  private static normalizeApiKey(apiKey: string): string {
+    const compact = String(apiKey || "").trim().replace(/\s+/g, "");
+    return compact.replace(/^Bearer/i, "").trim();
+  }
+
   private static normalizeRecipient(to: string): string {
     const digits = String(to || "").replace(/\D/g, "");
     return digits.startsWith("00") ? digits.slice(2) : digits;
@@ -32,6 +37,7 @@ export class ThreeSixtyDialogService {
     if (!apiKey) {
       throw new Error("360dialog API error: D360-API-KEY is missing.");
     }
+    const normalizedApiKey = this.normalizeApiKey(apiKey);
 
     try {
       let bodyData: any;
@@ -69,7 +75,7 @@ export class ThreeSixtyDialogService {
       const response = await fetch(url, {
         method: "POST",
         headers: {
-          "D360-API-KEY": apiKey.trim(),
+          "D360-API-KEY": normalizedApiKey,
           "Content-Type": "application/json"
         },
         body: JSON.stringify(bodyData)
@@ -119,6 +125,7 @@ export class ThreeSixtyDialogService {
     if (!apiKey) {
       throw new Error("360dialog API error: D360-API-KEY is missing.");
     }
+    const normalizedApiKey = this.normalizeApiKey(apiKey);
 
     try {
       const bodyData = {
@@ -143,7 +150,7 @@ export class ThreeSixtyDialogService {
       const sendStandardTemplate = () => fetch(standardUrl, {
         method: "POST",
         headers: {
-          "D360-API-KEY": apiKey.trim(),
+          "D360-API-KEY": normalizedApiKey,
           "Content-Type": "application/json"
         },
         body: JSON.stringify(bodyData)
@@ -170,7 +177,7 @@ export class ThreeSixtyDialogService {
           standardStatus: response.status
         });
 
-        response = await sendMarketingTemplate(apiKey.trim());
+        response = await sendMarketingTemplate(normalizedApiKey);
         endpoint = "marketing_messages";
 
         if (!response.ok) {
@@ -182,7 +189,7 @@ export class ThreeSixtyDialogService {
             marketingStatus: rawMarketingStatus
           });
 
-          response = await sendMarketingTemplate(`Bearer ${apiKey.trim()}`);
+          response = await sendMarketingTemplate(`Bearer ${normalizedApiKey}`);
           endpoint = "marketing_messages";
 
           if (!response.ok) {
@@ -236,6 +243,7 @@ export class ThreeSixtyDialogService {
     if (!apiKey) {
       throw new Error("360dialog API error: D360-API-KEY is missing.");
     }
+    const normalizedApiKey = this.normalizeApiKey(apiKey);
 
     try {
       const bodyData = {
@@ -252,7 +260,7 @@ export class ThreeSixtyDialogService {
       const response = await fetch(url, {
         method: "POST",
         headers: {
-          "D360-API-KEY": apiKey.trim(),
+          "D360-API-KEY": normalizedApiKey,
           "Content-Type": "application/json"
         },
         body: JSON.stringify(bodyData)
