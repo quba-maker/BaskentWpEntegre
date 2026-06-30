@@ -90,6 +90,44 @@ function readPositiveIntEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function isMaxTokensFinishReason(finishReason?: string): boolean {
+  return String(finishReason || '').toUpperCase() === 'MAX_TOKENS';
+}
+
+function getLastCompleteBoundary(text: string): number {
+  const punctuationBoundaries = ['.', '!', '?', '…', '😊', '🙏'];
+  let boundary = -1;
+  for (const marker of punctuationBoundaries) {
+    boundary = Math.max(boundary, text.lastIndexOf(marker));
+  }
+
+  const paragraphBoundary = text.lastIndexOf('\n\n');
+  if (paragraphBoundary > 0) {
+    boundary = Math.max(boundary, paragraphBoundary);
+  }
+
+  return boundary;
+}
+
+function salvageMaxTokensText(text?: string): string | null {
+  const clean = String(text || '').trim();
+  if (clean.length < 140) return null;
+
+  const hardLimit = 1800;
+  const candidate = clean.length > hardLimit ? clean.slice(0, hardLimit).trim() : clean;
+  const boundary = getLastCompleteBoundary(candidate);
+
+  if (boundary >= 120) {
+    return candidate.slice(0, boundary + 1).trim();
+  }
+
+  if (clean.length <= hardLimit) {
+    return clean;
+  }
+
+  return null;
+}
+
 /**
  * 🎼 AI Orchestrator (Phase 5B/5C - Decision Engine, Runtime & Audit)
  * Abstract provider wrapper + Tool Execution loop + Observability.
@@ -284,6 +322,34 @@ export class AIOrchestrator {
           }
 
           if (rawResponse.finishReason && rawResponse.finishReason !== 'STOP') {
+            const salvagedText = isMaxTokensFinishReason(rawResponse.finishReason)
+              ? salvageMaxTokensText(rawResponse.text)
+              : null;
+
+            if (salvagedText) {
+              this.log.warn(`[LLM_MAX_TOKENS_SALVAGED] Usable truncated response preserved`, {
+                provider: config.provider,
+                modelId: config.modelId,
+                originalChars: String(rawResponse.text || '').length,
+                salvagedChars: salvagedText.length,
+                finishReason: rawResponse.finishReason,
+                finalPromptCharCount,
+                estimatedTokenCount,
+                contextCompactionApplied,
+                modelMaxOutputTokens: config.maxTokens
+              });
+
+              return {
+                text: salvagedText,
+                providerUsed: config.provider,
+                modelUsed: config.modelId,
+                latencyMs,
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens,
+                finishReason: rawResponse.finishReason
+              };
+            }
+
             throw new IncompleteResponseError(`Incomplete AI response blocked by Orchestrator. finishReason=${rawResponse.finishReason}`, rawResponse.finishReason);
           }
 

@@ -8451,6 +8451,76 @@ test("P0.28 T3: MAX_TOKENS error with date question triggers date fallback", asy
   }
 });
 
+test("Başkent v91 T147: usable Gemini MAX_TOKENS text is preserved instead of generic fallback", async () => {
+  const { AIOrchestrator } = require("../lib/services/ai/orchestrator");
+  const orchestrator = new AIOrchestrator();
+
+  (orchestrator as any).callGemini = async () => ({
+    text: "Merhaba, form kaydınızdaki bilgileri görüyorum. Babanızın bel ve boyun fıtığı şikayeti için öncelikle geçmiş olsun. Bu tür durumlarda uzaktan kesin değerlendirme yapmak doğru olmaz; Beyin ve Sinir Cerrahisi uzmanımızın muayenesiyle süreç daha güvenli şekilde netleşir. İsterseniz önce süreci kısaca anlatayım.",
+    usageMetadata: {
+      promptTokenCount: 1200,
+      candidatesTokenCount: 450
+    },
+    finishReason: "MAX_TOKENS"
+  });
+
+  const res = await orchestrator.generateResponse(
+    [
+      { role: "system", content: "Başkent V3 Tek Prompt" },
+      { role: "user", content: "merhaba" }
+    ],
+    {
+      provider: "gemini",
+      modelId: "gemini-3.5-flash",
+      apiKey: "test-key",
+      temperature: 0.7,
+      maxTokens: 2000
+    },
+    "unknown",
+    "unknown",
+    { sandbox: true }
+  );
+
+  assert(res.modelUsed === "gemini-3.5-flash", `Expected Gemini response to be preserved, got: ${res.modelUsed}`);
+  assert(res.finishReason === "MAX_TOKENS", `Expected original finish reason to be retained, got: ${res.finishReason}`);
+  assert(res.text?.includes("Babanızın bel ve boyun fıtığı"), `Expected usable response text, got: ${res.text}`);
+  assert(!res.text?.includes("Sistemlerimizde geçici bir yoğunluk"), `Must not show generic high-load fallback for usable MAX_TOKENS text: ${res.text}`);
+});
+
+test("Başkent v91 T148: short Gemini MAX_TOKENS text still falls back safely", async () => {
+  const { AIOrchestrator } = require("../lib/services/ai/orchestrator");
+  const orchestrator = new AIOrchestrator();
+
+  (orchestrator as any).callGemini = async () => ({
+    text: "Merhaba",
+    usageMetadata: {
+      promptTokenCount: 1200,
+      candidatesTokenCount: 5
+    },
+    finishReason: "MAX_TOKENS"
+  });
+
+  const res = await orchestrator.generateResponse(
+    [
+      { role: "system", content: "Başkent V3 Tek Prompt" },
+      { role: "user", content: "merhaba" }
+    ],
+    {
+      provider: "gemini",
+      modelId: "gemini-3.5-flash",
+      apiKey: "test-key",
+      temperature: 0.7,
+      maxTokens: 2000
+    },
+    "unknown",
+    "unknown",
+    { sandbox: true }
+  );
+
+  assert(res.modelUsed === "fallback", `Short truncated text should still fall back, got: ${res.modelUsed}`);
+  assert(res.finishReason === "MAX_TOKENS", `Expected finish reason to explain fallback, got: ${res.finishReason}`);
+});
+
 test("P0.28.1 T1: arrival_date_answer bypass does not write last_callback_offer and cleans up stale/conflicting offer", async () => {
   const { AIResponseOrchestrator } = require("../lib/services/ai/ai-response-orchestrator");
   const dbCalls: any[] = [];
