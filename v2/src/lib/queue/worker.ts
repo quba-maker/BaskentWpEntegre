@@ -1689,7 +1689,9 @@ export class QueueWorkerEngine {
       }
     }
 
-    const isGlobalAutopilotEnabled = process.env.ENABLE_SELECTED_AUTOPILOT === 'true';
+    const isGlobalAutopilotEnabled =
+      process.env.ENABLE_SELECTED_AUTOPILOT === 'true' ||
+      await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
     let isAutopilotResponding = false;
     let shouldProceedWithBot = false;
 
@@ -4159,7 +4161,9 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     }
 
     // Check 1: Autopilot is still active
-    const isGlobalAutopilotEnabled = process.env.ENABLE_SELECTED_AUTOPILOT === 'true';
+    const isGlobalAutopilotEnabled =
+      process.env.ENABLE_SELECTED_AUTOPILOT === 'true' ||
+      await FeatureFlagService.isEnabled(tenantId, 'whatsapp_auto_reply', false);
     if (!isGlobalAutopilotEnabled || !autopilotEnabled) {
       this.log.info(`[DEBOUNCE_WORKER] Autopilot is disabled, exit`, { traceId, autopilotEnabled });
       

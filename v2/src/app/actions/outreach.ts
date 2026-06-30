@@ -1364,7 +1364,10 @@ export async function sendFormGreetingTemplateAction(
                      last_channel = 'whatsapp',
                      last_message_status = 'sent',
                      last_message_direction = 'out',
-                     message_count = COALESCE(message_count, 0) + 1
+                     message_count = COALESCE(message_count, 0) + 1,
+                     status = 'bot',
+                     autopilot_enabled = true,
+                     bot_activated_at = COALESCE(bot_activated_at, NOW())
                  WHERE id = $2::uuid AND tenant_id = $3::uuid`,
           values: [templateText, finalConvId, ctx.tenantId]
         });

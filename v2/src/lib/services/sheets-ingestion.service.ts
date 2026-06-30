@@ -1,6 +1,7 @@
 import { withTenantDB } from '@/lib/core/tenant-db';
 import { logger } from '@/lib/core/logger';
 import { CredentialsService } from '@/lib/services/credentials.service';
+import { ThreeSixtyDialogService } from '@/lib/services/providers/three-sixty-dialog.service';
 import { logAudit } from '@/lib/audit';
 import { normalizePhoneForIdentity } from '@/lib/utils/phone-identity';
 import * as crypto from 'crypto';
@@ -544,6 +545,7 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
     let messageSent = false;
     let activePhone = phone1;
     let conversationId: string | undefined;
+    let providerMessageId: string | null = null;
 
     if (!skipAutoMessage) {
       // Resolve WhatsApp credentials
@@ -579,38 +581,79 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
         greetingLang = profileRes[0].greeting_language || 'auto';
       }
 
-      if (META_ACCESS_TOKEN && PHONE_NUMBER_ID && autoGreetingEnabled) {
-        const isTurkish = greetingLang === 'tr' ? true : greetingLang === 'en' ? false : phone1.startsWith('90');
-                const displayName = tenantName || 'Ekibimiz';
-        const greeting = isTurkish ? 'Merhaba!' : 'Hello!';
-        const welcomeMsg = isTurkish
-          ? `${greeting} ${displayName} olarak size yazıyoruz 🙏\n\nDoldurduğunuz form bize ulaştı. Talebiniz hakkında detaylı bilgi alabilir miyiz?`
-          : `${greeting} We are reaching out from ${displayName} 🙏\n\nWe received your form. Could you provide more details about your request?`;
+      if (META_ACCESS_TOKEN && autoGreetingEnabled) {
+        const templateName = process.env.FORM_GREETING_TEMPLATE_NAME || 'tr_karsilama';
+        const templateLanguage = process.env.FORM_GREETING_TEMPLATE_LANGUAGE || 'tr';
+        const welcomeMsg = "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
 
-        // Send WhatsApp function
-        const sendWhatsApp = async (phoneToTry: string) => {
-          const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              messaging_product: 'whatsapp',
-              to: phoneToTry,
-              type: 'text',
-              text: { body: welcomeMsg },
-            }),
-          });
-          return response.ok;
+        const sendWhatsApp = async (phoneToTry: string): Promise<{ ok: boolean; providerMessageId?: string }> => {
+          try {
+            if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
+              const res = await ThreeSixtyDialogService.sendTemplate(
+                META_ACCESS_TOKEN as string,
+                phoneToTry,
+                templateName,
+                templateLanguage
+              );
+              return { ok: res.success, providerMessageId: res.providerMessageId };
+            }
+
+            if (!PHONE_NUMBER_ID) {
+              log.warn('[INGEST_AUTO_GREETING_TEMPLATE] Missing Meta phone number id');
+              return { ok: false };
+            }
+
+            const response = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${META_ACCESS_TOKEN}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                to: phoneToTry,
+                recipient_type: 'individual',
+                type: 'template',
+                template: {
+                  name: templateName,
+                  language: { code: templateLanguage },
+                },
+              }),
+            });
+
+            if (!response.ok) {
+              const errText = await response.text().catch(() => '');
+              log.warn('[INGEST_AUTO_GREETING_TEMPLATE] Meta template rejected', {
+                status: response.status,
+                errText: errText.substring(0, 500),
+                templateName,
+              });
+              return { ok: false };
+            }
+
+            const data = await response.json().catch(() => ({}));
+            return { ok: true, providerMessageId: data?.messages?.[0]?.id || undefined };
+          } catch (sendErr) {
+            log.error('[INGEST_AUTO_GREETING_TEMPLATE] Send failed', sendErr instanceof Error ? sendErr : new Error(String(sendErr)), {
+              templateName,
+              provider: creds.provider,
+            });
+            return { ok: false };
+          }
         };
 
         // Try phone1, fallback to phone2
-        messageSent = await sendWhatsApp(phone1);
+        const primarySend = await sendWhatsApp(phone1);
+        messageSent = primarySend.ok;
+        providerMessageId = primarySend.providerMessageId || null;
         if (!messageSent && phone2 && phone2 !== phone1) {
           log.info('[INGEST_PHONE_FALLBACK] Trying secondary phone', { phone2 });
-          messageSent = await sendWhatsApp(phone2);
-          if (messageSent) activePhone = phone2;
+          const secondarySend = await sendWhatsApp(phone2);
+          messageSent = secondarySend.ok;
+          if (messageSent) {
+            activePhone = phone2;
+            providerMessageId = secondarySend.providerMessageId || null;
+          }
         }
 
         // Create conversation & message record
@@ -638,14 +681,20 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
           let convId = existingConv?.[0]?.id;
           if (!convId) {
             const newConv = await db.executeSafe({
-              text: `INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department, channel, channel_id)
-                     VALUES ($1, $2, $3, $4, 'bot', 'Genel', 'whatsapp', $5) RETURNING id`,
+              text: `INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department, channel, channel_id, autopilot_enabled, bot_activated_at)
+                     VALUES ($1, $2, $3, $4, 'bot', 'Genel', 'whatsapp', $5, true, NOW()) RETURNING id`,
               values: [tenantId, activePhone, name, JSON.stringify(tags), whatsappChannelId]
             }) as any[];
             convId = newConv?.[0]?.id;
           } else {
             await db.executeSafe({
-              text: `UPDATE conversations SET channel_id = COALESCE(channel_id, $1), channel = COALESCE(channel, 'whatsapp') WHERE id = $2 AND tenant_id = $3`,
+              text: `UPDATE conversations
+                     SET channel_id = COALESCE(channel_id, $1),
+                         channel = COALESCE(channel, 'whatsapp'),
+                         status = 'bot',
+                         autopilot_enabled = true,
+                         bot_activated_at = COALESCE(bot_activated_at, NOW())
+                     WHERE id = $2 AND tenant_id = $3`,
               values: [whatsappChannelId, convId, tenantId]
             });
           }
@@ -663,9 +712,9 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
 
           // Insert message record
           await db.executeSafe({
-            text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, channel_id)
-                   VALUES ($1, $2, $3, 'out', $4, 'whatsapp', $5)`,
-            values: [tenantId, convId, activePhone, welcomeMsg, whatsappChannelId]
+            text: `INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, channel_id, status, provider_message_id)
+                   VALUES ($1, $2, $3, 'out', $4, 'whatsapp', $5, 'sent', $6)`,
+            values: [tenantId, convId, activePhone, welcomeMsg, whatsappChannelId, providerMessageId]
           });
 
           // Update lead stage
@@ -673,6 +722,26 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
             text: `UPDATE leads SET stage = 'contacted', contacted_at = NOW(), phone_number = $1 WHERE phone_number = $2 AND tenant_id = $3`,
             values: [activePhone, phone1, tenantId]
           });
+
+          if (leadId && convId) {
+            await db.executeSafe({
+              text: `INSERT INTO outreach_logs (tenant_id, lead_id, conversation_id, action, channel, actor_id, metadata)
+                     VALUES ($1, $2::uuid, $3, 'form_greeting_template_sent', 'whatsapp', 'system', $4)`,
+              values: [
+                tenantId,
+                leadId,
+                String(convId),
+                JSON.stringify({
+                  template_name: templateName,
+                  language: templateLanguage,
+                  provider_message_id: providerMessageId,
+                  phone: activePhone,
+                  form_name: formName,
+                  source: 'sheets_webhook_auto_greeting'
+                })
+              ]
+            });
+          }
         }
       }
     }

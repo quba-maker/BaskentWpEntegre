@@ -11,6 +11,7 @@ import { getCountryFromPhone } from "@/lib/utils/country";
 import { extractFormFields } from "@/lib/utils/form-field-extractor";
 import { normalizeCountry, getCountryDisplayLabel, resolvePatientCountryDetailed } from "@/lib/utils/country-normalizer";
 import { ExpectsReplyClassifier } from "@/lib/services/classification/expects-reply-classifier";
+import { FeatureFlagService } from "@/lib/services/feature-flag.service";
 import { normalizePhoneForIdentity, parseAllPhones } from "@/lib/utils/phone-identity";
 import { logger } from "@/lib/core/logger";
 
@@ -1903,7 +1904,11 @@ export async function toggleBotStatus(conversationIdOrPhone: string, isBotActive
       }
 
       // Security Kill-switch Gate
-      if (isBotActive && process.env.ENABLE_SELECTED_AUTOPILOT !== 'true') {
+      const selectedAutopilotAllowed =
+        process.env.ENABLE_SELECTED_AUTOPILOT === 'true' ||
+        await FeatureFlagService.isEnabled(ctx.tenantId, 'whatsapp_auto_reply', false);
+
+      if (isBotActive && !selectedAutopilotAllowed) {
         return { success: false, error: "Otopilot sistemi şu anda genel olarak kapalıdır. Lütfen sistem yöneticiniz ile iletişime geçin." };
       }
 

@@ -188,7 +188,9 @@ export async function POST(request: NextRequest) {
       data: rowData,
       outboundChannelId,
       greetingGroupId,
-      skipAutoMessage: true, // PHASE 2L-P0: Coordinator-initiated outreach only
+      // Live webhook: send the approved WhatsApp greeting template automatically.
+      // Batch/cron sync paths remain skipAutoMessage=true to avoid sending old leads.
+      skipAutoMessage: false,
       source: 'webhook'
     });
 
