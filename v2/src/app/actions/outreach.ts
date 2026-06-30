@@ -23,6 +23,57 @@ import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function redactSecret(value: string, secret?: string | null): string {
+  if (!secret) return value;
+  return value.split(secret).join('[SCRUBBED_API_KEY]');
+}
+
+function truncateProviderError(value: string, maxLength = 900): string {
+  const compact = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength)}…` : compact;
+}
+
+function explainThreeSixtyTemplateError(rawMessage: string, templateName: string, languageCode: string) {
+  const raw = truncateProviderError(rawMessage);
+  const lower = raw.toLowerCase();
+  const details = `Şablon: ${templateName} · Dil: ${languageCode || 'tr'} · 360dialog ham yanıt: ${raw}`;
+
+  if (
+    lower.includes('lack of payment') ||
+    lower.includes('payment') ||
+    lower.includes('billing') ||
+    lower.includes('balance') ||
+    lower.includes('insufficient') ||
+    lower.includes('funds')
+  ) {
+    return `360dialog gönderimi ödeme/bakiye nedeniyle reddetti. 360dialog Hub > Funds/Balance bölümünde bu WhatsApp numarasının bakiyesini ve auto-recharge durumunu kontrol edin. ${details}`;
+  }
+
+  if (
+    lower.includes('invalid api token') ||
+    lower.includes('invalid api key') ||
+    lower.includes('unauthorized') ||
+    lower.includes('http 401')
+  ) {
+    return `360dialog bu API key'i kabul etmedi veya key bu kanala ait değil. Entegrasyonlar'daki Başkent 360dialog Live kanalına, 360dialog panelindeki aynı WhatsApp kanalının Client/API Key değerini girin. ${details}`;
+  }
+
+  if (
+    lower.includes('template') &&
+    (lower.includes('not found') ||
+      lower.includes('does not exist') ||
+      lower.includes('not approved') ||
+      lower.includes('rejected') ||
+      lower.includes('invalid parameter'))
+  ) {
+    return `360dialog şablonu kabul etmedi. Şablon adının, dilinin ve kategorisinin bu 360dialog hesabında onaylı olduğundan emin olun. ${details}`;
+  }
+
+  return `360dialog şablon gönderimini reddetti. ${details}`;
+}
+
 // ═══════════════════════════════════════════════════════════
 // 1. PREPARE GREETING DRAFT — Taslak mesaj üret (NO API CALL)
 // ═══════════════════════════════════════════════════════════
@@ -1224,20 +1275,13 @@ export async function sendFormGreetingTemplateAction(
         }
       } catch (err: any) {
         // Safe scrubbing of credentials in the returned error message
-        const safeErrorMsg = (err instanceof Error ? err.message : String(err))
-          .replace(new RegExp(creds.accessToken || 'NON_EXISTENT_KEY', 'g'), '[SCRUBBED_API_KEY]');
-          
-        const normalizedProviderError = safeErrorMsg.toLowerCase();
+        const safeErrorMsg = redactSecret(err instanceof Error ? err.message : String(err), creds.accessToken);
 
-        if (normalizedProviderError.includes('invalid api token') || normalizedProviderError.includes('http 401')) {
+        if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
           return {
             success: false,
-            error: `360dialog bu API key'i kabul etmedi (HTTP 401). Bu hata şablon metninden önce oluşur: Entegrasyonlar'daki Başkent 360dialog Live kanalına, 360dialog panelindeki aynı WhatsApp kanalının Client/API Key değerini girin. Şablon: ${templateName} · Dil: ${languageCode || 'tr'}`
+            error: explainThreeSixtyTemplateError(safeErrorMsg, templateName, languageCode || 'tr')
           };
-        }
-
-        if (normalizedProviderError.includes('lack of payment on client side')) {
-          return { success: false, error: '360dialog API gönderimi ödeme/billing nedeniyle reddetti. Dilerseniz ücretsiz manuel seçenekle WhatsApp uygulamasında açabilirsiniz.' };
         }
         
         return { success: false, error: `WhatsApp gönderimi başarısız oldu: ${safeErrorMsg}` };
