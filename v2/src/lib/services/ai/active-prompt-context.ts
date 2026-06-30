@@ -206,7 +206,8 @@ export function isNameBypassAllowed(params: {
     /\bismim\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
     /\badım\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
     /\badim\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
-    /\bben\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i
+    /\bben\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
+    /^\s*([a-zA-ZçıüşöğİÇIÜŞÖĞ]{2,}(?:\s+[a-zA-ZçıüşöğİÇIÜŞÖĞ]{2,}){0,2})\s+(?:ismim|ismin|adım|adim)\b/i
   ];
   let detectedName = '';
   for (const regex of nameIntroductions) {

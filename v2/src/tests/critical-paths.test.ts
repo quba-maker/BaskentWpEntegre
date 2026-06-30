@@ -2145,6 +2145,13 @@ test("P0.12 EK 6: Normal call_scheduling_request LLM-first path’e gider (bypas
   assert(isLlmBypassChallenge === false, "call_scheduling_request should not trigger bypass to LLM");
 });
 
+test("P0.12 EK 6b: Yazım hatalı ters isim yanıtı name_intent olarak yakalanır", () => {
+  const { ConversationIntentRouter } = require("../lib/services/ai/conversation-intent-router");
+
+  assert(ConversationIntentRouter.route("mehmet ismin") === "name_intent", "mehmet ismin should be treated as name_intent");
+  assert(ConversationIntentRouter.route("mehmet ismim") === "name_intent", "mehmet ismim should be treated as name_intent");
+});
+
 test("P0.12 EK 7: FinalOutboundGuard güvenli LLM cevabını değiştirmez", () => {
   const { FinalOutboundGuard } = require("../lib/services/ai/final-outbound-guard");
 
@@ -5391,7 +5398,8 @@ test("P0.16-E: 3. Generic fallback texts are not present in history-aware path",
   assert(!fallbackRes.includes("Kusura bakmayın, sorunuzu tam anlayamadım"), "Should not contain generic fallback 1");
   assert(!fallbackRes.includes("Kusura bakmayın, cevabımı daha net ifade edeyim"), "Should not contain generic fallback 2");
   assert(!fallbackRes.includes("Mesajınızı aldım"), "Should not contain generic fallback 3");
-  assert(fallbackRes.includes("bel fıtığı şikayetinizle ilgili paylaştığınız detayları not ettim"), "Should summarize complaint instead");
+  assert(!fallbackRes.includes("paylaştığınız detayları not ettim"), "Should not use stale context-aware fallback wording");
+  assert(fallbackRes.includes("bel fıtığı şikayetinizle ilgili aynı yerden devam edelim"), "Should keep the complaint context");
 });
 
 test("P0.16-E: 4. MessageService skipGuard check", async () => {

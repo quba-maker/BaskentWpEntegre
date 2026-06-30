@@ -75,6 +75,17 @@ export function getNewDedupeKey(tenantId: string, channelId: string, conversatio
   return `tenant:${tenantId}:dedupe:response:${channelId || 'unknown'}:${conversationId}:${burstAnchorId}`;
 }
 
+function isHardQualityGateReason(reason: string): boolean {
+  const normalized = (reason || '').toLowerCase();
+  return [
+    'empty_response',
+    'system_leak_detected',
+    'prompt_challenge_leak',
+    'privacy_violation',
+    'wrong_language_reply'
+  ].some(fragment => normalized.includes(fragment));
+}
+
 export class AIResponseOrchestrator {
   public static sandboxLockStore = new Map<string, { token: string; expiresAt: number }>();
   public static sandboxProcessedStore = new Set<string>();
@@ -2099,31 +2110,43 @@ export class AIResponseOrchestrator {
         if (qualityGate.valid) {
           text = qualityGate.morphologyCorrectedText || text;
         } else {
-          qualityGateValid = false;
           qualityGateReason = qualityGate.reason || 'quality_gate_failed';
 
-          const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
-            inboundText,
-            brain,
-            identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
-            unifiedContext,
-            channelId,
-            systemPromptText,
-            resolvedActiveDepartment: resolvedActiveDepartment || null,
-            replyLanguage,
-            turkeyVisitIntent: currentVisitIntent,
-            formAlreadyAddressed
-          });
-          text = fallbackResult.text;
-          modelUsed = 'fallback';
+          if (isHardQualityGateReason(qualityGateReason)) {
+            qualityGateValid = false;
 
-          console.log(JSON.stringify({
-            tag: "AI_RESPONSE_ORCHESTRATOR_FALLBACK_APPLIED",
-            tenantId,
-            conversationId: conversationId || 'unknown',
-            reason: `quality_gate_failed:${qualityGateReason}`,
-            workerPath
-          }));
+            const fallbackResult = ContextAwareSafeFallbackResolver.resolve({
+              inboundText,
+              brain,
+              identityConfig: brain.prompts.metadata?.identity || brain.context.config?.identity || {},
+              unifiedContext,
+              channelId,
+              systemPromptText,
+              resolvedActiveDepartment: resolvedActiveDepartment || null,
+              replyLanguage,
+              turkeyVisitIntent: currentVisitIntent,
+              formAlreadyAddressed
+            });
+            text = fallbackResult.text;
+            modelUsed = 'fallback';
+
+            console.log(JSON.stringify({
+              tag: "AI_RESPONSE_ORCHESTRATOR_FALLBACK_APPLIED",
+              tenantId,
+              conversationId: conversationId || 'unknown',
+              reason: `quality_gate_failed:${qualityGateReason}`,
+              workerPath
+            }));
+          } else {
+            console.log(JSON.stringify({
+              tag: "V3_LIGHT_QUALITY_GATE_WARNING",
+              tenantId,
+              conversationId: conversationId || 'unknown',
+              reason: qualityGateReason,
+              workerPath
+            }));
+            qualityGateReason = '';
+          }
         }
       }
 

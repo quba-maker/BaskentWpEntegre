@@ -187,7 +187,7 @@ export class ConversationIntentRouter {
     }
 
     // 8. Name Intent
-    const nameKeywords = ['adım', 'ismim', 'benim adım', 'benim ismim', 'adım ', 'ismim '];
+    const nameKeywords = ['adım', 'adim', 'ismim', 'benim adım', 'benim adim', 'benim ismim', 'adım ', 'adim ', 'ismim '];
     const blocklistedWords = ['kiminle', 'kimle', 'kim', 'ne', 'neden', 'niye', 'nasil', 'hangi', 'kac', 'nerede', 'suan', 'simdi'];
     const blocklistedNamePhrases = [
       'ben kiminle gorusuyorum',
@@ -204,7 +204,8 @@ export class ConversationIntentRouter {
     const hasBlocklistedPhrase = blocklistedNamePhrases.some(phrase => clean.includes(phrase));
 
     if (!hasBlocklistedWord && !hasBlocklistedPhrase) {
-      if (nameKeywords.some(kw => clean.includes(kw)) || /^(?:ben|adım|ismim)\s+[a-z]+/i.test(clean)) {
+      const reverseNameTypoPattern = /^[a-z]{2,}(?:\s+[a-z]{2,}){0,2}\s+(?:ismim|ismin|adim)$/i;
+      if (nameKeywords.some(kw => clean.includes(kw)) || /^(?:ben|adim|ismim)\s+[a-z]+/i.test(clean) || reverseNameTypoPattern.test(clean)) {
         return 'name_intent';
       }
     }

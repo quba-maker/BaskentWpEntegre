@@ -1002,7 +1002,8 @@ export class ContextAwareSafeFallbackResolver {
       /\bismim\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
       /\badım\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
       /\badim\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
-      /\bben\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i
+      /\bben\s+([a-zA-ZçıüşöğİÇIÜŞÖĞ\s]+)/i,
+      /^\s*([a-zA-ZçıüşöğİÇIÜŞÖĞ]{2,}(?:\s+[a-zA-ZçıüşöğİÇIÜŞÖĞ]{2,}){0,2})\s+(?:ismim|ismin|adım|adim)\b/i
     ];
     let detectedName = '';
     for (const regex of nameIntroductions) {
@@ -2016,7 +2017,7 @@ export function buildHistoryAwareRecoveryFallback(
   if (isHealthcare) {
     if (complaint) {
       const topicWord = (complaint === 'check-up' || complaint.includes('estetik')) ? 'talebinizle' : 'şikayetinizle';
-      return `Haklısınız, ${complaint} ${topicWord} ilgili paylaştığınız detayları not ettim. Bu süreçte değerlendirme ve planlama için sizi ilgili birime/${agentName}a yönlendirebiliriz.`;
+      return `${complaint} ${topicWord} ilgili aynı yerden devam edelim. Süreç, randevu veya telefon görüşmesi tarafında hangi adımı netleştirelim?`;
     }
     if (hasPersona && !identityAlreadyIntroduced) {
       return `Ben *${pName}*, ${orgName}’nden sizinle ilgileniyorum. Size sağlık talebinizle ilgili yardımcı olayım.`;
