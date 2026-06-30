@@ -762,7 +762,20 @@ function applyKnownFactsRelationGuard(text: string, ctx: FinalOutboundAuditCtx):
   const asksDoctorMeeting = /\b(?:doktorla\s+g[öo]r[üu][şs]|hekimle\s+g[öo]r[üu][şs]|doktor\s+g[öo]r[üu][şs]mesi|ön\s+g[öo]r[üu][şs]me)\b/i.test(inbound);
   const relationSpecificFollowup = (asksAccommodation || asksDoctorMeeting) && (!hasRelationInText || requesterLocationMissing || patientLocationMissing);
 
-  if (!selfMismatch && !asksForMoreComplaint && !(isFirstFormWelcome && !hasRelationInText) && !relationContextMissing && !relationSelfProcessMismatch && !malformedRelationText && !relationSpecificFollowup) {
+  // V3: this guard is only a red-line fixer. It must not replace a good
+  // model-written form reply just because a location/relation detail is absent.
+  // Rewriting healthy Gemini replies here made live answers colder than the
+  // local V3 prompt tests.
+  const shouldRewrite =
+    selfMismatch ||
+    asksForMoreComplaint ||
+    relationSelfProcessMismatch ||
+    malformedRelationText ||
+    relationSpecificFollowup ||
+    // Keep the old first-form repair only for clearly broken legacy openings.
+    (relationContextMissing && /form\s+başvurunuz\s+bize\s+ulaştı\.?,/i.test(text));
+
+  if (!shouldRewrite) {
     return { text, rewrote: false };
   }
 

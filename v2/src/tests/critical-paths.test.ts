@@ -15254,6 +15254,37 @@ test("Başkent v91 T145: sandbox tests do not consume live-style hourly cost lim
   assert(orchestratorContent.includes("this.liveCostLimiter"), "Canlı hasta akışındaki maliyet koruması korunmalı");
 });
 
+test("Başkent v91 T146: relation auditor preserves healthy V3 form replies", () => {
+  const { FinalOutboundBodyAuditor } = require("../lib/services/ai/final-outbound-body-auditor");
+  const raw = [
+    "Merhaba, formunuzdaki bilgiler doğrultusunda babanız için çok geçmiş olsun dileklerimi iletiyorum.",
+    "Bel ve boyun fıtığı nedeniyle uzun süredir yürüme güçlüğü yaşaması hassas bir durum.",
+    "",
+    "Bu tür durumlarda uzaktan kesin karar vermek doğru olmaz; Beyin ve Sinir Cerrahisi değerlendirmesiyle süreç daha güvenli şekilde netleşir.",
+    "",
+    "İsterseniz önce süreci kısaca anlatayım ya da doktor, konaklama ve arama planı tarafında merak ettiğiniz noktayı yanıtlayayım.",
+  ].join("\n");
+
+  const result = FinalOutboundBodyAuditor.audit(raw, {
+    tenantId: "caab9ea1-9591-45e4-bbc5-9c9b498982c8",
+    conversationId: "v91-t146",
+    workerPath: "test",
+    channel: "whatsapp",
+    replyLanguage: "tr",
+    inboundText: "merhaba",
+    patientKnownFacts: [
+      "Başvuran kişinin bulunduğu yer: Almanya",
+      "Hastanın bulunduğu yer: Türkiye",
+      "Yakını (Babası) konusu: Bel ve boyun fıtığı",
+    ],
+  });
+
+  assert(result.text.includes("uzun süredir yürüme güçlüğü"), result.text);
+  assert(result.text.includes("Beyin ve Sinir Cerrahisi"), result.text);
+  assert(!result.text.includes("Önce bilgi almak istediğinizi not ediyorum"), result.text);
+  assert(!result.text.includes("Sizin Almanya’da, babanızın Türkiye’de olduğunu ayrıca not ediyorum"), result.text);
+});
+
 
 async function runAllTests() {
   try {
