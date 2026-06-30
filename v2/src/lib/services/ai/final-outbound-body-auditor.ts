@@ -939,16 +939,24 @@ function applyTrustRepairGuard(text: string, ctx: FinalOutboundAuditCtx): { text
   const hasTrustSignal = /\b(?:g[üu]ven|inanmad[ıi]m|bot|bor\s+musun|robot|yapay\s+zeka|anlam[ıi]yor|anlamad[ıi]n|unut|unuttun|unutuyorsun|s[öo]yledim|dedim\s+ya|yard[ıi]mc[ıi]\s+olamayacaks[ıi]n[ıi]z|cevap\s+vermedin|cevaplamad[ıi]n|sorular[ıi]ma\s+cevap)\b/i.test(inbound);
   if (!hasTrustSignal) return { text, rewrote: false };
 
-  const contextRecovery = buildKnownContextRecovery(ctx, 'trust');
-  if (contextRecovery) {
-    return { text: contextRecovery, rewrote: true };
-  }
-
   const looksLikeWrongFallback =
     /gelme\s+d[üu][şs][üu]ncenizi\s+not\s+ald[ıi]m/i.test(text) ||
+    /ayn[ıi]\s+yerden\s+devam\s+edelim/i.test(text) ||
+    /hangi\s+(?:ad[ıi]m[ıi]|bilgiyi)\s+netle[şs]tirelim/i.test(text) ||
     /hangi\s+konuda\s+bilgi\s+almak\s+istiyorsunuz/i.test(text) ||
     /size\s+sa[ğg]l[ıi]k\s+talebinizle\s+ilgili\s+yard[ıi]mc[ıi]\s+olay[ıi]m/i.test(text) ||
     /ba[şs]ka\s+bir\s+sorunuz\s+var\s+m[ıi]/i.test(text);
+
+  const ownsTrustMoment = /\b(?:hakl[ıi]s[ıi]n[ıi]z|kusura\s+bakmay[ıi]n|özür|g[üu]ven|daha\s+net|net\s+yard[ıi]mc[ıi]|anl[ıi]yorum)\b/i.test(text);
+  const keepsConversationContext = /\b(?:bel\s+f[ıi]t[ıi][ğg][ıi]|boyun\s+f[ıi]t[ıi][ğg][ıi]|fiyat|[üu]cret|beyin\s+ve\s+sinir|kardiyoloji|dermatoloji|randevu|telefon|dan[ıi][şs]man|s[üu]re[çc]|muayene|konaklama|rinoplasti|burun|ameliyat)\b/i.test(text);
+  if (ownsTrustMoment && keepsConversationContext && !looksLikeWrongFallback) {
+    return { text, rewrote: false };
+  }
+
+  const contextRecovery = buildKnownContextRecovery(ctx, 'trust');
+  if (contextRecovery && looksLikeWrongFallback) {
+    return { text: contextRecovery, rewrote: true };
+  }
 
   const asksDoctorPattern = /\b(?:doktor|hekim|hoca|uzman|dermatoloji|kardiyoloji|kad[ıi]n\s+do[ğg]um)\b.*\b(?:isim|ismi|ismini|ad[ıi]|kim|kimler|liste|ara[şs]t[ıi]r)|\b(?:isim|ad[ıi])\s+s[öo]yle|\bara[şs]t[ıi]raca[ğg][ıi]m|\bara[şs]t[ıi]racam/i;
   const directoryText = asksDoctorPattern.test(contextText)

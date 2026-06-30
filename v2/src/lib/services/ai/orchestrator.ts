@@ -233,7 +233,10 @@ export class AIOrchestrator {
 
     try {
       if (tenantId !== 'unknown') {
-        await (isSandbox ? this.sandboxCostLimiter : this.liveCostLimiter).consume(tenantId);
+        const shouldLimitSandbox = process.env.AI_SANDBOX_COST_LIMIT_ENABLED === 'true';
+        if (!isSandbox || shouldLimitSandbox) {
+          await (isSandbox ? this.sandboxCostLimiter : this.liveCostLimiter).consume(tenantId);
+        }
       }
 
       let loopCount = 0;

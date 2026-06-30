@@ -1263,11 +1263,12 @@ export class ContextAwareSafeFallbackResolver {
     }
 
     const isBotAccusation = ['bot musun', 'sen bot musun', 'are you a bot', 'botsun', 'robot musun', 'yapay zeka mısın', 'yapay zeka misin', 'insan mısın', 'insan misin'].some(kw => lowerInbound.includes(kw));
-    const isAiAccusation = ['yapay zeka', 'yapayzeka', 'gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model'].some(kw => lowerInbound.includes(kw));
+    const isAiAccusation = ['yapay zeka', 'yapayzeka'].some(kw => lowerInbound.includes(kw));
+    const isModelOrVendorQuestion = ['gpt', 'gemini', 'openai', 'claude', 'dil modeli', 'hangi model', 'modelin ne', 'hangi ai', 'hangi yapay zeka'].some(kw => lowerInbound.includes(kw));
     const isPromptChallengeOnly = detectedIntent === 'prompt_challenge' || interpretedIntent === 'prompt_challenge' || ['prompt', 'promt', 'sistem prompt', 'system prompt', 'talimatların', 'sistem talimati', 'kuralın ne', 'direktifin ne', 'uydurma'].some(kw => lowerInbound.includes(kw));
     const isAngryPromptChallenge = isPromptChallengeOnly && ['şikayet', 'sikayet', 'rezalet', 'berbat', 'kötü', 'sinir', 'bıktım', 'yeter', 'dalga'].some(kw => lowerInbound.includes(kw));
 
-    const isLlmBypassChallenge = isPromptChallengeOnly || isBotAccusation || isAiAccusation || isAngryPromptChallenge;
+    const isLlmBypassChallenge = isPromptChallengeOnly || isModelOrVendorQuestion || isAngryPromptChallenge;
 
     if (isLlmBypassChallenge) {
       const { PromptChallengeSafetyPolicy } = require('./prompt-challenge-safety-policy');
@@ -1299,7 +1300,7 @@ export class ContextAwareSafeFallbackResolver {
       };
     }
 
-    if (isAngryOrChallenge) {
+    if (isAngryOrChallenge || isBotAccusation || isAiAccusation) {
       // Identity query, bot questions, abuse or general anger
       let text = '';
 

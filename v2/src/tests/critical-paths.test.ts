@@ -15206,6 +15206,46 @@ test("Forms T142: form detail lazy load must keep lead id as UUID string", () =>
   assert(actionContent.includes("l.id = $1::uuid"), "getFormDetailData sorgusu UUID cast ile güvenli çalışmalı");
 });
 
+test("Başkent v91 T143: bot accusation must stay on V3 LLM path, not bypass", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const orchestratorPath = path.join(process.cwd(), "src/lib/services/ai/ai-response-orchestrator.ts");
+  const fallbackPath = path.join(process.cwd(), "src/lib/services/ai/context-aware-safe-fallback.ts");
+  const orchestratorContent = fs.readFileSync(orchestratorPath, "utf8");
+  const fallbackContent = fs.readFileSync(fallbackPath, "utf8");
+
+  assert(orchestratorContent.includes("const isSoftTrustChallenge = isBotAccusation || isAiAccusation"), "Bot/yapay zeka ithamları yumuşak güven kırılması olarak işaretlenmeli");
+  assert(orchestratorContent.includes("const isHardPromptOrModelChallenge = isPromptChallenge || isAngryPromptChallenge || isModelOrVendorQuestion"), "Sadece prompt/model soruları bypass güvenlik yoluna girmeli");
+  assert(orchestratorContent.includes("if (isSoftTrustChallenge)     intentList.push('trust_challenge_llm_first')"), "Güven kırılması LLM-first intent olarak izlenmeli");
+  assert(orchestratorContent.includes("GÜVEN KIRILMASI / BOT İTHAMI KURALI"), "LLM'e güven kırılmasını sahiplenmesi için açık talimat verilmeli");
+  assert(!orchestratorContent.includes("isPromptChallenge || isBotAccusation || isAiAccusation || isAngryPromptChallenge"), "Eski bot ithamı bypass kuralı geri gelmemeli");
+  assert(fallbackContent.includes("const isLlmBypassChallenge = isPromptChallengeOnly || isModelOrVendorQuestion || isAngryPromptChallenge"), "Fallback tarafında da bot ithamı normal bypass sayılmamalı");
+});
+
+test("Başkent v91 T144: trust auditor preserves valid Gemini trust repair", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const auditorPath = path.join(process.cwd(), "src/lib/services/ai/final-outbound-body-auditor.ts");
+  const auditorContent = fs.readFileSync(auditorPath, "utf8");
+
+  assert(auditorContent.includes("const ownsTrustMoment"), "Haklısınız/güven gibi sahiplenen cevaplar ayrı tanınmalı");
+  assert(auditorContent.includes("const keepsConversationContext"), "Cevabın sağlık bağlamını koruyup korumadığı kontrol edilmeli");
+  assert(auditorContent.includes("if (ownsTrustMoment && keepsConversationContext && !looksLikeWrongFallback)"), "Geçerli Gemini güven tamiri fallback ile ezilmemeli");
+  assert(auditorContent.includes("ayn[ıi]\\s+yerden\\s+devam\\s+edelim"), "Eski kötü kaçış cümlesi hâlâ yakalanmalı");
+  assert(auditorContent.includes("if (contextRecovery && looksLikeWrongFallback)"), "Sadece gerçekten kötü fallbackler bağlam kurtarmasına çevrilmeli");
+});
+
+test("Başkent v91 T145: sandbox tests do not consume live-style hourly cost limit by default", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const orchestratorPath = path.join(process.cwd(), "src/lib/services/ai/orchestrator.ts");
+  const orchestratorContent = fs.readFileSync(orchestratorPath, "utf8");
+
+  assert(orchestratorContent.includes("AI_SANDBOX_COST_LIMIT_ENABLED"), "Sandbox maliyet limiti ayrı env bayrağıyla açılmalı");
+  assert(orchestratorContent.includes("if (!isSandbox || shouldLimitSandbox)"), "Test paneli varsayılan olarak saatlik maliyet limitine takılmamalı");
+  assert(orchestratorContent.includes("this.liveCostLimiter"), "Canlı hasta akışındaki maliyet koruması korunmalı");
+});
+
 
 async function runAllTests() {
   try {
