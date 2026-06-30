@@ -216,6 +216,21 @@ export class FinalOutboundGuard {
     ];
 
     const lowerText = corrected.toLowerCase();
+
+    const criticalBlockedPatterns = [
+      /sistem detay/i,
+      /sistem prompt/i,
+      /promptunda/i,
+      /müşteri temsilcisine devredildi/i,
+      /ai unavailable/i,
+      /quota exceeded/i,
+      /\bgemini\b/i,
+      /servis dışı/i,
+      /\bllm\b/i,
+      /language model/i,
+      /\[object object\]/i,
+      /\bundefined\b/i
+    ];
     
     // Check general reduplication pattern
     // P0.16-C: Tightened to avoid false-positives on normal Turkish words.
@@ -228,6 +243,7 @@ export class FinalOutboundGuard {
       /iniziniz/i.test(lowerText);
 
     const hasBlockedPattern = blockedPatterns.some(regex => regex.test(lowerText)) || hasSuffixDoublingPattern;
+    const hasCriticalBlockedPattern = criticalBlockedPatterns.some(regex => regex.test(lowerText));
 
     if (isShortGreetingOnly) {
       const history = unifiedContext?.history || [];
@@ -261,11 +277,35 @@ export class FinalOutboundGuard {
         );
         return greetingFallback;
       }
-      // If we have history, treat it as blocked and do not reset greeting (fall through to deterministic fallback)
+      console.log(JSON.stringify({
+        tag: "FINAL_OUTBOUND_GUARD_BLOCKED",
+        tenantId,
+        conversationId: conversationId || 'unknown',
+        intent: context.intent || 'unknown',
+        reasons: ['greeting_only_after_history'],
+        fallbackApplied: true,
+        rawTextLogged: false
+      }));
+      return isHealthcare
+        ? "Sağlık talebinizle ilgili aynı yerden devam edelim. Hangi başlığı netleştirelim?"
+        : "Aynı yerden devam edelim. Hangi konuda bilgi almak istersiniz?";
     }
 
-    // Trigger fallback if blocked pattern exists, or if sentence is incomplete / extremely short
-    if (hasBlockedPattern || isSentenceIncomplete || isExtremelyShort || isShortGreetingOnly) {
+    if (hasBlockedPattern && !hasCriticalBlockedPattern) {
+      console.log(JSON.stringify({
+        tag: "FINAL_OUTBOUND_GUARD_LIGHT_WARNING",
+        tenantId,
+        conversationId: conversationId || 'unknown',
+        intent: context.intent || 'unknown',
+        reasons: ['non_critical_pattern'],
+        fallbackApplied: false,
+        rawTextLogged: false
+      }));
+    }
+
+    // V3 local-parity: do not replace natural model answers for light style/morphology warnings.
+    // Only hard technical leakage, incomplete output or broken empty/short output can trigger recovery.
+    if (hasCriticalBlockedPattern || isSentenceIncomplete || isExtremelyShort) {
       const mockBrainForIdentity = {
         prompts: {
           systemPrompt: context.systemPromptText,
@@ -282,10 +322,9 @@ export class FinalOutboundGuard {
       };
 
       const blockReasons: string[] = [];
-      if (hasBlockedPattern) blockReasons.push('blocked_pattern');
+      if (hasCriticalBlockedPattern) blockReasons.push('critical_blocked_pattern');
       if (isSentenceIncomplete) blockReasons.push('sentence_incomplete');
       if (isExtremelyShort) blockReasons.push('extremely_short');
-      if (isShortGreetingOnly) blockReasons.push('greeting_only');
 
       const blockReasonStr = blockReasons.join(',');
       context.blocked = true;
