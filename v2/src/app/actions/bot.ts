@@ -24,6 +24,18 @@ type SandboxFormInput = {
 type SandboxBrainMode = 'legacy' | 'v2' | 'hybrid' | 'pure';
 type NormalizedSandboxBrainMode = 'legacy' | 'v2';
 
+const SANDBOX_MODEL_IDS = new Set([
+  'gemini-3.5-flash',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-pro',
+]);
+
+function normalizeSandboxModelOverride(value: unknown): string | null {
+  const modelId = String(value || '').trim();
+  return SANDBOX_MODEL_IDS.has(modelId) ? modelId : null;
+}
+
 function normalizeSandboxBrainMode(value: unknown): NormalizedSandboxBrainMode {
   if (value === 'v2' || value === 'pure') return 'v2';
   return 'legacy';
@@ -466,6 +478,7 @@ export async function getBotStats(period: string = '7d') {
 // ==========================================
 
 const MODEL_COSTS: Record<string, { input: number; output: number; label: string }> = {
+  'gemini-3.5-flash': { input: 0.50, output: 2.00, label: 'Gemini 3.5 Flash' },
   'gemini-2.5-flash': { input: 0.15, output: 0.60, label: 'Gemini 2.5 Flash' },
   'gemini-2.5-flash-lite': { input: 0.04, output: 0.15, label: 'Flash Lite' },
   'gemini-2.5-pro': { input: 1.25, output: 10.0, label: 'Gemini 2.5 Pro' },
@@ -590,6 +603,7 @@ export async function testBotPrompt(
   options?: {
     sandboxForm?: SandboxFormInput | null;
     sandboxBrainMode?: SandboxBrainMode;
+    sandboxModelOverride?: string | null;
   }
 ) {
   return withActionGuard(
@@ -653,7 +667,8 @@ export async function testBotPrompt(
         values: [botGroupId, ctx.tenantId]
       });
       const profile = profileResult[0] || null;
-      const aiModel = profile?.ai_model || 'gemini-2.5-flash';
+      const sandboxModelOverride = normalizeSandboxModelOverride(options?.sandboxModelOverride);
+      const aiModel = sandboxModelOverride || profile?.ai_model || 'gemini-2.5-flash';
       const maxTokens = profile?.max_response_tokens || 1000;
 
       // 5. Build dynamic system prompt using PromptBuilder
@@ -843,7 +858,9 @@ export async function testBotPrompt(
           qubaBrainCoreApplied: effectiveQubaBrainCoreApplied,
           qubaBrainRolloutMode,
           sandboxBrainMode,
-          sandboxPromptSource: sandboxBrainMode === 'v2' ? 'v2_quba_brain' : 'legacy_system_prompt',
+          sandboxPromptSource: sandboxBrainMode === 'v2' ? 'v2_quba_brain' : 'v3_single_prompt',
+          v3SinglePromptApplied: sandboxBrainMode !== 'v2',
+          sandboxModelOverride,
           legacySystemPromptChars: rawSystemPrompt.length,
           sandboxSystemPromptChars: sandboxSystemPrompt.length,
           missingGeminiApiKey,

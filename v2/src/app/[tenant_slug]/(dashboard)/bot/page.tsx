@@ -23,6 +23,24 @@ function resolveIcon(iconName: string) {
   return map[iconName] || Bot;
 }
 
+function getModelDisplay(modelId?: string) {
+  if (!modelId) return null;
+  const normalized = modelId.toLowerCase();
+  if (normalized.includes("3.5-flash")) {
+    return { label: "3.5 Flash", bg: "var(--q-purple-bg, rgba(99,102,241,0.1))", color: "var(--q-purple, #6366f1)" };
+  }
+  if (normalized.includes("2.5-pro")) {
+    return { label: "2.5 Pro", bg: "var(--q-purple-bg, rgba(99,102,241,0.1))", color: "var(--q-purple, #6366f1)" };
+  }
+  if (normalized.includes("lite")) {
+    return { label: "2.5 Lite", bg: "var(--q-green-bg, rgba(34,197,94,0.1))", color: "var(--q-green, #22c55e)" };
+  }
+  if (normalized.includes("2.5-flash")) {
+    return { label: "2.5 Flash", bg: "var(--q-blue-bg, rgba(59,130,246,0.1))", color: "var(--q-blue, #3b82f6)" };
+  }
+  return { label: modelId, bg: "rgba(0,0,0,0.04)", color: "var(--q-text-secondary)" };
+}
+
 // ==========================================
 // BOT CARD
 // ==========================================
@@ -30,6 +48,7 @@ function BotCard({ bot, isSelected, onClick }: { bot: BotData; isSelected: boole
   const channelCount = bot.channels.length;
   const hasWarnings = bot.channels.some(c => !c.hasPromptBinding || !c.hasCredentials);
   const iconName = bot.icon;
+  const modelDisplay = getModelDisplay(bot.profile?.aiModel);
 
   return (
     <div
@@ -60,16 +79,16 @@ function BotCard({ bot, isSelected, onClick }: { bot: BotData; isSelected: boole
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {bot.profile?.aiModel && (
+          {modelDisplay && (
             <span
               className="text-[10px] font-bold px-1.5 py-0.5 rounded-md"
               style={{
-                backgroundColor: bot.profile.aiModel.includes('pro') ? 'var(--q-purple-bg, rgba(99,102,241,0.1))' : bot.profile.aiModel.includes('lite') ? 'var(--q-green-bg, rgba(34,197,94,0.1))' : 'var(--q-blue-bg, rgba(59,130,246,0.1))',
-                color: bot.profile.aiModel.includes('pro') ? 'var(--q-purple, #6366f1)' : bot.profile.aiModel.includes('lite') ? 'var(--q-green, #22c55e)' : 'var(--q-blue, #3b82f6)',
+                backgroundColor: modelDisplay.bg,
+                color: modelDisplay.color,
               }}
             >
               <Cpu className="w-2.5 h-2.5 inline -mt-0.5 mr-0.5" />
-              {bot.profile.aiModel.includes('pro') ? 'Pro' : bot.profile.aiModel.includes('lite') ? 'Lite' : 'Flash'}
+              {modelDisplay.label}
             </span>
           )}
           <div className="flex items-center gap-1">

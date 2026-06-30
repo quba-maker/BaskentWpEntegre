@@ -4553,6 +4553,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     // Resolve dynamic identity context in delayed path
     let unifiedContext: any = {};
     let rawHistory: any[] = [];
+    let history: any[] = [];
     if (conversationId && customerId) {
       try {
         const { IdentityEngine } = await import('../services/ai/engines/identity');
@@ -4582,7 +4583,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
 
       const { ConversationTurnAggregator } = await import('../services/ai/conversation-turn-aggregator');
-      const history = await ConversationTurnAggregator.aggregate(tenantId, phoneNumber, rawHistory, 10);
+      history = await ConversationTurnAggregator.aggregate(tenantId, phoneNumber, rawHistory, 10);
       unifiedContext.history = history;
       unifiedContext.currentMessageText = combinedInboundText;
     } catch (e) {

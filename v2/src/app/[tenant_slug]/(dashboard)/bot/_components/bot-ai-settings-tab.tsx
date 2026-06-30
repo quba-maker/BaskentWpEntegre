@@ -17,9 +17,10 @@ import { updateBot, type BotData } from "@/app/actions/bot";
 
 // ── Model Definitions ──
 const AI_MODELS = [
-  { id: "gemini-2.5-flash-lite", name: "Flash Lite", desc: "Hızlı & Ekonomik", speed: 95, cost: 20, iq: 60, color: "var(--q-green)" },
-  { id: "gemini-2.5-flash", name: "Flash", desc: "Dengeli (Önerilen)", speed: 85, cost: 40, iq: 85, color: "var(--q-blue)" },
-  { id: "gemini-2.5-pro", name: "Pro", desc: "Güçlü & Pahalı", speed: 50, cost: 90, iq: 98, color: "var(--q-purple)" },
+  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", desc: "Başkent için kalite tercihi", speed: 78, cost: 70, iq: 96, color: "var(--q-purple)" },
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", desc: "Ekonomik denge", speed: 85, cost: 40, iq: 85, color: "var(--q-blue)" },
+  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", desc: "En ekonomik", speed: 95, cost: 20, iq: 60, color: "var(--q-green)" },
+  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", desc: "Güçlü ama pahalı", speed: 50, cost: 90, iq: 98, color: "var(--q-purple)" },
 ];
 
 // ── Response Length Presets ──
@@ -46,7 +47,7 @@ interface BotAISettingsTabProps {
 export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
   const profile = bot.profile;
 
-  const [aiModel, setAiModel] = useState(profile?.aiModel || "gemini-2.5-flash");
+  const [aiModel, setAiModel] = useState(profile?.aiModel || "gemini-3.5-flash");
   const [maxTokens, setMaxTokens] = useState(profile?.maxResponseTokens || 1000);
   const [maxMessages, setMaxMessages] = useState(profile?.maxMessages ?? 8);
   const [workingHours, setWorkingHours] = useState<{
@@ -63,7 +64,7 @@ export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
 
   // Sync when bot changes
   useEffect(() => {
-    setAiModel(profile?.aiModel || "gemini-2.5-flash");
+    setAiModel(profile?.aiModel || "gemini-3.5-flash");
     setMaxTokens(profile?.maxResponseTokens || 1000);
     setMaxMessages(profile?.maxMessages ?? 8);
     setWorkingHours(profile?.workingHours || { enabled: false });
@@ -81,7 +82,7 @@ export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
   ]);
 
   const isDirty =
-    aiModel !== (profile?.aiModel || "gemini-2.5-flash") ||
+    aiModel !== (profile?.aiModel || "gemini-3.5-flash") ||
     maxTokens !== (profile?.maxResponseTokens || 1000) ||
     maxMessages !== (profile?.maxMessages ?? 8) ||
     responseStyle !== (profile?.responseStyle || "balanced") ||
@@ -128,7 +129,7 @@ export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
           <Cpu className="w-4 h-4" style={{ color: "var(--q-text-secondary)" }} />
           <h3 className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>Yapay Zeka Modeli</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           {AI_MODELS.map((m) => {
             const isActive = aiModel === m.id;
             return (
@@ -150,7 +151,8 @@ export function BotAISettingsTab({ bot, onRefresh }: BotAISettingsTabProps) {
                   </div>
                 )}
                 <p className="text-sm font-bold" style={{ color: "var(--q-text-primary)" }}>{m.name}</p>
-                <p className="text-[11px] mb-3" style={{ color: "var(--q-text-secondary)" }}>{m.desc}</p>
+                <p className="text-[11px]" style={{ color: "var(--q-text-secondary)" }}>{m.desc}</p>
+                <p className="text-[9px] mb-3 text-gray-400">{m.id}</p>
                 <div className="space-y-1.5">
                   {[
                     { label: "Hız", val: m.speed },
