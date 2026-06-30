@@ -19,6 +19,10 @@ export interface EncryptedPayload {
   encrypted_payload: string;
 }
 
+export function hasConfiguredEncryptionKey(): boolean {
+  return Boolean(process.env.INTEGRATION_ENCRYPTION_KEY || process.env.AUTH_SECRET);
+}
+
 export function encryptPayload(provider: string, data: Record<string, any>, version = "1.0"): EncryptedPayload {
   const text = JSON.stringify(data);
   const iv = crypto.randomBytes(IV_LENGTH);

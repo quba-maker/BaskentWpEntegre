@@ -1,7 +1,7 @@
 import { withTenantDB } from "@/lib/core/tenant-db";
 import { logger } from "@/lib/core/logger";
 import { decryptPayload, EncryptedPayload } from "@/lib/core/encryption";
-import { getProviderAliases, canonicalProvider } from "@/lib/core/provider-aliases";
+import { getProviderAliases, canonicalProvider, isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 
 const log = logger.withContext({ module: "CredentialsService" });
 
@@ -49,13 +49,31 @@ export class CredentialsService {
       const providerAliases = getProviderAliases(provider);
       const v2Results = await db.executeSafe({
         text: `
-          SELECT ci.credentials_encrypted, c.identifier, c.id as channel_id, c.provider
+          SELECT ci.credentials_encrypted,
+                 ci.provider as integration_provider,
+                 ci.health_status,
+                 ci.last_sync_at,
+                 c.identifier,
+                 c.id as channel_id,
+                 c.provider,
+                 c.name
           FROM channels c
           JOIN channel_groups cg ON c.group_id = cg.id
           LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
           WHERE cg.tenant_id = $1 
             AND c.provider = ANY($2::text[])
             AND c.status = 'active'
+          ORDER BY
+            CASE
+              WHEN c.provider IN ('360dialog', '360dialog_whatsapp') THEN 0
+              WHEN ci.provider IN ('360dialog', '360dialog_whatsapp') THEN 0
+              WHEN LOWER(COALESCE(c.name, '')) LIKE '%360dialog%' THEN 0
+              WHEN ci.health_status = 'healthy' THEN 1
+              WHEN ci.credentials_encrypted IS NOT NULL THEN 2
+              ELSE 3
+            END,
+            ci.last_sync_at DESC NULLS LAST,
+            c.created_at DESC NULLS LAST
           LIMIT 1
         `,
         values: [tenantId, providerAliases]
@@ -98,15 +116,40 @@ export class CredentialsService {
           }
         }
 
+        if (row.credentials_encrypted && !accessToken) {
+          log.error("[CREDENTIAL_UNREADABLE] V2 channel credentials exist but could not be decrypted/read. Refusing fallback to avoid using a stale outbound key.", undefined, {
+            tenantId,
+            provider,
+            channelId: row.channel_id,
+            channelProvider: row.provider,
+            integrationProvider: row.integration_provider
+          });
+          return {
+            accessToken: null,
+            whatsappPhoneNumberId: null,
+            whatsappBusinessAccountId: null,
+            metaPageId: null,
+            instagramId: null,
+            source: "none",
+            channelId: row.channel_id,
+            provider: row.provider
+          };
+        }
+
         if (accessToken) {
           log.info("[CREDENTIAL_RESOLVED] V2 channel credentials found", {
             tenantId, provider, channelId: row.channel_id, source: "v2_channels"
           });
           
+          const inferredThreeSixty =
+            isThreeSixtyProvider(row.provider) ||
+            isThreeSixtyProvider(row.integration_provider) ||
+            String(row.name || '').toLowerCase().includes('360dialog');
           const isCoexistence = provider === "whatsapp" && process.env.ENABLE_360DIALOG_COEXISTENCE === "true";
-          const finalToken = isCoexistence 
-            ? (process.env.THREE_SIXTY_DIALOG_API_KEY_FALLBACK || accessToken)
-            : accessToken;
+          // A tenant-updated channel key must always win. The environment fallback exists only
+          // for first deploy/rollback when no V2 key is stored; otherwise a stale fallback can
+          // make the UI look updated while outbound 360dialog sends use the wrong key.
+          const finalToken = accessToken;
 
           return {
             accessToken: finalToken,
@@ -116,7 +159,7 @@ export class CredentialsService {
             instagramId: provider === "instagram" ? row.identifier : null,
             source: "v2_channels",
             channelId: row.channel_id,
-            provider: isCoexistence ? "360dialog" : row.provider
+            provider: (isCoexistence || inferredThreeSixty) ? "360dialog" : row.provider
           };
         }
       }

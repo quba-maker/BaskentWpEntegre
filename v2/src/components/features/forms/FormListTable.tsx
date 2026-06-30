@@ -5,6 +5,8 @@ import { ChevronDown, ChevronRight, MessageCircle, Bot, StickyNote, CheckCircle2
 import { getBestDate, getDisplayName, getAllPhones, getFormCountry, getStageInfo, STAGES } from "./utils";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 
+const BULK_SELECTION_LIMIT = 50;
+
 // Simple outside click hook for dropdowns
 function useDropdown() {
   const [isOpen, setIsOpen] = useState(false);
@@ -67,7 +69,7 @@ export function FormListTable({
       const selectableIds = forms
         .filter((f: any) => f.firstContactStatus === 'needs_greeting' && !f.noReplyFollowup?.is_no_reply_eligible)
         .map((f: any) => f.id)
-        .slice(0, 10);
+        .slice(0, BULK_SELECTION_LIMIT);
       setSelectedLeadIds(selectableIds);
     } else {
       setSelectedLeadIds([]);
@@ -111,7 +113,7 @@ export function FormListTable({
                 <input 
                   type="checkbox"
                   className="w-4 h-4 rounded border-gray-300 text-[#007AFF] focus:ring-[#007AFF] cursor-pointer"
-                  checked={forms.length > 0 && selectedLeadIds.length > 0 && selectedLeadIds.length === Math.min(10, forms.filter((f:any) => f.firstContactStatus === 'needs_greeting' && !f.noReplyFollowup?.is_no_reply_eligible).length)}
+                  checked={forms.length > 0 && selectedLeadIds.length > 0 && selectedLeadIds.length === Math.min(BULK_SELECTION_LIMIT, forms.filter((f:any) => f.firstContactStatus === 'needs_greeting' && !f.noReplyFollowup?.is_no_reply_eligible).length)}
                   onChange={(e) => handleSelectAll(e.target.checked)}
                 />
               </th>
@@ -208,8 +210,8 @@ export function FormListTable({
                       checked={selectedLeadIds.includes(form.id)}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          if (selectedLeadIds.length >= 10) {
-                            alert("En fazla 10 kişi seçebilirsiniz.");
+                          if (selectedLeadIds.length >= BULK_SELECTION_LIMIT) {
+                            alert(`En fazla ${BULK_SELECTION_LIMIT} kişi seçebilirsiniz.`);
                             return;
                           }
                           setSelectedLeadIds([...selectedLeadIds, form.id]);

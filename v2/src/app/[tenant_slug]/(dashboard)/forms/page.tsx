@@ -11,6 +11,7 @@ import { FormStatsTabs } from "@/components/features/forms/FormStatsTabs";
 import { FormListTable } from "@/components/features/forms/FormListTable";
 import { FormDetailModal } from "@/components/features/forms/FormDetailModal";
 import { BulkQueueModal } from "@/components/features/forms/BulkQueueModal";
+import { BulkTemplateSendModal } from "@/components/features/forms/BulkTemplateSendModal";
 import { getDisplayName, getAllPhones } from "@/components/features/forms/utils";
 import { BulkAutopilotDecisionBar } from "@/components/features/forms/BulkAutopilotDecisionBar";
 import { AutoGreetingSettingsPanel } from "@/components/features/settings/AutoGreetingSettingsPanel";
@@ -20,6 +21,7 @@ import { GreetingAutomationDecision } from "@/lib/services/automation/first-cont
 import { updateLeadStage, updateLeadNotes } from "@/app/actions/forms";
 import { 
   sendFormGreetingTemplateAction, 
+  getGreetingTemplates,
   logWhatsappAppOpenedForGreetingAction, 
   saveGreetingDraftInternal, 
   logCallReached, 
@@ -140,6 +142,12 @@ export default function FormsPage() {
   const [currentQueueIndex, setCurrentQueueIndex] = useState(0);
   const [queueItems, setQueueItems] = useState<any[]>([]);
   const [isPreparingQueue, setIsPreparingQueue] = useState(false);
+  const [isBulkTemplateModalOpen, setIsBulkTemplateModalOpen] = useState(false);
+  const [bulkTemplates, setBulkTemplates] = useState<any[]>([]);
+  const [bulkTemplateId, setBulkTemplateId] = useState("");
+  const [bulkTemplatesLoading, setBulkTemplatesLoading] = useState(false);
+  const [bulkTemplateSending, setBulkTemplateSending] = useState(false);
+  const [bulkTemplateResults, setBulkTemplateResults] = useState<Record<string, { status: "pending" | "sent" | "failed" | "skipped"; message?: string }>>({});
 
   const normalizePhoneForWaMe = (p: string) => {
     if (!p) return "";
@@ -147,6 +155,20 @@ export default function FormsPage() {
     if (c.startsWith("05") && c.length === 11) return "90" + c.slice(1);
     if (c.startsWith("5") && c.length === 10) return "90" + c;
     return c;
+  };
+
+  const selectedBulkForms = selectedLeadIds
+    .map(id => forms.find((f: any) => f.id === id))
+    .filter(Boolean) as any[];
+
+  const renderBulkTemplateForForm = (template: any, form: any) => {
+    const rd = form?.raw_data || {};
+    const name = form?.current_display_name || form?.patient_name || rd.full_name || rd["full name"] || "";
+    return String(template?.body || "")
+      .replace(/\{\{patient_name\}\}/g, name)
+      .replace(/\{\{name\}\}/g, name)
+      .replace(/\{\{tenant_name\}\}/g, "Başkent Üniversitesi Konya Hastanesi")
+      .trim();
   };
 
   const handleMessageClick = (form: any, e?: React.MouseEvent) => {
@@ -418,6 +440,70 @@ export default function FormsPage() {
     }
   };
 
+  const handleBulkTemplateStart = async () => {
+    if (selectedLeadIds.length === 0) return;
+    setIsBulkTemplateModalOpen(true);
+    setBulkTemplateResults({});
+    setBulkTemplatesLoading(true);
+    try {
+      const templates = await getGreetingTemplates();
+      setBulkTemplates(Array.isArray(templates) ? templates : []);
+      const firstTemplate = Array.isArray(templates) ? templates[0] : null;
+      setBulkTemplateId(firstTemplate?.id || "");
+    } catch (err) {
+      console.error(err);
+      setBulkTemplates([]);
+      setBulkTemplateId("");
+    } finally {
+      setBulkTemplatesLoading(false);
+    }
+  };
+
+  const handleBulkTemplateSend = async () => {
+    if (!bulkTemplateId || selectedBulkForms.length === 0) return;
+    const template = bulkTemplates.find((tpl: any) => tpl.id === bulkTemplateId);
+    if (!template) return;
+
+    // eslint-disable-next-line quba/no-native-dialog
+    if (!window.confirm(`${selectedBulkForms.length} kişiye onaylı WhatsApp şablonu sırayla gönderilecek. Emin misiniz?`)) {
+      return;
+    }
+
+    setBulkTemplateSending(true);
+    const initialResults: Record<string, { status: "pending" | "sent" | "failed" | "skipped"; message?: string }> = {};
+    selectedBulkForms.forEach((form: any) => {
+      initialResults[form.id] = { status: "pending" };
+    });
+    setBulkTemplateResults(initialResults);
+
+    for (const form of selectedBulkForms) {
+      const renderedText = renderBulkTemplateForForm(template, form);
+      try {
+        const result = await sendFormGreetingTemplateAction(
+          form.id,
+          template.id,
+          template.name,
+          template.language || "tr",
+          renderedText
+        );
+        setBulkTemplateResults(prev => ({
+          ...prev,
+          [form.id]: result.success
+            ? { status: "sent" }
+            : { status: "failed", message: result.error || "Gönderilemedi" }
+        }));
+      } catch (err: any) {
+        setBulkTemplateResults(prev => ({
+          ...prev,
+          [form.id]: { status: "failed", message: err?.message || "Gönderilemedi" }
+        }));
+      }
+    }
+
+    setBulkTemplateSending(false);
+    mutate();
+  };
+
   const handleOpenNextInQueue = async (action: 'open' | 'skip') => {
     if (currentQueueIndex >= queueItems.length) return;
     
@@ -596,6 +682,25 @@ export default function FormsPage() {
         }}
         templates={detailState.templates}
         onUpdateDraftText={handleUpdateQueueItemDraftText}
+      />
+
+      <BulkTemplateSendModal
+        isOpen={isBulkTemplateModalOpen}
+        onClose={() => {
+          if (!bulkTemplateSending) {
+            setIsBulkTemplateModalOpen(false);
+            setSelectedLeadIds([]);
+            mutate();
+          }
+        }}
+        selectedForms={selectedBulkForms}
+        templates={bulkTemplates}
+        selectedTemplateId={bulkTemplateId}
+        onTemplateSelect={setBulkTemplateId}
+        onSend={handleBulkTemplateSend}
+        isLoadingTemplates={bulkTemplatesLoading}
+        isSending={bulkTemplateSending}
+        results={bulkTemplateResults}
       />
 
       {/* Sync progress centered modal notification */}
@@ -815,6 +920,7 @@ export default function FormsPage() {
         decisions={selectedDecisions}
         onClearSelection={() => setSelectedLeadIds([])}
         onPrepareDrafts={handleBulkQueueStart}
+        onSendTemplates={handleBulkTemplateStart}
         onFilterTemplateRequired={() => setDecisionFilter('template_required')}
         onFilterInboxOpen={() => setDecisionFilter('inbox_open')}
       />

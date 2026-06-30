@@ -3,6 +3,11 @@ import { logger } from "@/lib/core/logger";
 export class ThreeSixtyDialogService {
   private static log = logger.withContext({ module: 'ThreeSixtyDialog' });
 
+  private static normalizeRecipient(to: string): string {
+    const digits = String(to || "").replace(/\D/g, "");
+    return digits.startsWith("00") ? digits.slice(2) : digits;
+  }
+
   /**
    * Sends an outgoing text message to a customer via the 360dialog WhatsApp Business API.
    * 
@@ -42,7 +47,7 @@ export class ThreeSixtyDialogService {
 
         bodyData = {
           messaging_product: "whatsapp",
-          to: to,
+          to: this.normalizeRecipient(to),
           recipient_type: "individual",
           type: media.type,
           [media.type]: mediaPayload
@@ -50,7 +55,7 @@ export class ThreeSixtyDialogService {
       } else {
         bodyData = {
           messaging_product: "whatsapp",
-          to: to,
+          to: this.normalizeRecipient(to),
           recipient_type: "individual",
           type: "text",
           text: { body: content }
@@ -108,7 +113,8 @@ export class ThreeSixtyDialogService {
     languageCode: string = "tr",
     components: any[] = []
   ): Promise<{ success: boolean; providerMessageId?: string }> {
-    const url = "https://waba-v2.360dialog.io/messages";
+    const standardUrl = "https://waba-v2.360dialog.io/messages";
+    const marketingUrl = "https://waba-v2.360dialog.io/marketing_messages";
     
     if (!apiKey) {
       throw new Error("360dialog API error: D360-API-KEY is missing.");
@@ -117,7 +123,7 @@ export class ThreeSixtyDialogService {
     try {
       const bodyData = {
         messaging_product: "whatsapp",
-        to: to,
+        to: this.normalizeRecipient(to),
         recipient_type: "individual",
         type: "template",
         template: {
@@ -128,8 +134,13 @@ export class ThreeSixtyDialogService {
           ...(components.length > 0 ? { components } : {})
         }
       };
+      const marketingBodyData = {
+        ...bodyData,
+        message_activity_sharing: true,
+        product_policy: "cloud_api_fallback"
+      };
 
-      const response = await fetch(url, {
+      const sendStandardTemplate = () => fetch(standardUrl, {
         method: "POST",
         headers: {
           "D360-API-KEY": apiKey.trim(),
@@ -137,6 +148,53 @@ export class ThreeSixtyDialogService {
         },
         body: JSON.stringify(bodyData)
       });
+
+      const sendMarketingTemplate = (apiKeyHeader: string) => fetch(marketingUrl, {
+        method: "POST",
+        headers: {
+          "D360-API-KEY": apiKeyHeader,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(marketingBodyData)
+      });
+
+      let response = await sendStandardTemplate();
+      let endpoint: "messages" | "marketing_messages" = "messages";
+      let standardErr = "";
+
+      if (!response.ok && process.env.ENABLE_360DIALOG_MARKETING_TEMPLATE_FALLBACK === "true") {
+        standardErr = await response.text();
+        this.log.warn("360dialog standard template endpoint rejected message, trying marketing endpoint", {
+          to: this.normalizeRecipient(to),
+          templateName,
+          standardStatus: response.status
+        });
+
+        response = await sendMarketingTemplate(apiKey.trim());
+        endpoint = "marketing_messages";
+
+        if (!response.ok) {
+          const rawMarketingStatus = response.status;
+          const rawMarketingErr = await response.text();
+          this.log.warn("360dialog marketing endpoint rejected raw API key, trying Bearer header", {
+            to: this.normalizeRecipient(to),
+            templateName,
+            marketingStatus: rawMarketingStatus
+          });
+
+          response = await sendMarketingTemplate(`Bearer ${apiKey.trim()}`);
+          endpoint = "marketing_messages";
+
+          if (!response.ok) {
+            const bearerMarketingErr = await response.text();
+            throw new Error(
+              `360dialog API HTTP ${response.status} Error: ${bearerMarketingErr}` +
+              ` | marketing raw failed (${rawMarketingStatus}): ${rawMarketingErr}` +
+              ` | standard /messages failed: ${standardErr}`
+            );
+          }
+        }
+      }
 
       if (!response.ok) {
         const err = await response.text();
@@ -149,6 +207,7 @@ export class ThreeSixtyDialogService {
       this.log.info("Template sent successfully via 360dialog", { 
         to, 
         templateName,
+        endpoint,
         hasMessageId: !!providerMessageId 
       });
 

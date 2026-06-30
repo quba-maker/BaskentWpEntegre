@@ -1,6 +1,7 @@
 import type { TenantBrain } from '../tenant-brain';
 import type { QubaBrainProfile } from './schema';
 import { DoctorDirectoryResolver, type Doctor } from '../../services/ai/doctor-directory-resolver';
+import type { BrainV2ShadowPlan } from '../../services/ai/brain-v2-shadow-planner';
 
 export type QubaV2ContactMode =
   | 'form_lead'
@@ -271,7 +272,7 @@ function buildSummary(contactMode: QubaV2ContactMode, signals: QubaV2GateSignal[
   return `${modeLabel}; V2 bağımsız kapı sinyalleri: ${intents}; dry-run aksiyon: ${actionText}.`;
 }
 
-function toLegacyShadowPlan(result: QubaV2GateResult) {
+function toLegacyShadowPlan(result: QubaV2GateResult): BrainV2ShadowPlan {
   return {
     version: 'brain_v2_shadow_v1',
     mode: 'shadow',
@@ -436,7 +437,7 @@ export class QubaV2GateEngine {
     return lines.join('\n');
   }
 
-  public static toLegacyShadowPlan(result: QubaV2GateResult) {
+  public static toLegacyShadowPlan(result: QubaV2GateResult): BrainV2ShadowPlan {
     return toLegacyShadowPlan(result);
   }
 }

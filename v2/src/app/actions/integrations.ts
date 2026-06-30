@@ -1,9 +1,9 @@
 "use server";
 
 import { withActionGuard } from "@/lib/core/action-guard";
-import { canonicalProvider, isValidMessengerIdentifier } from "@/lib/core/provider-aliases";
+import { canonicalProvider, isThreeSixtyProvider, isValidMessengerIdentifier } from "@/lib/core/provider-aliases";
 import { withTenantDB } from "@/lib/core/tenant-db";
-import { encryptPayload, decryptPayload, EncryptedPayload } from "@/lib/core/encryption";
+import { encryptPayload, decryptPayload, EncryptedPayload, hasConfiguredEncryptionKey } from "@/lib/core/encryption";
 import crypto from "crypto";
 
 // ==========================================
@@ -293,6 +293,7 @@ export async function getIntegrationHealth() {
       const dbChannels = await ctx.db.executeSafe({
         text: `SELECT 
                  c.id, c.provider, c.identifier, c.name, c.status as channel_status,
+                 ci.provider as integration_provider,
                  ci.health_status, ci.credentials_encrypted, ci.last_sync_at,
                  cg.name as group_name,
                  COALESCE(cg.display_name, cg.name) as bot_name,
@@ -310,6 +311,9 @@ export async function getIntegrationHealth() {
         id: string;
         name: string;
         provider: string;
+        rawProvider?: string | null;
+        integrationProvider?: string | null;
+        transportProvider?: string | null;
         group: string;
         status: 'connected' | 'disconnected' | 'warning' | 'error';
         detail: string;
@@ -325,6 +329,12 @@ export async function getIntegrationHealth() {
         let status: 'connected' | 'disconnected' | 'warning' | 'error' = 'warning';
         let detail = 'Bağlantı bekleniyor...';
         const displayProvider = canonicalProvider(row.provider);
+        const transportProvider =
+          isThreeSixtyProvider(row.provider) ||
+          isThreeSixtyProvider(row.integration_provider) ||
+          String(row.name || '').toLowerCase().includes('360dialog')
+            ? '360dialog'
+            : displayProvider;
 
         // ── Real Health Evaluation ──
         const hasCreds = !!row.credentials_encrypted;
@@ -349,6 +359,11 @@ export async function getIntegrationHealth() {
         else if (row.health_status === 'pending') {
           status = 'warning';
           detail = `Bağlandı — test/webhook bekleniyor (${row.identifier})`;
+        }
+        // 4b. Credentials were updated and need a real send/webhook to become healthy
+        else if (row.health_status === 'needs_check') {
+          status = 'warning';
+          detail = `Key kaydedildi — test gönderimi bekleniyor (${row.identifier})`;
         }
         // 5. Healthy but no last_sync_at
         else if (row.health_status === 'healthy' && !hasLastSync) {
@@ -395,6 +410,9 @@ export async function getIntegrationHealth() {
           id: row.id,
           name: row.name || displayProvider,
           provider: displayProvider,
+          rawProvider: row.provider,
+          integrationProvider: row.integration_provider || null,
+          transportProvider,
           group: row.group_name,
           botName: row.bot_name || row.group_name,
           botId: row.bot_id,
@@ -540,13 +558,14 @@ export async function connectWhatsAppChannel(input: {
       const channelId = ch[0].id;
 
       // Insert credentials (tenant_id bound via channel → group)
-      const encrypted = encryptPayload('whatsapp', { accessToken, wabaId: wabaId || '', phoneNumberId: normalizedId });
+      const integrationProvider = String(name || '').toLowerCase().includes('360dialog') ? '360dialog' : 'whatsapp';
+      const encrypted = encryptPayload(integrationProvider, { accessToken, wabaId: wabaId || '', phoneNumberId: normalizedId });
       await ctx.db.executeSafe({
         text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
-               SELECT $1, 'whatsapp', $2, 'pending'
+               SELECT $1, $2, $3, 'pending'
                FROM channels c JOIN channel_groups cg ON c.group_id = cg.id
-               WHERE c.id = $1 AND cg.tenant_id = $3`,
-        values: [channelId, JSON.stringify(encrypted), ctx.tenantId]
+               WHERE c.id = $1 AND cg.tenant_id = $4`,
+        values: [channelId, integrationProvider, JSON.stringify(encrypted), ctx.tenantId]
       });
 
       // Create prompt binding to bot's active prompt
@@ -898,9 +917,14 @@ export async function updateChannelCredentials(
   return withActionGuard(
     { actionName: 'updateChannelCredentials', roles: ['owner', 'admin'] },
     async (ctx) => {
+      if (!hasConfiguredEncryptionKey()) {
+        throw new Error('Güvenli şifreleme anahtarı tanımlı değil. Canlı kanal API key bilgisini bu ortamdan güncellemeyin; production ortamında güncelleyin veya local ortama aynı INTEGRATION_ENCRYPTION_KEY değerini ekleyin.');
+      }
+
       // 1. Fetch existing channel & integration to verify ownership & existing identifier
       const dbChannel = await ctx.db.executeSafe({
-        text: `SELECT c.id, c.provider, c.identifier, ci.credentials_encrypted 
+        text: `SELECT c.id, c.provider, c.identifier, c.name,
+                      ci.provider as integration_provider, ci.credentials_encrypted
                FROM channels c
                JOIN channel_groups cg ON c.group_id = cg.id
                LEFT JOIN channel_integrations ci ON ci.channel_id = c.id
@@ -914,6 +938,7 @@ export async function updateChannelCredentials(
 
       const channel = dbChannel[0];
       const provider = channel.provider;
+      const requestedTransportProvider = updatedFields.transportProvider === '360dialog' ? '360dialog' : null;
 
       // Decrypt existing credentials if any
       let existingCreds: Record<string, any> = {};
@@ -956,13 +981,32 @@ export async function updateChannelCredentials(
       }
 
       // Encrypt and save back
-      const encrypted = encryptPayload(providerKey, newCreds);
+      const integrationProvider =
+        requestedTransportProvider ||
+        (isThreeSixtyProvider(provider) ||
+        isThreeSixtyProvider(channel.integration_provider) ||
+        String(channel.name || '').toLowerCase().includes('360dialog')
+          ? '360dialog'
+          : providerKey);
+      const encrypted = encryptPayload(integrationProvider, newCreds);
 
       await ctx.db.executeSafe({
-        text: `UPDATE channel_integrations 
-               SET credentials_encrypted = $1, health_status = 'needs_check', updated_at = NOW()
-               WHERE channel_id = $2`,
-        values: [JSON.stringify(encrypted), channelId]
+        text: `DELETE FROM channel_integrations ci
+               USING channels c
+               JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE ci.channel_id = c.id
+                 AND ci.channel_id = $1
+                 AND cg.tenant_id = $2`,
+        values: [channelId, ctx.tenantId]
+      });
+
+      await ctx.db.executeSafe({
+        text: `INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)
+               SELECT $1, $2, $3, 'needs_check'
+               FROM channels c
+               JOIN channel_groups cg ON c.group_id = cg.id
+               WHERE c.id = $1 AND cg.tenant_id = $4`,
+        values: [channelId, integrationProvider, JSON.stringify(encrypted), ctx.tenantId]
       });
 
       return true;
@@ -972,5 +1016,3 @@ export async function updateChannelCredentials(
     return { success: true };
   });
 }
-
-

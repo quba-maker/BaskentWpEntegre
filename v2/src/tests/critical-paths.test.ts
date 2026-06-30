@@ -223,6 +223,8 @@ const mockDbCalls: any[] = [];
         return [{
           id: 'wa-channel-id',
           provider: 'whatsapp',
+          name: 'Başkent 360dialog Live',
+          integration_provider: '360dialog',
           identifier: 'wa-identifier',
           credentials_encrypted: JSON.stringify(encrypted)
         }];
@@ -551,13 +553,17 @@ test("CREDENTIAL UPDATE: başarılı güncelleme sonrası identifier değişmez 
   const res = await updateChannelCredentials('wa-channel-id', { accessToken: 'new-token', wabaId: 'new-waba-id' });
   assert(res.success === true, "Should succeed updating own tenant channel credentials");
 
-  // Find update call with whitespace normalized
-  const updateCall = mockDbCalls.find(c => c.text.replace(/\s+/g, ' ').includes("UPDATE channel_integrations SET"));
-  assert(!!updateCall, "Update SQL statement should be executed");
-  assert(updateCall.text.replace(/\s+/g, ' ').includes("health_status = 'needs_check'"), "health_status must be reset to needs_check");
+  // Credentials are replaced with a clean integration row so the transport provider cannot stay stale.
+  const deleteCall = mockDbCalls.find(c => c.text.replace(/\s+/g, ' ').includes("DELETE FROM channel_integrations"));
+  assert(!!deleteCall, "Existing integration row should be deleted before reinserting fresh credentials");
+
+  const insertCall = mockDbCalls.find(c => c.text.replace(/\s+/g, ' ').includes("INSERT INTO channel_integrations (channel_id, provider, credentials_encrypted, health_status)"));
+  assert(!!insertCall, "Fresh integration insert should be executed");
+  assert(insertCall.vals[0] === 'wa-channel-id', "Channel id must be preserved on credential replacement");
+  assert(insertCall.vals[1] === '360dialog', "360dialog channels must keep the 360dialog integration provider");
 
   // Verify identifier is preserved
-  const encryptedPayload = JSON.parse(updateCall.vals[0]);
+  const encryptedPayload = JSON.parse(insertCall.vals[2]);
   const { decryptPayload } = require("../lib/core/encryption");
   const decrypted = decryptPayload(encryptedPayload);
   assert(decrypted.phoneNumberId === 'wa-identifier', "Identifier must be preserved after credential update");

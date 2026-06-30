@@ -8,6 +8,7 @@ interface BulkAutopilotDecisionBarProps {
   decisions: GreetingAutomationDecision[];
   onClearSelection: () => void;
   onPrepareDrafts: () => void;
+  onSendTemplates: () => void;
   onFilterTemplateRequired: () => void;
   onFilterInboxOpen: () => void;
 }
@@ -16,6 +17,7 @@ export function BulkAutopilotDecisionBar({
   decisions,
   onClearSelection,
   onPrepareDrafts,
+  onSendTemplates,
   onFilterTemplateRequired,
   onFilterInboxOpen
 }: BulkAutopilotDecisionBarProps) {
@@ -129,7 +131,13 @@ export function BulkAutopilotDecisionBar({
               onClick={onPrepareDrafts}
               className="flex items-center gap-1.5 px-4 py-2 bg-[#007AFF] hover:bg-[#0056b3] text-white rounded-xl text-xs font-bold transition-all active:scale-[0.98] shadow-md shadow-[#007AFF]/25 cursor-pointer"
             >
-              Taslakları Hazırla <ArrowRight className="w-3.5 h-3.5" />
+              Taslak Hazırla <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onSendTemplates}
+              className="flex items-center gap-1.5 px-4 py-2 bg-[#34C759] hover:bg-[#248A3D] text-white rounded-xl text-xs font-bold transition-all active:scale-[0.98] shadow-md shadow-[#34C759]/25 cursor-pointer"
+            >
+              Hazır Şablonla Gönder <FileText className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

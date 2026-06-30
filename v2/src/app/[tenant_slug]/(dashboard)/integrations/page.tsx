@@ -28,6 +28,7 @@ import { PageLoader } from "@/components/ui/shared-states";
 // ==========================================
 const PROVIDER_META: Record<string, { label: string; icon: any; color: string }> = {
   whatsapp: { label: "WhatsApp", icon: MessageCircle, color: "#25D366" },
+  "360dialog": { label: "360dialog WhatsApp", icon: MessageCircle, color: "#0B5C5A" },
   instagram: { label: "Instagram", icon: Instagram, color: "#E1306C" },
   meta_instagram: { label: "Instagram", icon: Instagram, color: "#E1306C" },
   messenger: { label: "Messenger", icon: Facebook, color: "#0084FF" },
@@ -37,6 +38,15 @@ const PROVIDER_META: Record<string, { label: string; icon: any; color: string }>
 
 function getProviderMeta(provider: string) {
   return PROVIDER_META[provider] || { label: provider, icon: Webhook, color: "#6366f1" };
+}
+
+function is360DialogChannel(channel: any): boolean {
+  return (
+    channel?.transportProvider === "360dialog" ||
+    channel?.rawProvider === "360dialog" ||
+    channel?.integrationProvider === "360dialog" ||
+    String(channel?.name || "").toLowerCase().includes("360dialog")
+  );
 }
 
 // ==========================================
@@ -77,7 +87,8 @@ function ChannelRow({
   onUpdateCredentials: (channel: any) => void;
   onRefresh: () => void;
 }) {
-  const meta = getProviderMeta(channel.provider);
+  const is360 = is360DialogChannel(channel);
+  const meta = getProviderMeta(is360 ? "360dialog" : channel.provider);
   const Icon = meta.icon;
   const [assigning, setAssigning] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -111,7 +122,9 @@ function ChannelRow({
           </div>
           <div className="min-w-0">
             <p className="text-[13px] font-semibold truncate" style={{ color: "var(--q-text-primary)" }}>{channel.name}</p>
-            <p className="text-[10px] font-mono truncate" style={{ color: "var(--q-text-secondary)" }}>{channel.id.slice(0, 8)} • {channel.provider}</p>
+            <p className="text-[10px] font-mono truncate" style={{ color: "var(--q-text-secondary)" }}>
+              {channel.id.slice(0, 8)} • {is360 ? "360dialog" : channel.provider}
+            </p>
           </div>
         </div>
 
@@ -436,7 +449,8 @@ function CredentialUpdateModal({ channel, onClose, onSuccess }: CredentialUpdate
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const displayProvider = channel.provider === "meta_instagram" ? "instagram" : channel.provider;
+  const is360 = is360DialogChannel(channel);
+  const displayProvider = is360 ? "360dialog" : channel.provider === "meta_instagram" ? "instagram" : channel.provider;
 
   async function handleSave() {
     setError("");
@@ -447,7 +461,10 @@ function CredentialUpdateModal({ channel, onClose, onSuccess }: CredentialUpdate
     setSaving(true);
     
     const fields: Record<string, any> = {};
-    if (displayProvider === "whatsapp") {
+    if (displayProvider === "360dialog") {
+      fields.accessToken = token.trim();
+      fields.transportProvider = "360dialog";
+    } else if (displayProvider === "whatsapp") {
       fields.accessToken = token.trim();
       if (wabaId.trim()) fields.wabaId = wabaId.trim();
     } else if (displayProvider === "instagram") {
@@ -491,7 +508,7 @@ function CredentialUpdateModal({ channel, onClose, onSuccess }: CredentialUpdate
         </div>
 
         <div className="p-4 bg-amber-50/50 border border-amber-100 rounded-xl mb-4 text-[11px] text-amber-800 leading-relaxed">
-          ℹ️ Mevcut kanal kimlikleri (ID'ler) değiştirilemez. Sadece Meta erişim token değerlerini güvenli bir şekilde güncelleyebilirsiniz. Güncelleme sonrası bağlantı durumu kontrol edilecektir.
+          ℹ️ Mevcut kanal kimlikleri (ID'ler) değiştirilemez. Sadece bu kanalın gönderim anahtarını güvenli şekilde güncelleyebilirsiniz. Güncelleme sonrası bağlantı durumu kontrol edilecektir.
         </div>
 
         <div className="space-y-4">
@@ -500,19 +517,23 @@ function CredentialUpdateModal({ channel, onClose, onSuccess }: CredentialUpdate
               Kanal
             </label>
             <div className="px-3 py-2 bg-gray-50 border rounded-xl text-sm font-semibold text-gray-700">
-              {channel.name} ({displayProvider})
+              {channel.name} ({displayProvider === "360dialog" ? "360dialog" : displayProvider})
             </div>
           </div>
 
           <div>
             <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1">
-              {displayProvider === "messenger" ? "Yeni Page Access Token" : "Yeni Meta Access Token"}
+              {displayProvider === "360dialog"
+                ? "Yeni 360dialog API Key"
+                : displayProvider === "messenger"
+                  ? "Yeni Page Access Token"
+                  : "Yeni Meta Access Token"}
             </label>
             <input
               type="password"
               value={token}
               onChange={e => setToken(e.target.value)}
-              placeholder="Yeni erişim anahtarını yapıştırın"
+              placeholder={displayProvider === "360dialog" ? "360dialog API Key" : "Yeni erişim anahtarını yapıştırın"}
               autoComplete="new-password"
               className="w-full px-3 py-2 rounded-xl border text-sm font-mono focus:ring-2 focus:ring-indigo-100 outline-none"
               style={{ borderColor: "var(--q-border-default)" }}

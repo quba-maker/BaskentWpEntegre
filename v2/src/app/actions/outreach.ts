@@ -1227,7 +1227,16 @@ export async function sendFormGreetingTemplateAction(
         const safeErrorMsg = (err instanceof Error ? err.message : String(err))
           .replace(new RegExp(creds.accessToken || 'NON_EXISTENT_KEY', 'g'), '[SCRUBBED_API_KEY]');
           
-        if (safeErrorMsg.includes('lack of payment on client side')) {
+        const normalizedProviderError = safeErrorMsg.toLowerCase();
+
+        if (normalizedProviderError.includes('invalid api token') || normalizedProviderError.includes('http 401')) {
+          return {
+            success: false,
+            error: `360dialog bu API key'i kabul etmedi (HTTP 401). Bu hata şablon metninden önce oluşur: Entegrasyonlar'daki Başkent 360dialog Live kanalına, 360dialog panelindeki aynı WhatsApp kanalının Client/API Key değerini girin. Şablon: ${templateName} · Dil: ${languageCode || 'tr'}`
+          };
+        }
+
+        if (normalizedProviderError.includes('lack of payment on client side')) {
           return { success: false, error: '360dialog API gönderimi ödeme/billing nedeniyle reddetti. Dilerseniz ücretsiz manuel seçenekle WhatsApp uygulamasında açabilirsiniz.' };
         }
         
@@ -1236,6 +1245,18 @@ export async function sendFormGreetingTemplateAction(
 
       if (!sendSuccess) {
         return { success: false, error: "WhatsApp sağlayıcı şablon gönderimi başarısız oldu." };
+      }
+
+      if (creds.channelId) {
+        await ctx.db.executeSafe({
+          text: `/* sendFormGreetingTemplateAction:markChannelHealthy */
+                 UPDATE channel_integrations
+                 SET health_status = 'healthy',
+                     last_sync_at = NOW(),
+                     updated_at = NOW()
+                 WHERE channel_id = $1`,
+          values: [creds.channelId]
+        });
       }
 
       // 5. Ensure conversation/opportunity exist in compliance with FormLeadActivationService
