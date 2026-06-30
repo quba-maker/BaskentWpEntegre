@@ -83,6 +83,13 @@ export interface AIResponse {
   finishReason?: string;
 }
 
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 /**
  * 🎼 AI Orchestrator (Phase 5B/5C - Decision Engine, Runtime & Audit)
  * Abstract provider wrapper + Tool Execution loop + Observability.
@@ -90,7 +97,16 @@ export interface AIResponse {
 export class AIOrchestrator {
   private log = logger.withContext({ module: 'AIOrchestrator' });
   private geminiCircuit = new CircuitBreaker('gemini', { failureThreshold: 5, resetTimeoutMs: 180000 });
-  private costLimiter = new CostLimiter({ maxRequests: 200, windowSeconds: 3600 }); // Saatte 200 İstek
+  private liveCostLimiter = new CostLimiter({
+    maxRequests: readPositiveIntEnv('AI_LIVE_HOURLY_REQUEST_LIMIT', 200),
+    windowSeconds: 3600,
+    namespace: 'live'
+  });
+  private sandboxCostLimiter = new CostLimiter({
+    maxRequests: readPositiveIntEnv('AI_SANDBOX_HOURLY_REQUEST_LIMIT', 2000),
+    windowSeconds: 3600,
+    namespace: 'sandbox'
+  });
 
   public async generateResponse(
     initialMessages: ChatMessage[],
@@ -217,7 +233,7 @@ export class AIOrchestrator {
 
     try {
       if (tenantId !== 'unknown') {
-        await this.costLimiter.consume(tenantId);
+        await (isSandbox ? this.sandboxCostLimiter : this.liveCostLimiter).consume(tenantId);
       }
 
       let loopCount = 0;

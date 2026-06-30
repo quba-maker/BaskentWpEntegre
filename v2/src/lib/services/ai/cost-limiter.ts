@@ -5,6 +5,7 @@ import { redis } from "./circuit-breaker";
 export interface CostLimiterOptions {
   maxRequests: number; // e.g. 50 requests
   windowSeconds: number; // e.g. 3600 (1 hour)
+  namespace?: 'live' | 'sandbox' | string;
 }
 
 /**
@@ -19,7 +20,8 @@ export class CostLimiter {
   ) {}
 
   private getRedisKey(tenantId: string) {
-    return `tenant:${tenantId}:cost_limiter:ai_requests:${this.options.windowSeconds}:requests`;
+    const namespace = this.options.namespace || 'live';
+    return `tenant:${tenantId}:cost_limiter:${namespace}:ai_requests:${this.options.windowSeconds}:requests`;
   }
 
   /**
@@ -40,19 +42,20 @@ export class CostLimiter {
       }
 
       if (requests > this.options.maxRequests) {
-        this.log.warn(`[COST_LIMIT_EXCEEDED] Tenant ${tenantId} exceeded usage limit (${this.options.maxRequests} req / ${this.options.windowSeconds}s).`);
+        const namespace = this.options.namespace || 'live';
+        this.log.warn(`[COST_LIMIT_EXCEEDED] Tenant ${tenantId} exceeded ${namespace} usage limit (${this.options.maxRequests} req / ${this.options.windowSeconds}s).`);
         
         telemetry.track(
           'AI_COST_THRESHOLD',
           'warn',
           {
             severity: 'high',
-            reason: `Usage limit exceeded: ${requests} > ${this.options.maxRequests}`,
+            reason: `${namespace} usage limit exceeded: ${requests} > ${this.options.maxRequests}`,
             tenantId
           }
         );
 
-        throw new Error(`COST_LIMIT_EXCEEDED: Tenant ${tenantId}`);
+        throw new Error(`COST_LIMIT_EXCEEDED: Tenant ${tenantId} (${namespace})`);
       }
     } catch (e: any) {
       if (e.message.startsWith('COST_LIMIT_EXCEEDED')) throw e;
