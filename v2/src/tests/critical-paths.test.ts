@@ -15355,6 +15355,33 @@ test("Başkent v91 T146: relation auditor preserves healthy V3 form replies", ()
   assert(!result.text.includes("Sizin Almanya’da, babanızın Türkiye’de olduğunu ayrıca not ediyorum"), result.text);
 });
 
+test("Başkent v91 T149: form sandbox simulates approved template already sent", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const botActionsPath = path.join(process.cwd(), "src/app/actions/bot.ts");
+  const botActionsContent = fs.readFileSync(botActionsPath, "utf8");
+
+  assert(botActionsContent.includes("tr_form_karsilama_v1"), "Formlu test yeni onaylı şablon adını kullanmalı");
+  assert(botActionsContent.includes("form_greeted_at: createdAt"), "Formlu test ilk karşılama gönderilmiş metadata'sı taşımalı");
+  assert(botActionsContent.includes("greetingSent: true"), "Formlu test outreachContext.greetingSent=true ile başlamalı");
+  assert(botActionsContent.includes("contactMode: 'system_outbound_greeting'"), "Formlu test hasta dönüşü modunda çalışmalı");
+  assert(botActionsContent.includes("formAlreadyAddressed: true"), "Formlu test ilk form karşılamasını tekrar ettirmemeli");
+});
+
+test("Başkent v91 T150: template greeting logs count as addressed form lead", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const identityPath = path.join(process.cwd(), "src/lib/services/ai/engines/identity.ts");
+  const orchestratorPath = path.join(process.cwd(), "src/lib/services/ai/ai-response-orchestrator.ts");
+  const identityContent = fs.readFileSync(identityPath, "utf8");
+  const orchestratorContent = fs.readFileSync(orchestratorPath, "utf8");
+
+  assert(identityContent.includes("'form_greeting_template_sent'"), "API ile gönderilen form şablonu greetingSent sayılmalı");
+  assert(identityContent.includes("'inbox_form_greeting_sent'"), "Panelden gönderilen form karşılaması greetingSent sayılmalı");
+  assert(orchestratorContent.includes("unifiedContext?.outreachContext?.greetingSent === true"), "Orchestrator greetingSent bilgisini formAlreadyAddressed için kullanmalı");
+  assert(orchestratorContent.includes("unifiedContext?.contactMode === 'system_outbound_greeting'"), "Orchestrator system_outbound_greeting modunu korumalı");
+});
+
 
 async function runAllTests() {
   try {

@@ -105,6 +105,7 @@ function buildSandboxUnifiedContext(input?: SandboxFormInput | null) {
   if (!data) return null;
 
   const createdAt = new Date().toISOString();
+  const templateGreetingText = 'Merhaba, ben Rüya. Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum.\n\nDoldurduğunuz form doğrultusunda sürecinizle ilgili size yardımcı olmak isteriz.\n\nMüsait olduğunuzda buradan bize dönüş yapabilirsiniz 🙏🏻';
   const latestForm = {
     id: 'sandbox-form',
     name: input?.formName?.trim() || 'Sandbox Test Formu',
@@ -125,6 +126,9 @@ function buildSandboxUnifiedContext(input?: SandboxFormInput | null) {
         complaint: data.sikayet || data.complaint || undefined,
         travel_date: data.ne_zaman_gelmek_istiyorsunuz || data.randevu_tercihi || undefined,
         sandbox_form: true,
+        form_greeted_at: createdAt,
+        form_context_handled: true,
+        greeting_template_name: 'tr_form_karsilama_v1',
       },
     },
     conversation: {
@@ -135,8 +139,25 @@ function buildSandboxUnifiedContext(input?: SandboxFormInput | null) {
       department: data.onerilen_bolum || undefined,
       metadata: {
         sandbox_form: true,
+        form_greeted_at: createdAt,
+        form_context_handled: true,
+        greeting_template_name: 'tr_form_karsilama_v1',
       },
     },
+    outreachContext: {
+      source: 'form_lead',
+      greetingSent: true,
+      greetingAction: 'form_greeting_template_sent',
+      greetingTemplateName: 'tr_form_karsilama_v1',
+      greetingText: templateGreetingText,
+      botActivated: true,
+      lastCallAction: null,
+      lastCallNote: null,
+    },
+    hasVerifiedFormContext: true,
+    hasFormContext: true,
+    formAlreadyAddressed: true,
+    contactMode: 'system_outbound_greeting',
   };
 
   const resolvedFacts = ConversationKnownFactsResolver.resolve({

@@ -1299,7 +1299,11 @@ export class AIResponseOrchestrator {
       unifiedContext.hasFormContext = hasVerifiedFormContext;
 
       // Check if the form/opportunity has already been addressed by the bot
-      let formAlreadyAddressed = false;
+      let formAlreadyAddressed = !!(
+        unifiedContext?.formAlreadyAddressed === true ||
+        unifiedContext?.contactMode === 'system_outbound_greeting' ||
+        unifiedContext?.outreachContext?.greetingSent === true
+      );
       if (hasForm) {
         let latestFormCreatedAt: Date | null = null;
         if (unifiedContext?.latestForm?.created_at) {
@@ -1364,10 +1368,10 @@ export class AIResponseOrchestrator {
 
       const contactMode = !hasVerifiedFormContext
         ? 'direct_whatsapp'
-        : formAlreadyAddressed || assistantHistory.length > 0
-          ? 'continuing_conversation'
-          : unifiedContext?.outreachContext?.greetingSent
-            ? 'system_outbound_greeting'
+        : unifiedContext?.contactMode === 'system_outbound_greeting' || unifiedContext?.outreachContext?.greetingSent === true
+          ? 'system_outbound_greeting'
+          : formAlreadyAddressed || assistantHistory.length > 0
+            ? 'continuing_conversation'
             : 'patient_inbound_after_form';
       unifiedContext.contactMode = contactMode;
 

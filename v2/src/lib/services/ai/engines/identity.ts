@@ -820,7 +820,13 @@ export class IdentityEngine {
             }) as any[];
 
             if (outreachRows.length > 0) {
-              const greetingSent = outreachRows.some((r: any) => r.action === 'greeting_sent');
+              const greetingSent = outreachRows.some((r: any) => [
+                'greeting_sent',
+                'template_sent',
+                'form_greeting_template_sent',
+                'inbox_form_greeting_sent',
+                'manual_whatsapp_greeting_echo_confirmed'
+              ].includes(r.action));
               const botActivated = outreachRows.some((r: any) => r.action === 'bot_activated');
               const lastCallRow = outreachRows.find((r: any) => 
                 ['called_reached', 'called_missed', 'callback_scheduled'].includes(r.action)
