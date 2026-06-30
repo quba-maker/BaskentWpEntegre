@@ -15182,6 +15182,20 @@ test("Başkent v90 T141: independent V2 gate flags forgetfulness trust repair an
   assert((trust.recommendedFollowUp || "").includes("güven"), trust.recommendedFollowUp || "");
 });
 
+test("Forms T142: form detail lazy load must keep lead id as UUID string", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const hookPath = path.join(process.cwd(), "src/components/features/forms/hooks/useFormDetailState.ts");
+  const actionPath = path.join(process.cwd(), "src/app/actions/forms.ts");
+  const hookContent = fs.readFileSync(hookPath, "utf8");
+  const actionContent = fs.readFileSync(actionPath, "utf8");
+
+  assert(!hookContent.includes("loadDetailLazy(Number(selectedForm.id))"), "Form detay çağrısı UUID'yi Number() ile NaN'e çevirmemeli");
+  assert(hookContent.includes("loadDetailLazy(selectedForm.id)"), "Form detay çağrısı selectedForm.id değerini string olarak taşımalı");
+  assert(actionContent.includes("getFormDetailData(leadId: string)"), "getFormDetailData leadId string/UUID kabul etmeli");
+  assert(actionContent.includes("l.id = $1::uuid"), "getFormDetailData sorgusu UUID cast ile güvenli çalışmalı");
+});
+
 
 async function runAllTests() {
   try {

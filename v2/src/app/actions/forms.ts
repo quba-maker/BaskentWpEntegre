@@ -9,6 +9,8 @@ import { FIRST_CONTACT_HARD_DUPLICATE_ACTIONS } from "@/lib/utils/first-contact-
 // QUBA AI — Forms & Leads Actions (Zero-Trust)
 // ==========================================
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export async function getForms(page: number = 1, search: string = "", source: string = "all", firstContactFilter: string = "all", stageFilter: string = "all") {
   return withActionGuard(
     { actionName: 'getForms', conversationId: 'forms_action_no_conversation' },
@@ -392,7 +394,12 @@ export async function getForms(page: number = 1, search: string = "", source: st
   ).then(res => res.data || []);
 }
 
-export async function getFormDetailData(leadId: number) {
+export async function getFormDetailData(leadId: string) {
+  const safeLeadId = typeof leadId === 'string' ? leadId.trim() : '';
+  if (!safeLeadId || !UUID_RE.test(safeLeadId)) {
+    throw new Error("Geçersiz Lead ID.");
+  }
+
   return withActionGuard(
     { actionName: 'getFormDetailData', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
@@ -442,8 +449,8 @@ export async function getFormDetailData(leadId: number) {
                    o.updated_at DESC
                  LIMIT 1
                ) opp ON opp_id IS NOT NULL OR COALESCE(c_identity.id, c_phone.id) IS NOT NULL
-               WHERE l.id = $1 AND l.tenant_id = $2`,
-        values: [leadId, ctx.tenantId]
+               WHERE l.id = $1::uuid AND l.tenant_id = $2::uuid`,
+        values: [safeLeadId, ctx.tenantId]
       });
 
       if (rows.length === 0) {
@@ -943,4 +950,3 @@ export async function getFormsSyncMetadata() {
     return res.data;
   });
 }
-

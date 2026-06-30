@@ -59,7 +59,7 @@ export function useFormDetailState(selectedForm: any, onFormUpdate: () => void) 
   }, []);
 
   // Fetch detail information on demand / lazy loading
-  const loadDetailLazy = useCallback(async (leadId: number) => {
+  const loadDetailLazy = useCallback(async (leadId: string) => {
     setDetailLoading(true);
     try {
       const detail = await getFormDetailData(leadId);
@@ -128,7 +128,7 @@ export function useFormDetailState(selectedForm: any, onFormUpdate: () => void) 
       setSelectedPhone(phones[0] || selectedForm.phone_number || "");
 
       // Trigger lazy loads
-      loadDetailLazy(Number(selectedForm.id));
+      loadDetailLazy(selectedForm.id);
       loadOutreachTimeline(selectedForm.id);
       loadTemplatesLazy();
       loadReadinessLazy(selectedForm.id, selectedForm);
