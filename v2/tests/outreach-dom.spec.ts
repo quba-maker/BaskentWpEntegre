@@ -58,9 +58,9 @@ test('Verify Outreach Card for Halil Hanay', async ({ page }) => {
     console.log("SUCCESS: 'Form Yönetimi / Şablon ayarlarından greeting template ekleyin' is NOT in DOM");
   }
   
-  if (content.includes('Sistemde aktif şablon var: tr_karsilama')) {
-    console.log("SUCCESS: 'Sistemde aktif şablon var: tr_karsilama' IS IN DOM!");
+  if (content.includes('Sistemde aktif şablon var: tr_form_karsilama_v1')) {
+    console.log("SUCCESS: 'Sistemde aktif şablon var: tr_form_karsilama_v1' IS IN DOM!");
   } else {
-    console.log("FAIL: 'Sistemde aktif şablon var: tr_karsilama' is NOT in DOM");
+    console.log("FAIL: 'Sistemde aktif şablon var: tr_form_karsilama_v1' is NOT in DOM");
   }
 });

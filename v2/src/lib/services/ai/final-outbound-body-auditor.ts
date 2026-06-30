@@ -787,7 +787,7 @@ function applyKnownFactsRelationGuard(text: string, ctx: FinalOutboundAuditCtx):
     return { text: parts.join('\n\n'), rewrote: true };
   }
 
-  const firstLine = `Merhaba, Başkent Üniversitesi Konya Hastanesi’nden ben Rüya, form başvurunuz bize ulaştı.`;
+  const firstLine = `Form kaydınızdaki bilgileri görüyorum.`;
   const subjectLine = `${related.relationPossessive[0].toUpperCase()}${related.relationPossessive.slice(1)} için ${related.topic} konusunda bilgi almak istediğinizi görüyorum. Öncelikle geçmiş olsun.`;
   const contextLine = locationLine ? `${locationLine[0].toUpperCase()}${locationLine.slice(1)} ayrıca not ediyorum.` : '';
   return {

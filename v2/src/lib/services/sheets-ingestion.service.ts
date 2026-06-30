@@ -582,9 +582,10 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
       }
 
       if (META_ACCESS_TOKEN && autoGreetingEnabled) {
-        const templateName = process.env.FORM_GREETING_TEMPLATE_NAME || 'tr_karsilama';
+        const templateName = process.env.FORM_GREETING_TEMPLATE_NAME || 'tr_form_karsilama_v1';
         const templateLanguage = process.env.FORM_GREETING_TEMPLATE_LANGUAGE || 'tr';
-        const welcomeMsg = "Merhaba, Başkent Üniversitesi Konya Hastanesi’nden, doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz.";
+        const welcomeMsg = process.env.FORM_GREETING_TEMPLATE_TEXT ||
+          "Merhaba, ben Rüya. Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum.\n\nDoldurduğunuz form doğrultusunda sürecinizle ilgili size yardımcı olmak isteriz.\n\nMüsait olduğunuzda buradan bize dönüş yapabilirsiniz 🙏🏻";
 
         const sendWhatsApp = async (phoneToTry: string): Promise<{ ok: boolean; providerMessageId?: string }> => {
           try {

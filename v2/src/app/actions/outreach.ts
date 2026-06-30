@@ -22,6 +22,23 @@ import { logAudit } from "@/lib/audit";
 import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEFAULT_FORM_GREETING_TEMPLATE_NAME = process.env.FORM_GREETING_TEMPLATE_NAME || 'tr_form_karsilama_v1';
+const DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE = process.env.FORM_GREETING_TEMPLATE_LANGUAGE || 'tr';
+const DEFAULT_FORM_GREETING_TEMPLATE_TEXT = process.env.FORM_GREETING_TEMPLATE_TEXT ||
+  "Merhaba, ben Rüya. Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum.\n\nDoldurduğunuz form doğrultusunda sürecinizle ilgili size yardımcı olmak isteriz.\n\nMüsait olduğunuzda buradan bize dönüş yapabilirsiniz 🙏🏻";
+
+function normalizeFormGreetingTemplateName(templateName: string): string {
+  const clean = String(templateName || '').trim();
+  if (!clean || clean === 'tr_karsilama') return DEFAULT_FORM_GREETING_TEMPLATE_NAME;
+  return clean;
+}
+
+function normalizeFormGreetingTemplateText(templateName: string, templateText: string): string {
+  const cleanName = String(templateName || '').trim();
+  const cleanText = String(templateText || '').trim();
+  if (cleanName === 'tr_karsilama' || !cleanText) return DEFAULT_FORM_GREETING_TEMPLATE_TEXT;
+  return cleanText;
+}
 
 function redactSecret(value: string, secret?: string | null): string {
   if (!secret) return value;
@@ -1125,6 +1142,9 @@ export async function sendFormGreetingTemplateAction(
   if (!safeLeadId || !UUID_RE.test(safeLeadId)) return { success: false, error: "Geçersiz Lead ID." };
   if (!templateName) return { success: false, error: "Şablon ismi gerekli." };
   if (!templateText) return { success: false, error: "Şablon metni gerekli." };
+  const effectiveTemplateName = normalizeFormGreetingTemplateName(templateName);
+  const effectiveLanguageCode = String(languageCode || '').trim() || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE;
+  const effectiveTemplateText = normalizeFormGreetingTemplateText(templateName, templateText);
 
   return withActionGuard(
     { actionName: 'sendFormGreetingTemplateAction' },
@@ -1232,8 +1252,8 @@ export async function sendFormGreetingTemplateAction(
           const res = await ThreeSixtyDialogService.sendTemplate(
             creds.accessToken,
             phone,
-            templateName,
-            languageCode
+            effectiveTemplateName,
+            effectiveLanguageCode
           );
           sendSuccess = res.success;
           providerMessageId = res.providerMessageId || null;
@@ -1255,9 +1275,9 @@ export async function sendFormGreetingTemplateAction(
               recipient_type: 'individual',
               type: 'template',
               template: {
-                name: templateName,
+                name: effectiveTemplateName,
                 language: {
-                  code: languageCode
+                  code: effectiveLanguageCode
                 }
               }
             }),
@@ -1280,7 +1300,7 @@ export async function sendFormGreetingTemplateAction(
         if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
           return {
             success: false,
-            error: explainThreeSixtyTemplateError(safeErrorMsg, templateName, languageCode || 'tr')
+            error: explainThreeSixtyTemplateError(safeErrorMsg, effectiveTemplateName, effectiveLanguageCode || 'tr')
           };
         }
         
@@ -1352,7 +1372,7 @@ export async function sendFormGreetingTemplateAction(
           text: `/* sendFormGreetingTemplateAction:insertMessage */
                  INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, status, provider_message_id)
                  VALUES ($1::uuid, $2::uuid, $3, 'out', $4, 'whatsapp', 'sent', $5)`,
-          values: [ctx.tenantId, finalConvId, phone, templateText, providerMessageId]
+          values: [ctx.tenantId, finalConvId, phone, effectiveTemplateText, providerMessageId]
         });
 
         // Update conversation last_message
@@ -1369,7 +1389,7 @@ export async function sendFormGreetingTemplateAction(
                      autopilot_enabled = true,
                      bot_activated_at = COALESCE(bot_activated_at, NOW())
                  WHERE id = $2::uuid AND tenant_id = $3::uuid`,
-          values: [templateText, finalConvId, ctx.tenantId]
+          values: [effectiveTemplateText, finalConvId, ctx.tenantId]
         });
       }
 
@@ -1402,8 +1422,9 @@ export async function sendFormGreetingTemplateAction(
           ctx.userId,
           JSON.stringify({
             template_id: templateId,
-            template_name: templateName,
-            message_text: templateText,
+            template_name: effectiveTemplateName,
+            selected_template_name: templateName,
+            message_text: effectiveTemplateText,
             provider_message_id: providerMessageId,
             phone,
             form_name: lead.form_name
@@ -1419,7 +1440,7 @@ export async function sendFormGreetingTemplateAction(
         action: 'outreach_form_greeting_template_sent',
         entityType: 'lead',
         entityId: leadId,
-        details: { phone, templateName, providerMessageId },
+        details: { phone, templateName: effectiveTemplateName, selectedTemplateName: templateName, providerMessageId },
       });
 
       return { success: true, providerMessageId };

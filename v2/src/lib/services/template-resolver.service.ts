@@ -96,6 +96,22 @@ function detectLanguage(ctx: TemplateResolveContext, greetingLang?: string): str
 // ═══════════════════════════════════════════════════════════
 
 const MAX_RENDERED_LENGTH = 4096;
+const DEFAULT_FORM_GREETING_TEMPLATE_NAME = process.env.FORM_GREETING_TEMPLATE_NAME || 'tr_form_karsilama_v1';
+const DEFAULT_FORM_GREETING_TEMPLATE_BODY = process.env.FORM_GREETING_TEMPLATE_TEXT ||
+  "Merhaba, ben Rüya. Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum.\n\nDoldurduğunuz form doğrultusunda sürecinizle ilgili size yardımcı olmak isteriz.\n\nMüsait olduğunuzda buradan bize dönüş yapabilirsiniz 🙏🏻";
+
+function normalizeGreetingTemplateListItem(row: any, templateType: 'greeting' | 'remarketing'): TemplateListItem {
+  const isLegacyFormGreeting = templateType === 'greeting' && String(row.name || '').trim() === 'tr_karsilama';
+  return {
+    id: row.id,
+    name: isLegacyFormGreeting ? DEFAULT_FORM_GREETING_TEMPLATE_NAME : row.name,
+    language: row.language,
+    body: isLegacyFormGreeting ? DEFAULT_FORM_GREETING_TEMPLATE_BODY : row.body,
+    formName: row.form_name || null,
+    department: row.department || null,
+    isDefault: row.is_default,
+  };
+}
 
 function renderTemplate(body: string, ctx: TemplateResolveContext): string {
   const omitPatientName = ctx.omitPatientName ?? false;
@@ -346,15 +362,7 @@ export class TemplateResolverService {
         values: [tenantId, templateType]
       }) as any[];
 
-      return rows.map((r: any) => ({
-        id: r.id,
-        name: r.name,
-        language: r.language,
-        body: r.body,
-        formName: r.form_name || null,
-        department: r.department || null,
-        isDefault: r.is_default,
-      }));
+      return rows.map((r: any) => normalizeGreetingTemplateListItem(r, templateType));
     } catch (_) {
       return [];
     }

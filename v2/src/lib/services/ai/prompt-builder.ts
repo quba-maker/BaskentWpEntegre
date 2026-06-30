@@ -394,7 +394,7 @@ export class PromptBuilder {
         crmContext += `Bu kişide doğrulanmış form/lead bağlamı var. İletişim yönünü varsayma; aşağıdaki contact_mode'a göre davran.\n`;
         crmContext += `- contact_mode: ${contactMode}\n`;
         crmContext += `- patient_inbound_after_form: Hasta form sonrası kendisi yazmış olabilir; formu referans al ama "biz ulaştık" varsayımını abartma.\n`;
-        crmContext += `- system_outbound_greeting: İlk karşılama üretilecekse form bilgisini kısa ve doğal kullan.\n`;
+        crmContext += `- system_outbound_greeting: Onaylı WhatsApp form karşılama şablonu zaten gönderildi. Hasta şimdi buna dönüş yapıyor; "Merhaba ben Rüya", kurum tanıtımı ve "doldurduğunuz form doğrultusunda sizinle iletişime geçiyoruz" gibi ilk karşılama cümlelerini tekrar etme. Son mesaja göre devam et.\n`;
         crmContext += `- continuing_conversation: İlk karşılama/tanıtım metni tekrar edilmez, doğrudan son mesaja cevap verilir.\n`;
         if (oc.greetingSent) {
           crmContext += `- Hasta danışmanı karşılama mesajı GÖNDERİLDİ.\n`;

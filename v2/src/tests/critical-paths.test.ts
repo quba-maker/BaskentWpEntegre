@@ -193,7 +193,7 @@ test("PROVIDER: 360dialog API key header kopyalama boşluklarından arındırıl
   }) as any;
 
   try {
-    await ThreeSixtyDialogService.sendTemplate(" Bearer\nabc 123 \t", "905551112233", "tr_karsilama", "tr");
+    await ThreeSixtyDialogService.sendTemplate(" Bearer\nabc 123 \t", "905551112233", "tr_form_karsilama_v1", "tr");
     assert(sentApiKey === "abc123", "360dialog header temiz raw API key ile gitmeli");
   } finally {
     global.fetch = originalFetch;

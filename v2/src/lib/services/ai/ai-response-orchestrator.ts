@@ -1957,6 +1957,11 @@ export class AIResponseOrchestrator {
           llmSystemPrompt = llmSystemPrompt + '\n\n[NOT: Kullanıcı konuşmayı sürdürmek istiyor. "İyi günler" veya kapatma cümlesi KULLANMA. Yeni sorusunu bekle veya yardıma açık olduğunu nazikçe belirt.]';
         }
 
+        const outboundFormGreetingSent = formAlreadyAddressed || contactMode === 'system_outbound_greeting';
+        if (outboundFormGreetingSent && hasVerifiedFormContext) {
+          llmSystemPrompt = llmSystemPrompt + '\n\n[ÖNEMLİ FORM ŞABLONU DEVAM KURALI: Bu hastaya onaylı WhatsApp form karşılama şablonu daha önce gönderildi. Hasta şimdi o mesaja dönüş yapıyor. İlk karşılama/tanıtım metnini tekrar etme; "Merhaba, ben Rüya", "Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum", "doldurduğunuz form doğrultusunda" gibi açılışları yeniden yazma. En fazla kısa bir "Merhaba, dönüşünüz için teşekkür ederim" diyerek doğrudan formdaki şikayet/talep ve hastanın son mesajından devam et.]';
+        }
+
         // P0.16-M: Short affirmative ("tamam", "olur", "evet", "peki") — inject conversation-state-first directive
         // Prevents LLM from regressing to stale CRM context (Kardiyoloji/Ağustos 2026 etc.)
         const isShortAffirmative = /^(?:tamam|olur|evet|peki|harika|super|süper|anla[ydş]|anlad[ıi]m|anlaşıldı|anlasild[ıi]|tamamdır|tamamdir|tamamsa)[\.!?\s]*$/i.test(inboundText.trim());
