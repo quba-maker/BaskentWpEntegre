@@ -802,44 +802,119 @@ export class IdentityEngine {
 
       // ═══ B2 FIX: Outreach context for form lead bot handoff ═══
       let outreachContext = null;
-      if (lead) {
+      const parseMeta = (value: any) => {
+        if (!value) return {};
+        if (typeof value === 'string') {
+          try { return JSON.parse(value); } catch { return {}; }
+        }
+        return value || {};
+      };
+      const conversationMetaForOutreach = parseMeta(conversationRow?.metadata);
+      const opportunityMetaForOutreach = parseMeta(opportunity?.metadata);
+      if (lead || conversationId) {
         try {
-          const leadRows = await db.executeSafe({
-            text: `SELECT id FROM leads WHERE tenant_id = $1 AND customer_id = $2 ORDER BY created_at DESC LIMIT 1`,
-            values: [tenantId, customerId]
-          }) as any[];
+          const leadIds = new Set<string>();
+          if (lead?.id) leadIds.add(String(lead.id));
+          if (opportunity?.lead_id) leadIds.add(String(opportunity.lead_id));
 
-          if (leadRows.length > 0) {
-            const leadId = leadRows[0].id;
-
-            const outreachRows = await db.executeSafe({
-              text: `SELECT action, metadata, created_at FROM outreach_logs 
-                     WHERE lead_id = $1 AND tenant_id = $2 
-                     ORDER BY created_at DESC LIMIT 10`,
-              values: [leadId, tenantId]
+          try {
+            const leadRows = await db.executeSafe({
+              text: `SELECT id FROM leads WHERE tenant_id = $1 AND customer_id = $2 ORDER BY created_at DESC LIMIT 3`,
+              values: [tenantId, customerId]
             }) as any[];
-
-            if (outreachRows.length > 0) {
-              const greetingSent = outreachRows.some((r: any) => [
-                'greeting_sent',
-                'template_sent',
-                'form_greeting_template_sent',
-                'inbox_form_greeting_sent',
-                'manual_whatsapp_greeting_echo_confirmed'
-              ].includes(r.action));
-              const botActivated = outreachRows.some((r: any) => r.action === 'bot_activated');
-              const lastCallRow = outreachRows.find((r: any) => 
-                ['called_reached', 'called_missed', 'callback_scheduled'].includes(r.action)
-              );
-
-              outreachContext = {
-                source: 'form_lead',
-                greetingSent,
-                botActivated,
-                lastCallAction: lastCallRow?.action || null,
-                lastCallNote: lastCallRow?.metadata?.note || null,
-              };
+            for (const row of leadRows) {
+              if (row?.id) leadIds.add(String(row.id));
             }
+          } catch (_) {
+            // Best effort only. The direct lead id above is enough in the normal path.
+          }
+
+          const clauses: string[] = [];
+          const values: any[] = [tenantId];
+          if (leadIds.size > 0) {
+            values.push(Array.from(leadIds));
+            clauses.push(`lead_id = ANY($${values.length}::uuid[])`);
+          }
+          if (conversationId) {
+            values.push(conversationId);
+            clauses.push(`conversation_id = $${values.length}::uuid`);
+          }
+
+          let outreachRows: any[] = [];
+          if (clauses.length > 0) {
+            outreachRows = await db.executeSafe({
+              text: `SELECT action, metadata, created_at FROM outreach_logs 
+                     WHERE tenant_id = $1 AND (${clauses.join(' OR ')})
+                     ORDER BY created_at DESC LIMIT 20`,
+              values
+            }) as any[];
+          }
+
+          const greetingActions = [
+            'greeting_sent',
+            'template_sent',
+            'form_greeting_template_sent',
+            'inbox_form_greeting_sent',
+            'manual_whatsapp_greeting_echo_confirmed',
+            'whatsapp_app_opened_for_greeting',
+            'outreach_form_greeting_template_sent',
+          ];
+          const greetingRow = outreachRows.find((r: any) => greetingActions.includes(r.action));
+          let greetingSent = !!greetingRow;
+          let greetingTemplateName = parseMeta(greetingRow?.metadata)?.template_name || null;
+
+          if (!greetingSent) {
+            greetingSent = !!(
+              conversationMetaForOutreach.form_greeted_at ||
+              conversationMetaForOutreach.form_context_handled === true ||
+              conversationMetaForOutreach.greeting_template_name ||
+              opportunityMetaForOutreach.form_greeted_at ||
+              opportunityMetaForOutreach.form_context_handled === true ||
+              opportunityMetaForOutreach.greeting_template_name
+            );
+            greetingTemplateName =
+              conversationMetaForOutreach.greeting_template_name ||
+              opportunityMetaForOutreach.greeting_template_name ||
+              greetingTemplateName;
+          }
+
+          if (!greetingSent && conversationId) {
+            const templateLikeMessages = await db.executeSafe({
+              text: `SELECT id, content, created_at FROM messages
+                     WHERE tenant_id = $1
+                       AND conversation_id = $2
+                       AND direction = 'out'
+                       AND (
+                         content ILIKE '%Doldurduğunuz form doğrultusunda%'
+                         OR content ILIKE '%form doğrultusunda%'
+                         OR content ILIKE '%Müsait olduğunuzda buradan bize dönüş yapabilirsiniz%'
+                       )
+                     ORDER BY created_at DESC
+                     LIMIT 1`,
+              values: [tenantId, conversationId]
+            }) as any[];
+            if (templateLikeMessages.length > 0) {
+              greetingSent = true;
+              greetingTemplateName = greetingTemplateName || 'form_greeting_template';
+            }
+          }
+
+          const botActivated = outreachRows.some((r: any) => r.action === 'bot_activated');
+          const lastCallRow = outreachRows.find((r: any) =>
+            ['called_reached', 'called_missed', 'callback_scheduled'].includes(r.action)
+          );
+          const lastCallMeta = parseMeta(lastCallRow?.metadata);
+
+          if (greetingSent || botActivated || lastCallRow) {
+            outreachContext = {
+              source: 'form_lead',
+              greetingSent,
+              greetingAction: greetingRow?.action || (greetingSent ? 'form_greeting_template_sent' : null),
+              greetingTemplateName,
+              botActivated,
+              lastCallAction: lastCallRow?.action || null,
+              lastCallNote: lastCallMeta?.note || null,
+            };
           }
         } catch (ocErr) {
           console.warn('[IdentityEngine] Non-fatal: outreachContext query failed', ocErr);
@@ -941,6 +1016,16 @@ export class IdentityEngine {
            resolvedFrom
         } : null,
         outreachContext,
+        formAlreadyAddressed: !!(
+          outreachContext?.greetingSent === true ||
+          conversationMetaForOutreach.form_greeted_at ||
+          conversationMetaForOutreach.form_context_handled === true ||
+          opportunityMetaForOutreach.form_greeted_at ||
+          opportunityMetaForOutreach.form_context_handled === true
+        ),
+        contactMode: outreachContext?.greetingSent === true
+          ? 'system_outbound_greeting'
+          : undefined,
         conversation: conversationRow ? {
           id: conversationRow.id,
           status: conversationRow.status,

@@ -660,6 +660,7 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
         // Create conversation & message record
         if (messageSent) {
           const tags = [sheetName, formName].filter(Boolean);
+          const greetedAtIso = new Date().toISOString();
 
           // Resolve WhatsApp channel_id for conversation
           let whatsappChannelId: string | null = outboundChannelId || null;
@@ -682,9 +683,24 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
           let convId = existingConv?.[0]?.id;
           if (!convId) {
             const newConv = await db.executeSafe({
-              text: `INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department, channel, channel_id, autopilot_enabled, bot_activated_at)
-                     VALUES ($1, $2, $3, $4, 'bot', 'Genel', 'whatsapp', $5, true, NOW()) RETURNING id`,
-              values: [tenantId, activePhone, name, JSON.stringify(tags), whatsappChannelId]
+              text: `INSERT INTO conversations (tenant_id, phone_number, patient_name, tags, status, department, channel, channel_id, autopilot_enabled, bot_activated_at, metadata)
+                     VALUES ($1, $2, $3, $4, 'bot', 'Genel', 'whatsapp', $5, true, NOW(), $6::jsonb) RETURNING id`,
+              values: [
+                tenantId,
+                activePhone,
+                name,
+                JSON.stringify(tags),
+                whatsappChannelId,
+                JSON.stringify({
+                  form_greeted_at: greetedAtIso,
+                  form_context_handled: true,
+                  greeting_template_name: templateName,
+                  greeting_template_language: templateLanguage,
+                  form_greeting_source: 'sheets_webhook_auto_greeting',
+                  form_greeting_lead_id: leadId || null,
+                  form_greeting_provider_message_id: providerMessageId || null,
+                })
+              ]
             }) as any[];
             convId = newConv?.[0]?.id;
           } else {
@@ -694,9 +710,18 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
                          channel = COALESCE(channel, 'whatsapp'),
                          status = 'bot',
                          autopilot_enabled = true,
-                         bot_activated_at = COALESCE(bot_activated_at, NOW())
+                         bot_activated_at = COALESCE(bot_activated_at, NOW()),
+                         metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                           'form_greeted_at', $4::text,
+                           'form_context_handled', true,
+                           'greeting_template_name', $5::text,
+                           'greeting_template_language', $6::text,
+                           'form_greeting_source', 'sheets_webhook_auto_greeting',
+                           'form_greeting_lead_id', $7::text,
+                           'form_greeting_provider_message_id', $8::text
+                         )
                      WHERE id = $2 AND tenant_id = $3`,
-              values: [whatsappChannelId, convId, tenantId]
+              values: [whatsappChannelId, convId, tenantId, greetedAtIso, templateName, templateLanguage, leadId || null, providerMessageId || null]
             });
           }
 
