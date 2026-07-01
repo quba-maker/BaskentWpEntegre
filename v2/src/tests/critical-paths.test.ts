@@ -15594,6 +15594,7 @@ test("Başkent v94 T156: form management separates template greeting from WhatsA
   const uiPath = path.join(process.cwd(), "src/components/features/forms/first-contact-ui.ts");
   const tabsPath = path.join(process.cwd(), "src/components/features/forms/FormStatsTabs.tsx");
   const tablePath = path.join(process.cwd(), "src/components/features/forms/FormListTable.tsx");
+  const bulkBarPath = path.join(process.cwd(), "src/components/features/forms/BulkAutopilotDecisionBar.tsx");
   const detailStatePath = path.join(process.cwd(), "src/components/features/forms/hooks/useFormDetailState.ts");
 
   const resolverContent = fs.readFileSync(resolverPath, "utf8");
@@ -15603,6 +15604,7 @@ test("Başkent v94 T156: form management separates template greeting from WhatsA
   const uiContent = fs.readFileSync(uiPath, "utf8");
   const tabsContent = fs.readFileSync(tabsPath, "utf8");
   const tableContent = fs.readFileSync(tablePath, "utf8");
+  const bulkBarContent = fs.readFileSync(bulkBarPath, "utf8");
   const detailStateContent = fs.readFileSync(detailStatePath, "utf8");
 
   assert(!resolverContent.includes("'whatsapp_form_summary_received'"), "First contact resolver should not treat WhatsApp form summaries as hard duplicate greetings");
@@ -15624,6 +15626,10 @@ test("Başkent v94 T156: form management separates template greeting from WhatsA
   assert(uiContent.includes("if (status === 'patient_replied') return 'needs_reply'"), "Patient replies should roll up to the Cevap Geldi bucket");
   assert(tabsContent.includes("(statusCounts as any).patient_replied"), "Stats tab should add patient replies into Cevap Geldi count");
   assert(tableContent.includes("'needs_reply': { label: 'Cevap Geldi'"), "Table badge should show Cevap Geldi");
+  assert(!tableContent.includes("Kilit Gerekçesi"), "Form table should not expose technical lock tooltips");
+  assert(tableContent.includes("Kurum canlı gönderime açılmamış."), "Form table should translate live-lock reasons to user-facing text");
+  assert(bulkBarContent.includes("bg-white rounded-2xl"), "Bulk first-contact panel should use the light SaaS management surface");
+  assert(!bulkBarContent.includes("bg-[#1D1D1F] text-white"), "Bulk first-contact panel should not use the old dark floating style");
 });
 
 

@@ -33,93 +33,92 @@ export function BulkAutopilotDecisionBar({
   const isLiveLocked = decisions.some(d => d.gateState && d.gateState !== 'open');
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-[800px] px-4 animate-in slide-in-from-bottom-4 duration-300">
-      <div className="bg-[#1D1D1F] text-white rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.35)] border border-white/10 p-4 flex flex-col gap-3.5">
-        
-        {/* Header Summary Info */}
-        <div className="flex items-center justify-between border-b border-white/10 pb-2">
-          <div className="flex items-center gap-2">
-            <MessageCircle className="w-4 h-4 text-blue-400" />
-            <span className="font-bold text-xs uppercase tracking-wider text-gray-400">
-              Toplu İlk Temas ({total} Form Seçildi)
-            </span>
+    <div className="fixed inset-x-0 bottom-6 z-40 flex justify-center px-4 pointer-events-none animate-in slide-in-from-bottom-4 duration-300">
+      <div className="pointer-events-auto w-full max-w-[920px] bg-white rounded-2xl shadow-[0_18px_55px_rgba(15,23,42,0.16)] border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-4 bg-white">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[#1D1D1F]">
+              <MessageCircle className="w-4 h-4 text-[#007AFF]" />
+              <span className="font-bold text-sm">Toplu İlk Temas</span>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                {total} form seçildi
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-[#86868B]">
+              Seçili kayıtlar durumuna göre taslak, hazır şablon veya inbox yanıtı olarak ayrılır.
+            </p>
           </div>
           <button
             onClick={onClearSelection}
-            className="p-1 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white"
-            title="Seçimi Kapat"
+            className="shrink-0 p-2 hover:bg-slate-100 rounded-xl transition-colors text-[#86868B] hover:text-[#1D1D1F]"
+            title="Seçimi kapat"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Breakdown Row */}
-        <div className="flex flex-wrap gap-2 text-xs">
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            <CheckCircle className="w-3.5 h-3.5" /> Inbox'ta Yanıt: {botAutoEligible}
-          </span>
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/20">
-            <Sparkles className="w-3.5 h-3.5" /> Taslak: {manualDraftRequired}
-          </span>
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-            <FileText className="w-3.5 h-3.5" /> Hazır Şablon: {manualTemplateRequired}
-          </span>
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
-            <MessageCircle className="w-3.5 h-3.5" /> Cevap Bekleniyor: {alreadyOpenInbox}
-          </span>
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-            <AlertTriangle className="w-3.5 h-3.5" /> Uygun Değil: {notEligible}
-          </span>
-        </div>
-
-        {/* Live lock warning */}
-        {isLiveLocked && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-bold leading-normal">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>Bu seçimlerde canlı gönderime kapalı kayıtlar var. Sistem uygun olmayan kişiye mesaj göndermez.</span>
-          </div>
-        )}
-
-        {/* Five Action Buttons */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-3">
-          {/* Leftside action filters */}
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={onFilterTemplateRequired}
-              className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded-xl text-xs font-bold transition-all border border-amber-500/20"
-              title="Şablon Gereken Formları Listeler"
-            >
-              Hazır Şablon Gerekenler
-            </button>
-            <button
-              onClick={onFilterInboxOpen}
-              className="px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 rounded-xl text-xs font-bold transition-all border border-blue-500/20"
-              title="Zaten Inbox'ta Açılanları Listeler"
-            >
-              Cevap Bekleyenler
-            </button>
+        <div className="p-4 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+            <span className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+              <CheckCircle className="w-3.5 h-3.5" /> Inbox yanıtı: {botAutoEligible}
+            </span>
+            <span className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold bg-orange-50 text-orange-700 border border-orange-100">
+              <Sparkles className="w-3.5 h-3.5" /> Taslak: {manualDraftRequired}
+            </span>
+            <span className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold bg-amber-50 text-amber-700 border border-amber-100">
+              <FileText className="w-3.5 h-3.5" /> Şablon: {manualTemplateRequired}
+            </span>
+            <span className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold bg-blue-50 text-blue-700 border border-blue-100">
+              <MessageCircle className="w-3.5 h-3.5" /> Bekleyen: {alreadyOpenInbox}
+            </span>
+            <span className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold bg-rose-50 text-rose-700 border border-rose-100">
+              <AlertTriangle className="w-3.5 h-3.5" /> Kontrol: {notEligible}
+            </span>
           </div>
 
-          {/* Rightside action triggers */}
-          <div className="flex gap-2 items-center">
-            <button
-              onClick={onClearSelection}
-              className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white rounded-xl text-xs font-bold transition-all"
-            >
-              Seçimi Kaldır
-            </button>
-            <button
-              onClick={onPrepareDrafts}
-              className="flex items-center gap-1.5 px-4 py-2 bg-[#007AFF] hover:bg-[#0056b3] text-white rounded-xl text-xs font-bold transition-all active:scale-[0.98] shadow-md shadow-[#007AFF]/25 cursor-pointer"
-            >
-              Taslak Hazırla <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={onSendTemplates}
-              className="flex items-center gap-1.5 px-4 py-2 bg-[#34C759] hover:bg-[#248A3D] text-white rounded-xl text-xs font-bold transition-all active:scale-[0.98] shadow-md shadow-[#34C759]/25 cursor-pointer"
-            >
-              Hazır Şablonla Gönder <FileText className="w-3.5 h-3.5" />
-            </button>
+          {isLiveLocked && (
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold leading-relaxed">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <span>Seçimin içinde canlı gönderime uygun olmayan kayıtlar var. Sistem bu kişilere mesaj göndermez.</span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={onFilterTemplateRequired}
+                className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-xl text-xs font-bold transition-all border border-amber-200"
+              >
+                Şablon gerekenleri göster
+              </button>
+              <button
+                onClick={onFilterInboxOpen}
+                className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl text-xs font-bold transition-all border border-blue-200"
+              >
+                Cevap bekleyenleri göster
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2 items-center">
+              <button
+                onClick={onClearSelection}
+                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all"
+              >
+                Seçimi kaldır
+              </button>
+              <button
+                onClick={onPrepareDrafts}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#007AFF] hover:bg-[#0056b3] text-white rounded-xl text-xs font-bold transition-all active:scale-[0.98] shadow-sm cursor-pointer"
+              >
+                Taslak hazırla <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={onSendTemplates}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#34C759] hover:bg-[#248A3D] text-white rounded-xl text-xs font-bold transition-all active:scale-[0.98] shadow-sm cursor-pointer"
+              >
+                Hazır şablon gönder <FileText className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

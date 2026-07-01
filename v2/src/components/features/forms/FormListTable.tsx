@@ -320,103 +320,94 @@ export function FormListTable({
                         const apBadge = getAutopilotBadge(baseCat);
                         const gate = form.autopilotDecision.gateState;
 
-                        const getGateBadge = (gState: string) => {
+                        const getGateBadge = (gState: string, reason?: string) => {
+                          const normalizedReason = (reason || '').toLowerCase();
                           switch (gState) {
                             case 'live_locked':
-                              return { label: 'Kilitli', icon: '🔒' };
+                              return { label: 'Canlı Kapalı', icon: '🔒' };
                             case 'dry_run':
-                              return { label: 'Dry-Run', icon: '🧪' };
+                              return { label: 'Test Modu', icon: '🧪' };
                             case 'feature_disabled':
                               return { label: 'Ayar Kapalı', icon: '🔒' };
                             case 'allowlist_missing':
-                              return { label: 'İzin Eksik', icon: '🔒' };
+                              return { label: 'Canlı İzin Yok', icon: '🔒' };
                             case 'global_disabled':
-                              return { label: 'Kilit Kapalı', icon: '🔒' };
+                              return { label: 'Otomasyon Kapalı', icon: '🔒' };
                             default:
+                              if (normalizedReason === 'tenant_not_allowlisted' || normalizedReason === 'tenant_not_found') {
+                                return { label: 'Canlı İzin Yok', icon: '🔒' };
+                              }
                               return null;
                           }
                         };
-                        const gateBadge = getGateBadge(gate);
+                        const gateBadge = getGateBadge(gate, form.autopilotDecision.reason);
 
-                        const mapExactGateReason = (gateState: string, reason: string): string => {
+                        const mapGateReasonToDisplay = (gateState: string, reason: string): string => {
                           const r = (reason || '').toLowerCase();
                           const g = (gateState || '').toLowerCase();
 
                           if (g === 'allowlist_missing' || r === 'tenant_not_allowlisted' || r === 'tenant_not_found') {
-                            return 'tenant_not_allowlisted';
+                            return 'Kurum canlı gönderime açılmamış.';
                           }
                           if (g === 'live_locked' || r === 'phase_lock_outbound_blocked' || r === 'phase_lock_enabled') {
-                            return 'phase_lock_outbound_blocked';
+                            return 'Canlı mesaj gönderimi bu aşamada kapalı.';
                           }
                           if (g === 'global_disabled' || r === 'global_disabled') {
-                            return 'global_disabled';
+                            return 'Otomasyon genel ayarlardan kapalı.';
                           }
                           if (g === 'dry_run' || r === 'dry_run' || r === 'dry_run_enabled') {
-                            return 'dry_run';
+                            return 'Test modu açık; gerçek mesaj gönderilmez.';
                           }
                           if (r === 'rollout_percentage_excluded' || r === 'rollout_excluded') {
-                            return 'rollout_excluded';
+                            return 'Bu kayıt mevcut yayın kapsamının dışında.';
                           }
                           if (r === 'department_not_allowed') {
-                            return 'department_not_allowed';
+                            return 'Bu bölüm için otomatik gönderim kapalı.';
                           }
                           if (r === 'meta_window_closed' || r === 'template_required' || r === 'template_not_available') {
-                            return 'outside_24h_window';
+                            return '24 saat penceresi kapalı; onaylı şablon gerekir.';
                           }
                           if (r === 'not_whatsapp_channel' || r === 'invalid_phone' || r === 'invalid_phone/channel') {
-                            return 'invalid_phone/channel';
+                            return 'WhatsApp kanalı veya telefon bilgisi uygun değil.';
                           }
                           
-                          if (g === 'feature_disabled') return 'global_disabled';
+                          if (g === 'feature_disabled') return 'Bu özellik ayarlardan kapalı.';
                           
-                          return reason || gateState || 'unknown_reason';
+                          return 'Kontrol edilmesi gereken bir durum var.';
                         };
+                        const gateReasonText = mapGateReasonToDisplay(gate, form.autopilotDecision.reason);
+                        const decisionReason = form.autopilotDecision.userFriendlyReason || 'Durum hesaplandı.';
 
                         return (
                           <div className="flex flex-col items-start gap-1">
-                            <div className="relative group inline-block">
+                            <div className="inline-block">
                               <span 
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold border uppercase tracking-wider shadow-sm cursor-help transition-all hover:scale-[1.02]"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold border uppercase tracking-wider shadow-sm"
                                 style={{ 
                                   backgroundColor: `${apBadge.color}15`,
                                   color: apBadge.color,
                                   borderColor: `${apBadge.color}25`
                                 }}
+                                title={decisionReason}
                               >
                                 <span className="text-[10px]">{apBadge.icon}</span> {apBadge.label}
                               </span>
-                              
-                              {/* CSS Hover Tooltip */}
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-56 p-2.5 bg-slate-900 text-white text-[10px] font-semibold rounded-lg shadow-lg z-50 text-center leading-normal break-words whitespace-normal border border-white/10">
-                                <div className="font-bold border-b border-white/10 pb-1 mb-1">{apBadge.label} Durumu</div>
-                                <div className="text-gray-300 font-medium">{form.autopilotDecision.userFriendlyReason || 'Uyum durumu hesaplanamadı.'}</div>
-                                {gate && gate !== 'open' && (
-                                  <div className="mt-1.5 pt-1.5 border-t border-white/10 text-[9px] text-orange-400 font-bold uppercase tracking-wider flex items-center justify-center gap-1">
-                                    <span>⚠️</span> Canlı Mesaj Gönderimi Devre Dışı
-                                  </div>
-                                )}
-                                {/* Tooltip Arrow */}
-                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
-                              </div>
                             </div>
 
                             {gateBadge && (
-                              <div className="relative group inline-block mt-0.5">
+                              <div className="inline-block mt-0.5">
                                 <span 
-                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider text-slate-500 bg-slate-100 border-slate-200 cursor-help transition-all hover:scale-[1.02]"
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider text-slate-600 bg-slate-50 border-slate-200"
+                                  title={gateReasonText}
                                 >
                                   <span className="text-[9px]">{gateBadge.icon}</span> {gateBadge.label}
                                 </span>
-                                {/* Exact Reason Tooltip */}
-                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-slate-950 text-white text-[9px] font-bold rounded shadow-lg z-50 text-center leading-normal border border-white/5">
-                                  <div className="text-gray-400 font-semibold mb-0.5">Kilit Gerekçesi</div>
-                                  <div className="text-orange-400 font-extrabold font-mono tracking-wider break-all">
-                                    {mapExactGateReason(gate, form.autopilotDecision.reason)}
-                                  </div>
-                                  {/* Tooltip Arrow */}
-                                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-950" />
-                                </div>
                               </div>
+                            )}
+                            {gateBadge && (
+                              <span className="max-w-[220px] text-[10px] leading-snug text-[#86868B]">
+                                {gateReasonText}
+                              </span>
                             )}
                           </div>
                         );
