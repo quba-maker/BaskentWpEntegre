@@ -276,10 +276,10 @@ export function FormDetailModal({
 
   const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
     'needs_greeting': { label: 'Karşılama Bekliyor', color: '#FF9500', icon: '👋' },
-    'needs_reply': { label: 'Yanıt Verilecek', color: '#5856D6', icon: '💬' },
-    'waiting_patient': { label: 'Yanıt Bekleniyor', color: '#34C759', icon: '✅' },
+    'needs_reply': { label: 'Cevap Geldi', color: '#5856D6', icon: '💬' },
+    'waiting_patient': { label: 'Cevap Bekleniyor', color: '#34C759', icon: '✅' },
     'no_reply_waiting': { label: 'Takip Gerekli', color: '#FF9500', icon: '⏳' },
-    'patient_replied': { label: 'Yanıt Geldi', color: '#10B981', icon: '↩️' },
+    'patient_replied': { label: 'Cevap Geldi', color: '#10B981', icon: '↩️' },
     'blocked_or_invalid': { label: 'Kontrol Gerekli', color: '#FF3B30', icon: '⚠️' },
     'control_required': { label: 'Kontrol Gerekli', color: '#FF9500', icon: '🔍' },
   };

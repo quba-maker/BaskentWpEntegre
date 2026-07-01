@@ -46,7 +46,7 @@ export async function getForms(page: number = 1, search: string = "", source: st
         if (firstContactParam === 'control_required') {
           conditions.push(`cl.first_contact_status = 'control_required'`);
         } else if (firstContactParam === 'needs_reply') {
-          conditions.push(`cl.first_contact_status = 'waiting_inbox_reply' AND cl.is_no_reply_eligible = false AND COALESCE(cl.stage, '') != 'quarantine'`);
+          conditions.push(`cl.first_contact_status IN ('waiting_inbox_reply', 'patient_replied') AND cl.is_no_reply_eligible = false AND COALESCE(cl.stage, '') != 'quarantine'`);
         } else if (firstContactParam === 'waiting_patient' || firstContactParam === 'sent') {
           conditions.push(`cl.first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent') AND cl.is_no_reply_eligible = false AND COALESCE(cl.stage, '') != 'quarantine'`);
         } else if (firstContactParam === 'blocked_or_invalid') {
@@ -180,10 +180,18 @@ export async function getForms(page: number = 1, search: string = "", source: st
                       MAX(CASE WHEN action IN (${hardDuplicateActionsSql}) THEN created_at END) as first_greeting_at,
                       BOOL_OR(action = 'manual_whatsapp_greeting_echo_confirmed') as any_confirmed,
                       BOOL_OR(action = 'inbox_form_greeting_sent') as any_inbox_sent,
-                      BOOL_OR(action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')) as any_api_sent,
+                      BOOL_OR(action IN (${hardDuplicateActionsSql}) AND action != 'manual_whatsapp_greeting_echo_confirmed' AND action != 'inbox_form_greeting_sent') as any_api_sent,
                       BOOL_OR(action = 'whatsapp_app_opened_for_greeting') as any_opened
                     FROM outreach_logs
-                    WHERE lead_id = l.id AND tenant_id = l.tenant_id::text
+                    WHERE tenant_id::text = l.tenant_id::text
+                      AND (
+                        lead_id::text = l.id::text
+                        OR (
+                          action IN (${hardDuplicateActionsSql})
+                          AND created_at >= l.created_at - INTERVAL '2 hours'
+                          AND RIGHT(REGEXP_REPLACE(COALESCE(metadata->>'phone', metadata->>'target_phone', ''), '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(l.phone_number, '\\D', '', 'g'), 10)
+                        )
+                      )
                   ) ol ON true
                 ),
                 calculated_leads AS (
@@ -477,19 +485,24 @@ export async function getFormDetailData(leadId: string) {
   });
 }
 
-export async function updateLeadNotes(id: number, notes: string) {
+export async function updateLeadNotes(id: string, notes: string) {
+  const safeLeadId = typeof id === 'string' ? id.trim() : '';
+  if (!safeLeadId || !UUID_RE.test(safeLeadId)) {
+    return { success: false, error: "Geçersiz Lead ID." };
+  }
+
   return withActionGuard(
     { actionName: 'updateLeadNotes', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
       const lead = await ctx.db.executeSafe({
-        text: `SELECT phone_number FROM leads WHERE id = $1 AND tenant_id = $2`,
-        values: [id, ctx.tenantId]
+        text: `SELECT phone_number FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+        values: [safeLeadId, ctx.tenantId]
       });
       if (lead.length === 0) throw new Error("Kayıt bulunamadı.");
 
       await ctx.db.executeSafe({
-        text: `UPDATE leads SET notes = $1 WHERE id = $2 AND tenant_id = $3`,
-        values: [notes, id, ctx.tenantId]
+        text: `UPDATE leads SET notes = $1 WHERE id = $2::uuid AND tenant_id = $3::uuid`,
+        values: [notes, safeLeadId, ctx.tenantId]
       });
 
       const SHEET_URL = process.env.GOOGLE_SHEET_UPDATE_URL || process.env.GOOGLE_SHEET_URL;
@@ -558,13 +571,18 @@ export async function getCampaignNames() {
   ).then(res => res.data || []);
 }
 
-export async function updateLeadStage(id: number, stage: string) {
+export async function updateLeadStage(id: string, stage: string) {
+  const safeLeadId = typeof id === 'string' ? id.trim() : '';
+  if (!safeLeadId || !UUID_RE.test(safeLeadId)) {
+    return { success: false, error: "Geçersiz Lead ID." };
+  }
+
   return withActionGuard(
     { actionName: 'updateLeadStage', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
       const lead = await ctx.db.executeSafe({
-        text: `SELECT phone_number, raw_data FROM leads WHERE id = $1 AND tenant_id = $2`,
-        values: [id, ctx.tenantId]
+        text: `SELECT phone_number, raw_data FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+        values: [safeLeadId, ctx.tenantId]
       });
       if (lead.length === 0) throw new Error("Kayıt bulunamadı.");
 
@@ -578,7 +596,7 @@ export async function updateLeadStage(id: number, stage: string) {
       const result = await UnifiedStageService.update({
         tenantId: ctx.tenantId,
         source: 'forms',
-        leadId: id,
+        leadId: safeLeadId,
         phoneNumber: lead[0].phone_number,
         targetStage: oppTargetStage,
         actorId: ctx.userId,
@@ -752,6 +770,8 @@ export async function getFormStatusCounts() {
   return withActionGuard(
     { actionName: 'getFormStatusCounts', conversationId: 'forms_action_no_conversation' },
     async (ctx) => {
+      const hardDuplicateActionsSql = FIRST_CONTACT_HARD_DUPLICATE_ACTIONS.map(a => `'${a}'`).join(', ');
+
       // Build lightweight query for counts
       const countsSql = `
         WITH base_leads AS (
@@ -780,13 +800,21 @@ export async function getFormStatusCounts() {
           LEFT JOIN LATERAL (
             SELECT 
               MAX(created_at) as last_outreach_at,
-              MAX(CASE WHEN action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed', 'inbox_form_greeting_sent') THEN created_at END) as first_greeting_at,
+              MAX(CASE WHEN action IN (${hardDuplicateActionsSql}) THEN created_at END) as first_greeting_at,
               BOOL_OR(action = 'manual_whatsapp_greeting_echo_confirmed') as any_confirmed,
               BOOL_OR(action = 'inbox_form_greeting_sent') as any_inbox_sent,
-              BOOL_OR(action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')) as any_api_sent,
+              BOOL_OR(action IN (${hardDuplicateActionsSql}) AND action != 'manual_whatsapp_greeting_echo_confirmed' AND action != 'inbox_form_greeting_sent') as any_api_sent,
               BOOL_OR(action = 'whatsapp_app_opened_for_greeting') as any_opened
             FROM outreach_logs
-            WHERE lead_id = l.id AND tenant_id = l.tenant_id::text
+            WHERE tenant_id::text = l.tenant_id::text
+              AND (
+                lead_id::text = l.id::text
+                OR (
+                  action IN (${hardDuplicateActionsSql})
+                  AND created_at >= l.created_at - INTERVAL '2 hours'
+                  AND RIGHT(REGEXP_REPLACE(COALESCE(metadata->>'phone', metadata->>'target_phone', ''), '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE(l.phone_number, '\\D', '', 'g'), 10)
+                )
+              )
           ) ol ON true
           WHERE l.tenant_id = $1
         ),

@@ -15443,11 +15443,11 @@ test("Başkent v92 T152: form first-contact UI uses simple operational buckets",
   assert(mod.getFirstContactUiBucket({ firstContactStatus: "manual_greeting_confirmed" }) === "waiting_patient", "Manual greeting confirmed should wait for patient reply");
   assert(mod.getFirstContactUiBucket({ firstContactStatus: "inbox_greeting_sent" }) === "waiting_patient", "Inbox greeting sent should wait for patient reply");
   assert(mod.getFirstContactUiBucket({ firstContactStatus: "inbox_greeting_sent", noReplyFollowup: { is_no_reply_eligible: true } }) === "no_reply_waiting", "No-reply automation should have its own bucket");
-  assert(mod.getFirstContactUiBucket({ firstContactStatus: "patient_replied" }) === "patient_replied", "Patient replies should stay visible");
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "patient_replied" }) === "needs_reply", "Patient replies should be grouped under reply-needed bucket");
   assert(mod.getFirstContactUiBucket({ firstContactStatus: "out_of_scope" }) === "blocked_or_invalid", "Out of scope should roll up to control required");
   assert(mod.getFirstContactUiBucket({ firstContactStatus: "needs_greeting", stage: "quarantine" }) === "control_required", "Quarantine should always require control");
-  assert(mod.getFirstContactFilterLabel("needs_reply") === "Yanıt Verilecek", "Inbound waiting filter should be action oriented");
-  assert(mod.getFirstContactFilterLabel("waiting_patient") === "Yanıt Bekleniyor", "Sent filter should be shown as waiting for patient reply");
+  assert(mod.getFirstContactFilterLabel("needs_reply") === "Cevap Geldi", "Inbound waiting filter should be action oriented");
+  assert(mod.getFirstContactFilterLabel("waiting_patient") === "Cevap Bekleniyor", "Sent filter should be shown as waiting for patient reply");
   assert(mod.getFirstContactFilterLabel("no_reply_waiting") === "Takip Gerekli", "No-reply filter should be follow-up oriented");
 });
 
@@ -15524,6 +15524,42 @@ test("Başkent v93 T155: form greeting duplicate guards respect WhatsApp summari
   assert(outreachContent.includes("whatsapp_form_summary_received"), "Toplu karşılama WhatsApp form özeti alınan kişiye tekrar şablon göndermemeli");
   assert(sheetsContent.includes("INGEST_AUTO_GREETING_SKIP_INBOUND_EXISTS"), "Sheets webhook son WhatsApp inbound varsa otomatik şablonu atlamalı");
   assert(sheetsContent.includes("RIGHT(phone_number, 10) = ANY($2::text[])"), "Sheets webhook telefon suffix sorgusu tip güvenli olmalı");
+});
+
+test("Başkent v94 T156: form management treats WhatsApp form summaries as first contact handled", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const resolverPath = path.join(process.cwd(), "src/lib/utils/first-contact-status-resolver.ts");
+  const formsPath = path.join(process.cwd(), "src/app/actions/forms.ts");
+  const outreachPath = path.join(process.cwd(), "src/app/actions/outreach.ts");
+  const manualEchoPath = path.join(process.cwd(), "src/lib/services/manual-greeting-echo-matcher.ts");
+  const uiPath = path.join(process.cwd(), "src/components/features/forms/first-contact-ui.ts");
+  const tabsPath = path.join(process.cwd(), "src/components/features/forms/FormStatsTabs.tsx");
+  const tablePath = path.join(process.cwd(), "src/components/features/forms/FormListTable.tsx");
+
+  const resolverContent = fs.readFileSync(resolverPath, "utf8");
+  const formsContent = fs.readFileSync(formsPath, "utf8");
+  const outreachContent = fs.readFileSync(outreachPath, "utf8");
+  const manualEchoContent = fs.readFileSync(manualEchoPath, "utf8");
+  const uiContent = fs.readFileSync(uiPath, "utf8");
+  const tabsContent = fs.readFileSync(tabsPath, "utf8");
+  const tableContent = fs.readFileSync(tablePath, "utf8");
+
+  assert(resolverContent.includes("'whatsapp_form_summary_received'"), "First contact resolver should treat WhatsApp form summaries as hard duplicate greetings");
+  assert(resolverContent.includes("'outreach_form_greeting_template_sent'"), "First contact resolver should include action-result event names too");
+  assert(formsContent.includes("RIGHT(REGEXP_REPLACE(COALESCE(metadata->>'phone', metadata->>'target_phone', ''), '\\\\D', '', 'g'), 10)"), "Form list should match summary/greeting logs by sanitized phone fallback");
+  assert(formsContent.includes("action IN (${hardDuplicateActionsSql})"), "Form list/counts should use the shared hard duplicate action set");
+  assert(formsContent.includes("cl.first_contact_status IN ('waiting_inbox_reply', 'patient_replied')"), "Cevap Geldi filter should include both first inbound and later patient replies");
+  assert(formsContent.includes("updateLeadNotes(id: string"), "Lead notes should keep UUID as string");
+  assert(formsContent.includes("updateLeadStage(id: string"), "Lead stage updates should keep UUID as string");
+  assert(formsContent.includes("id = $1::uuid"), "Lead detail/update queries should cast UUID explicitly");
+  assert(outreachContent.includes("'whatsapp_form_summary_received'"), "Outreach duplicate guard should block repeat greetings after WhatsApp form summaries");
+  assert(manualEchoContent.includes("'whatsapp_form_summary_received'"), "Manual echo matcher should also treat WhatsApp form summaries as addressed");
+  assert(uiContent.includes("needs_reply: 'Cevap Geldi'"), "UI should use simple SaaS-facing reply label");
+  assert(uiContent.includes("waiting_patient: 'Cevap Bekleniyor'"), "UI should use simple SaaS-facing waiting label");
+  assert(uiContent.includes("if (status === 'patient_replied') return 'needs_reply'"), "Patient replies should roll up to the Cevap Geldi bucket");
+  assert(tabsContent.includes("(statusCounts as any).patient_replied"), "Stats tab should add patient replies into Cevap Geldi count");
+  assert(tableContent.includes("'needs_reply': { label: 'Cevap Geldi'"), "Table badge should show Cevap Geldi");
 });
 
 

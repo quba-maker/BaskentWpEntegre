@@ -10,24 +10,24 @@ export type FirstContactUiBucket =
 export const FIRST_CONTACT_UI_LABELS: Record<FirstContactUiBucket | 'all', string> = {
   all: 'Tümü',
   needs_greeting: 'Karşılama Bekliyor',
-  needs_reply: 'Yanıt Verilecek',
-  waiting_patient: 'Yanıt Bekleniyor',
+  needs_reply: 'Cevap Geldi',
+  waiting_patient: 'Cevap Bekleniyor',
   no_reply_waiting: 'Takip Gerekli',
-  patient_replied: 'Yanıt Geldi',
+  patient_replied: 'Cevap Geldi',
   blocked_or_invalid: 'Kontrol Gerekli',
   control_required: 'Kontrol Gerekli',
 };
 
 export const FIRST_CONTACT_INTERNAL_LABELS: Record<string, string> = {
   needs_greeting: 'Karşılama Bekliyor',
-  waiting_inbox_reply: 'Yanıt Verilecek',
+  waiting_inbox_reply: 'Cevap Geldi',
   whatsapp_opened: 'Kontrol Gerekli',
-  manual_greeting_confirmed: 'Yanıt Bekleniyor',
-  inbox_greeting_sent: 'Yanıt Bekleniyor',
-  sent: 'Yanıt Bekleniyor',
-  waiting_patient: 'Yanıt Bekleniyor',
-  needs_reply: 'Yanıt Verilecek',
-  patient_replied: 'Yanıt Geldi',
+  manual_greeting_confirmed: 'Cevap Bekleniyor',
+  inbox_greeting_sent: 'Cevap Bekleniyor',
+  sent: 'Cevap Bekleniyor',
+  waiting_patient: 'Cevap Bekleniyor',
+  needs_reply: 'Cevap Geldi',
+  patient_replied: 'Cevap Geldi',
   blocked_or_invalid: 'Kontrol Gerekli',
   out_of_scope: 'Kapsam Dışı',
   control_required: 'Kontrol Gerekli',
@@ -49,7 +49,7 @@ export function getFirstContactUiBucket(formOrStatus: any): FirstContactUiBucket
   if (status === 'needs_reply') return 'needs_reply';
   if (status === 'waiting_patient' || status === 'sent') return 'waiting_patient';
   if (status === 'waiting_inbox_reply') return 'needs_reply';
-  if (status === 'patient_replied') return 'patient_replied';
+  if (status === 'patient_replied') return 'needs_reply';
   if (status === 'blocked_or_invalid' || status === 'out_of_scope') return 'blocked_or_invalid';
   if (status === 'manual_greeting_confirmed' || status === 'inbox_greeting_sent') return 'waiting_patient';
   if (status === 'whatsapp_opened') return 'control_required';

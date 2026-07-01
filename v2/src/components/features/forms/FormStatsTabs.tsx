@@ -13,9 +13,8 @@ export function FormStatsTabs({ firstContactFilter, setFirstContactFilter, statu
     { value: 'all', label: FIRST_CONTACT_UI_LABELS.all, icon: '📁' },
     { value: 'needs_greeting', label: FIRST_CONTACT_UI_LABELS.needs_greeting, icon: '👋' },
     { value: 'needs_reply', label: FIRST_CONTACT_UI_LABELS.needs_reply, icon: '💬' },
-    { value: 'waiting_patient', label: FIRST_CONTACT_UI_LABELS.waiting_patient, icon: '✅' },
     { value: 'no_reply_waiting', label: FIRST_CONTACT_UI_LABELS.no_reply_waiting, icon: '⏳' },
-    { value: 'patient_replied', label: FIRST_CONTACT_UI_LABELS.patient_replied, icon: '↩️' },
+    { value: 'waiting_patient', label: FIRST_CONTACT_UI_LABELS.waiting_patient, icon: '✅' },
     { value: 'blocked_or_invalid', label: FIRST_CONTACT_UI_LABELS.blocked_or_invalid, icon: '⚠️' }
   ];
 
@@ -27,7 +26,7 @@ export function FormStatsTabs({ firstContactFilter, setFirstContactFilter, statu
           ? tab.value === 'blocked_or_invalid'
             ? ((statusCounts as any).blocked_or_invalid || 0) + ((statusCounts as any).control_required || 0) + ((statusCounts as any).whatsapp_opened || 0)
             : tab.value === 'needs_reply'
-              ? (statusCounts as any).waiting_inbox_reply
+              ? ((statusCounts as any).waiting_inbox_reply || 0) + ((statusCounts as any).patient_replied || 0)
             : tab.value === 'waiting_patient'
               ? (statusCounts as any).sent
             : (statusCounts as any)[tab.value]

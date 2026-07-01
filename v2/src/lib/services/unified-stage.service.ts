@@ -41,7 +41,7 @@ export interface UnifiedStageUpdateInput {
   /** Conversation ID — finds latest active opportunity */
   conversationId?: string;
   /** Lead ID — finds linked opportunity via customer_id or phone */
-  leadId?: number;
+  leadId?: string;
   /** Phone number — finds opportunity if single unambiguous match */
   phoneNumber?: string;
   /** Target stage in opportunity stage system */
@@ -325,7 +325,7 @@ export class UnifiedStageService {
   ): Promise<{
     opportunity: any | null;
     ambiguous: boolean;
-    leadId?: number;
+    leadId?: string;
   }> {
     const { tenantId, opportunityId, conversationId, leadId, phoneNumber } = input;
 
@@ -353,7 +353,7 @@ export class UnifiedStageService {
     // Path 3: leadId → find via customer_id or phone
     if (leadId) {
       const leadRows = await db.executeSafe({
-        text: `SELECT phone_number, customer_id FROM leads WHERE id = $1 AND tenant_id = $2`,
+        text: `SELECT phone_number, customer_id FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid`,
         values: [leadId, tenantId]
       }) as any[];
       
@@ -473,7 +473,7 @@ export class UnifiedStageService {
   private static async legacyFallback(
     db: TenantDB,
     input: UnifiedStageUpdateInput,
-    resolution: { leadId?: number }
+    resolution: { leadId?: string }
   ): Promise<UnifiedStageResult> {
     const { tenantId, source, targetStage, actorId, reason, phoneNumber, leadId } = input;
 
@@ -485,14 +485,14 @@ export class UnifiedStageService {
     const actualLeadId = leadId || resolution.leadId;
     if (actualLeadId) {
       queries.push({
-        text: `UPDATE leads SET stage = $1 WHERE id = $2 AND tenant_id = $3`,
+        text: `UPDATE leads SET stage = $1 WHERE id = $2::uuid AND tenant_id = $3::uuid`,
         values: [mirrorStage, actualLeadId, tenantId]
       });
 
       // Get phone for conv mirror
       if (!phoneNumber) {
         const leadRows = await db.executeSafe({
-          text: `SELECT phone_number FROM leads WHERE id = $1 AND tenant_id = $2`,
+          text: `SELECT phone_number FROM leads WHERE id = $1::uuid AND tenant_id = $2::uuid`,
           values: [actualLeadId, tenantId]
         }) as any[];
         if (leadRows.length > 0) {

@@ -58,7 +58,9 @@ export const FIRST_CONTACT_HARD_DUPLICATE_ACTIONS = [
   'inbox_form_greeting_sent',
   'greeting_sent',
   'template_sent',
-  'form_greeting_template_sent'
+  'form_greeting_template_sent',
+  'outreach_form_greeting_template_sent',
+  'whatsapp_form_summary_received'
 ];
 
 export const FIRST_CONTACT_GREETING_ACTIONS = FIRST_CONTACT_HARD_DUPLICATE_ACTIONS;
@@ -71,10 +73,10 @@ export const FIRST_CONTACT_SOFT_DRAFT_ACTIONS = [
 
 export const FIRST_CONTACT_STATUS_LABELS: Record<FirstContactStatus, string> = {
   needs_greeting: 'Karşılama Bekliyor',
-  waiting_inbox_reply: 'Panelden Cevap Bekliyor',
+  waiting_inbox_reply: 'Cevap Geldi',
   whatsapp_opened: 'WhatsApp\'ta Açıldı',
   manual_greeting_confirmed: 'Manuel WhatsApp Doğrulandı',
-  inbox_greeting_sent: 'Cevap Gönderildi',
+  inbox_greeting_sent: 'Cevap Bekleniyor',
   patient_replied: 'Cevap Geldi',
   blocked_or_invalid: 'Sorunlu',
   out_of_scope: 'Kapsam Dışı'
@@ -136,7 +138,9 @@ export function resolveFirstContactStatus(
     } else if (
       log.action === 'greeting_sent' || 
       log.action === 'template_sent' || 
-      log.action === 'form_greeting_template_sent'
+      log.action === 'form_greeting_template_sent' ||
+      log.action === 'outreach_form_greeting_template_sent' ||
+      log.action === 'whatsapp_form_summary_received'
     ) {
       phoneObj.hasApiGreetingSent = true;
     }
@@ -417,4 +421,3 @@ export async function resolveFirstContactCore(
 
   return resolveFirstContactStatus(phoneList, logsRes, inboundMessages, outboundMessages, { stage: lead.stage });
 }
-

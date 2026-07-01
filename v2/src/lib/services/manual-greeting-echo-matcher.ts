@@ -113,7 +113,7 @@ export class ManualGreetingEchoMatcher {
     if (score >= threshold) {
       // 4. Zero-outbound validation: Check if there's any API-sent or already confirmed log
       const duplicateConfirmedLogs = await db.executeSafe({
-        text: `SELECT id FROM outreach_logs WHERE tenant_id = $1 AND lead_id = $2 AND action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed') LIMIT 1`,
+        text: `SELECT id FROM outreach_logs WHERE tenant_id = $1 AND lead_id = $2 AND action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'outreach_form_greeting_template_sent', 'whatsapp_form_summary_received', 'manual_whatsapp_greeting_echo_confirmed') LIMIT 1`,
         values: [tenantId, openLog.lead_id]
       }) as any[];
       
