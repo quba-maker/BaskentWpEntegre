@@ -1188,16 +1188,32 @@ export async function sendFormGreetingTemplateAction(
       } catch (_) {}
 
       // 2. Duplicate Check (Hard Guard)
-      // Check if patient wrote to us (inbound)
-      const inbounds = await ctx.db.executeSafe({
-        text: `/* sendFormGreetingTemplateAction:inboundBlock */
-               SELECT 1 FROM messages 
-               WHERE tenant_id = $1::uuid AND RIGHT(phone_number, 10) = RIGHT($2, 10) AND direction = 'in' 
-               LIMIT 1`,
+      // A Meta click-to-WhatsApp form summary is an inbound message, but not a patient reply
+      // to a greeting. Keep it out of template greeting sends and route it to inbox/AI instead.
+      const inboundStateRows = await ctx.db.executeSafe({
+        text: `/* sendFormGreetingTemplateAction:inboundState */
+               SELECT
+                 COALESCE(BOOL_OR(COALESCE(media_metadata->'native'->'whatsapp_form_summary'->>'detected', 'false') = 'true'), false) AS has_form_summary,
+                 COALESCE(BOOL_OR(COALESCE(media_metadata->'native'->'whatsapp_form_summary'->>'detected', 'false') != 'true'), false) AS has_patient_message
+               FROM messages
+               WHERE tenant_id = $1::uuid
+                 AND RIGHT(REGEXP_REPLACE(phone_number, '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE($2::text, '\\D', '', 'g'), 10)
+                 AND direction = 'in'
+                 AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')`,
         values: [ctx.tenantId, phone]
       }) as any[];
-      if (inbounds.length > 0) {
+      const inboundState = inboundStateRows[0] || {};
+      const hasPatientMessage = inboundState.has_patient_message === true || inboundState.has_patient_message === 'true';
+      const hasFormSummary = inboundState.has_form_summary === true || inboundState.has_form_summary === 'true';
+
+      if (hasPatientMessage) {
         return { success: false, error: "Hasta zaten bize yazdı. Karşılama engellendi." };
+      }
+      if (hasFormSummary) {
+        return {
+          success: false,
+          error: "Hasta form özetini WhatsApp üzerinden göndermiş. Bu kayıt için hazır şablon yerine sohbet/inbox yanıtı kullanılmalı."
+        };
       }
 
       // Check if hard duplicate in outreach_logs

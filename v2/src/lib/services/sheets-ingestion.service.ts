@@ -641,11 +641,15 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
 	          const phoneSuffixes = [phone1, phone2].filter(Boolean).map((phone) => String(phone).slice(-10));
 	          const recentInboundRows = await db.executeSafe({
 	            text: `
-	              SELECT id, provider_message_id, created_at
+	              SELECT id,
+	                     provider_message_id,
+	                     created_at,
+	                     COALESCE(media_metadata->'native'->'whatsapp_form_summary'->>'detected', 'false') = 'true' AS is_whatsapp_form_summary
 	              FROM messages
 	              WHERE tenant_id = $1::uuid
 	                AND direction = 'in'
 	                AND RIGHT(phone_number, 10) = ANY($2::text[])
+	                AND (media_metadata IS NULL OR COALESCE(media_metadata->'native'->>'message_type', '') != 'reaction')
 	                AND created_at > NOW() - INTERVAL '2 hours'
 	              ORDER BY created_at DESC
 	              LIMIT 1
@@ -655,11 +659,16 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
 
 	          if (recentInboundRows.length > 0) {
 	            autoGreetingEnabled = false;
-	            log.info('[INGEST_AUTO_GREETING_SKIP_INBOUND_EXISTS] Recent inbound WhatsApp form/message already opened the conversation; template greeting skipped', {
+	            const isWhatsappFormSummary = recentInboundRows[0]?.is_whatsapp_form_summary === true
+	              || recentInboundRows[0]?.is_whatsapp_form_summary === 'true';
+	            log.info(isWhatsappFormSummary ? '[INGEST_AUTO_GREETING_SKIP_WHATSAPP_FORM_SUMMARY]' : '[INGEST_AUTO_GREETING_SKIP_INBOUND_EXISTS]', {
 	              tenantId,
 	              phoneSuffix: phone1.slice(-4),
 	              providerMessageId: recentInboundRows[0]?.provider_message_id || null,
 	              inboundAt: recentInboundRows[0]?.created_at || null,
+	              reason: isWhatsappFormSummary
+	                ? 'Meta click-to-WhatsApp form summary already opened the conversation; route to inbox/AI instead of template greeting'
+	                : 'Recent inbound WhatsApp message already opened the conversation; template greeting skipped',
 	            });
 	          }
 	        } catch (inboundGuardErr) {

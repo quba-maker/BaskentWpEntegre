@@ -386,7 +386,7 @@ export function AutoGreetingSettingsPanel({
                   <div className="space-y-0.5">
                     <label className="text-xs font-bold text-[#1D1D1F]">Otomatik Gönderilecek Şablon</label>
                     <p className="text-[10px] text-[#86868B] font-medium">
-                      Yeni form düşünce hastaya seçili onaylı WhatsApp şablonu gider.
+                      Yeni form düşünce seçili onaylı WhatsApp şablonu gider. Hasta form özetini WhatsApp sohbetine gönderdiyse şablon tekrarı yapılmaz; sohbet/inbox yanıtı kullanılır.
                     </p>
                   </div>
                   <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-1">

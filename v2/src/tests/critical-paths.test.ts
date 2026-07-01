@@ -15476,6 +15476,7 @@ test("Başkent v91 T151: automatic form greeting uses selected template settings
   assert(settingsContent.includes("settingsPatch.dry_run !== undefined ? { dry_run: settingsPatch.dry_run }"), "Legacy channel save should not force dry_run=true when patch omits it");
   assert(panelContent.includes("Otomatik Gönderilecek Şablon"), "Auto greeting panel should expose a template selector");
   assert(panelContent.includes("getGreetingTemplates"), "Auto greeting panel should load approved greeting templates");
+  assert(panelContent.includes("Hasta form özetini WhatsApp sohbetine gönderdiyse şablon tekrarı yapılmaz"), "Auto greeting panel should explain WhatsApp form summary handling");
   assert(sheetsContent.includes("form_autopilot_for_open_meta_window"), "Sheets webhook should read form autopilot settings");
   assert(sheetsContent.includes("formAutopilotConfig.template_name"), "Sheets webhook should use selected template name");
   assert(sheetsContent.includes("whatsappConfig.template_name"), "Sheets webhook should support whatsapp channel template fallback");
@@ -15575,8 +15576,11 @@ test("Başkent v93 T155: form greeting duplicate guards keep WhatsApp summaries 
   assert(!greetingActionsBlock.includes("whatsapp_form_summary_received"), "Identity WhatsApp form özetini greetingSent kabul etmemeli");
   assert(identityContent.includes("hasOnlyWhatsappFormSummaryContext"), "Identity eski WhatsApp form özeti kayıtlarını gerçek greeting'den ayırmalı");
   assert(outreachContent.includes("ol.lead_id::text = $2::text"), "Toplu karşılama duplicate guard lead id'yi text güvenli kıyaslamalı");
-  assert(outreachContent.includes("sendFormGreetingTemplateAction:inboundBlock"), "Toplu karşılama WhatsApp'tan yazan kişiyi inbound guard ile engellemeli");
+  assert(outreachContent.includes("sendFormGreetingTemplateAction:inboundState"), "Toplu karşılama WhatsApp form özeti ile normal hasta mesajını ayırmalı");
+  assert(outreachContent.includes("has_form_summary"), "Toplu karşılama WhatsApp form özetini ayrı sinyal olarak görmeli");
+  assert(outreachContent.includes("hazır şablon yerine sohbet/inbox yanıtı"), "Toplu karşılama WhatsApp form özeti gelmiş kayıtları inbox/AI yoluna yönlendirmeli");
   assert(sheetsContent.includes("INGEST_AUTO_GREETING_SKIP_INBOUND_EXISTS"), "Sheets webhook son WhatsApp inbound varsa otomatik şablonu atlamalı");
+  assert(sheetsContent.includes("INGEST_AUTO_GREETING_SKIP_WHATSAPP_FORM_SUMMARY"), "Sheets webhook WhatsApp form özetini ayrı skip nedeni olarak loglamalı");
   assert(sheetsContent.includes("RIGHT(phone_number, 10) = ANY($2::text[])"), "Sheets webhook telefon suffix sorgusu tip güvenli olmalı");
 });
 
