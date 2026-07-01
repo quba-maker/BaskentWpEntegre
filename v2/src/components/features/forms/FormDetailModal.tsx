@@ -6,7 +6,7 @@ import { FormDetailViewer } from "@/components/shared/form-detail-viewer/FormDet
 import { UniversalFormDetailData } from "@/components/shared/form-detail-viewer/types";
 import { extractFormFields } from "@/lib/utils/form-field-extractor";
 import { getBestDate, getDisplayName, getAllPhones, getFormCountry, STAGES } from "./utils";
-import { getFirstContactUiBucket } from "./first-contact-ui";
+import { getFirstContactUiBucket, getFirstContactUiMeta } from "./first-contact-ui";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { FormAutopilotStatusCard } from "./FormAutopilotStatusCard";
 
@@ -274,14 +274,14 @@ export function FormDetailModal({
     }
   };
 
-  const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
-    'needs_greeting': { label: 'Karşılama Bekliyor', color: '#FF9500', icon: '👋' },
-    'needs_reply': { label: 'Cevap Geldi', color: '#5856D6', icon: '💬' },
-    'waiting_patient': { label: 'Cevap Bekleniyor', color: '#34C759', icon: '✅' },
-    'no_reply_waiting': { label: 'Takip Gerekli', color: '#FF9500', icon: '⏳' },
-    'patient_replied': { label: 'Cevap Geldi', color: '#10B981', icon: '↩️' },
-    'blocked_or_invalid': { label: 'Kontrol Gerekli', color: '#FF3B30', icon: '⚠️' },
-    'control_required': { label: 'Kontrol Gerekli', color: '#FF9500', icon: '🔍' },
+  const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon?: string }> = {
+    'needs_greeting': { label: 'Karşılama Bekliyor', color: '#B45309' },
+    'needs_reply': { label: 'Yanıt Geldi', color: '#4F46E5' },
+    'waiting_patient': { label: 'Cevap Bekleniyor', color: '#047857' },
+    'no_reply_waiting': { label: 'Takip Gerekli', color: '#C2410C' },
+    'patient_replied': { label: 'Yanıt Geldi', color: '#4F46E5' },
+    'blocked_or_invalid': { label: 'Kontrol Gerekli', color: '#DC2626' },
+    'control_required': { label: 'Kontrol Gerekli', color: '#DC2626' },
   };
 
   const PRIORITY_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
@@ -456,7 +456,10 @@ export function FormDetailModal({
                     ...form,
                     firstContactStatus: readiness?.patientLevelStatus || form.firstContactStatus
                   });
-                  const badge = OUTREACH_BADGE_CONFIG[currentStatus];
+                  const badge = getFirstContactUiMeta({
+                    ...form,
+                    firstContactStatus: readiness?.patientLevelStatus || form.firstContactStatus
+                  });
                   
                   return (
                     <div className="space-y-3">
@@ -470,7 +473,7 @@ export function FormDetailModal({
                               borderColor: `${badge.color}30`
                             }}
                           >
-                            {badge.icon} {badge.label}
+                            {badge.label}
                           </span>
                         </div>
                       )}
@@ -852,9 +855,7 @@ export function FormDetailModal({
                   {outreachTimeline.map((entry) => {
                     const badgeInfo = OUTREACH_BADGE_CONFIG[entry.action];
                     const dotColor = badgeInfo?.color || '#86868B';
-                    const displayLabel = badgeInfo 
-                      ? `${badgeInfo.icon} ${badgeInfo.label}` 
-                      : entry.action;
+                    const displayLabel = badgeInfo?.label || entry.action;
                     return (
                       <div key={entry.id} className="flex items-start gap-2.5">
                         <div className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: dotColor }} />

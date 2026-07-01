@@ -1,6 +1,7 @@
 "use server";
 
 import { withActionGuard } from "@/lib/core/action-guard";
+import { resolveCanonicalFollowUp } from "@/lib/domain/task/canonical-follow-up";
 import { resolvePatientTimezone, formatDualClock, isOverdue, isToday, formatTimeTR, resolvePatientTimeDisplay } from "@/lib/utils/timezone";
 import type { JourneyStatus, NextBestAction } from "./focus-queue";
 import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
@@ -255,53 +256,23 @@ function buildOperationsTaskProjection(
   const metadata = task?.metadata || {};
   const status = task?.status || 'pending';
   const dueAt = task?.due_at;
-
-  const isClinic = metadata.appointment_type === 'clinic_visit';
-  const confirmationStatus = metadata.confirmation_status || 'none';
+  const canonical = resolveCanonicalFollowUp({
+    taskType: task?.task_type,
+    status,
+    dueAt,
+    metadata,
+    oppStage: opp?.opp_stage || opp?.stage,
+    oppIntentType: opp?.opp_intent_type || opp?.intent_type,
+    convStatus: opp?.conv_status,
+    lastOutreachAction: opp?.last_outreach_action,
+  });
+  const confirmationStatus = canonical.confirmationStatus;
 
   // 1. uiBucket Calculation
-  let uiBucket: UiBucket = 'open';
-
-  if (status === 'cancelled' || metadata.appointment_result === 'cancelled') {
-    uiBucket = 'cancelled';
-  } else if (status === 'completed') {
-    if (metadata.appointment_result === 'no_show') {
-      uiBucket = 'unreachable';
-    } else {
-      uiBucket = 'completed';
-    }
-  } else if (status === 'no_show' || metadata.appointment_result === 'no_show') {
-    uiBucket = 'unreachable';
-  } else if (isClinic && confirmationStatus === 'no_response') {
-    uiBucket = 'unreachable';
-  } else if (status === 'pending' || status === 'in_progress') {
-    const isTaskOverdue = dueAt && new Date(dueAt).getTime() < Date.now();
-    if (isTaskOverdue) {
-      uiBucket = 'overdue';
-    } else if (metadata.bot_suggestion?.status === 'pending') {
-      uiBucket = 'bot_suggestion_pending';
-    } else if (confirmationStatus === 'confirmed') {
-      uiBucket = 'confirmed';
-    } else if (task?.task_type === 'callback_scheduled' || isClinic) {
-      uiBucket = 'scheduled';
-    } else {
-      uiBucket = 'open';
-    }
-  }
+  let uiBucket: UiBucket = canonical.uiBucket;
 
   // 2. Appointment Type
-  let appointmentType: OperationsTaskProjected['appointmentType'] = 'phone_call';
-  if (isClinic) {
-    appointmentType = 'clinic_visit';
-  } else if (metadata.appointment_type === 'consultation') {
-    appointmentType = 'consultation';
-  } else if (task?.task_type === 'doctor_review_pending') {
-    appointmentType = 'doctor_review';
-  } else if (task?.task_type === 'send_report_reminder') {
-    appointmentType = 'report_followup';
-  } else if (metadata.appointment_type === 'phone_call') {
-    appointmentType = 'phone_call';
-  }
+  let appointmentType: OperationsTaskProjected['appointmentType'] = canonical.appointmentType;
 
   // 3. Time Display using resolvePatientTimeDisplay
   let scheduledUtc = metadata.scheduled_for_utc || dueAt || null;
@@ -349,6 +320,20 @@ function buildOperationsTaskProjection(
 // ── SHARED COMPUTE FUNCTIONS (reuse from focus-queue logic) ──
 
 function computeJourneyStatus(row: any): JourneyStatus {
+  const canonical = resolveCanonicalFollowUp({
+    taskType: row.task_type,
+    status: row.task_status,
+    dueAt: row.task_due_at,
+    metadata: row.task_metadata,
+    oppStage: row.opp_stage,
+    oppIntentType: row.opp_intent_type,
+    convStatus: row.conv_status,
+    lastOutreachAction: row.last_outreach_action,
+  });
+  if (row.task_type && canonical.lane !== 'other') {
+    return canonical.journeyStatus as JourneyStatus;
+  }
+
   if (row.opp_stage) {
     if (row.opp_stage === 'new_lead') return 'Yeni';
     if (row.opp_stage === 'first_contact') return 'İlk İletişim';
@@ -383,6 +368,20 @@ function computeJourneyStatus(row: any): JourneyStatus {
 }
 
 function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBestAction {
+  const canonical = resolveCanonicalFollowUp({
+    taskType: row.task_type,
+    status: row.task_status,
+    dueAt: row.task_due_at,
+    metadata: row.task_metadata,
+    oppStage: row.opp_stage,
+    oppIntentType: row.opp_intent_type,
+    convStatus: row.conv_status,
+    lastOutreachAction: row.last_outreach_action,
+  });
+  if (row.task_type && canonical.lane !== 'other') {
+    return canonical.nextBestAction as NextBestAction;
+  }
+
   if (journeyStatus === 'Geldi' || journeyStatus === 'Kapatıldı' || journeyStatus === 'Gelmedi / İptal' || journeyStatus === 'Uygun Değil') return 'no_action';
   
   if (row.task_due_at && !isOverdue(row.task_due_at) && !isToday(row.task_due_at)) {
@@ -403,6 +402,23 @@ function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBest
 }
 
 function computePriorityScore(row: any, journeyStatus: JourneyStatus, nextBestAction: NextBestAction): number {
+  const canonical = resolveCanonicalFollowUp({
+    taskType: row.task_type,
+    status: row.task_status,
+    dueAt: row.task_due_at,
+    metadata: row.task_metadata,
+    oppStage: row.opp_stage,
+    oppIntentType: row.opp_intent_type,
+    convStatus: row.conv_status,
+    lastOutreachAction: row.last_outreach_action,
+  });
+  if (row.task_type && canonical.lane !== 'other') {
+    let canonicalScore = canonical.priorityBoost;
+    if (row.opp_priority === 'hot' || row.task_metadata?.priority === 'high') canonicalScore += 20;
+    if (row.opp_intent_type === 'appointment_request' && canonical.isClinic) canonicalScore += 20;
+    return canonicalScore;
+  }
+
   let score = 0;
   if (journeyStatus === 'Kapatıldı' || journeyStatus === 'Geldi' || journeyStatus === 'Gelmedi / İptal') return -200;
   
@@ -440,6 +456,9 @@ const JOURNEY_STATUS_COLORS: Record<string, string> = {
   'Bot Cevap Bekliyor': 'bg-blue-100 text-blue-700',
   'İnsan Devri Gerekli': 'bg-amber-100 text-amber-800',
   'Danışman Arayacak': 'bg-indigo-100 text-indigo-700',
+  'Bugün Aranacak': 'bg-blue-100 text-blue-700',
+  'Arama Gecikti': 'bg-rose-100 text-rose-700',
+  'Arama Teyidi Bekliyor': 'bg-violet-100 text-violet-700',
   'Telefon Randevusu Planlandı': 'bg-purple-100 text-purple-700',
   'Telefon Görüşmesi Bekliyor': 'bg-violet-100 text-violet-700',
   'Telefon Görüşmesi Yapıldı': 'bg-green-100 text-green-700',
@@ -448,10 +467,18 @@ const JOURNEY_STATUS_COLORS: Record<string, string> = {
   'Tekrar Takip Gerekli': 'bg-orange-100 text-orange-700',
   'Rapor Bekleniyor': 'bg-orange-100 text-orange-700',
   'Doktor İncelemesi': 'bg-rose-100 text-rose-700',
+  'Bugünkü Randevu': 'bg-blue-100 text-blue-700',
+  'Randevu Gecikti': 'bg-rose-100 text-rose-700',
+  'Randevu Teyidi Bekliyor': 'bg-indigo-100 text-indigo-700',
+  'Randevu Tamamlandı': 'bg-green-100 text-green-700',
   'Klinik Randevusu Alındı': 'bg-green-100 text-green-700',
   'Teyit Bekliyor': 'bg-yellow-100 text-yellow-700',
   'Randevu Yaklaşıyor': 'bg-purple-100 text-purple-700',
   'Gelmedi / İptal': 'bg-red-100 text-red-700',
+  'Şablon Gerekli': 'bg-violet-100 text-violet-700',
+  'Cevap Gecikti': 'bg-rose-100 text-rose-700',
+  'Cevap Bekleniyor': 'bg-blue-100 text-blue-700',
+  'Kontrol Gerekli': 'bg-amber-100 text-amber-800',
   'Kapatıldı': 'bg-gray-100 text-gray-500',
 };
 
@@ -464,6 +491,7 @@ const ACTION_LABELS: Record<string, { label: string; colorClass: string }> = {
   'request_report': { label: 'Rapor İste', colorClass: 'text-orange-600 bg-orange-50' },
   'doctor_review_needed': { label: 'Doktor İncelemesi', colorClass: 'text-rose-600 bg-rose-50' },
   'prepare_followup_draft': { label: 'Taslak Hazırla', colorClass: 'text-violet-600 bg-violet-50' },
+  'review_required': { label: 'İncele', colorClass: 'text-amber-700 bg-amber-50' },
   'no_action': { label: 'İşlem Yok', colorClass: 'text-gray-500 bg-gray-50' },
 };
 
@@ -1439,7 +1467,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
         filtered = items.filter(item => {
           const rawStatus = item.metadata?.rawStatus || item.status;
           const isTerminal = rawStatus === 'completed' || rawStatus === 'cancelled' || item.metadata?.appointment_result === 'cancelled';
-          const dueTime = item.dueAtUtc ? new Date(item.dueAtUtc).getTime() : 0;
+          const dueTime = item.dueAtUtc ? new Date(item.dueAtUtc).getTime() : null;
 
           if (filters.status === 'completed') {
             return isTerminal;
@@ -1448,6 +1476,7 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           if (isTerminal) return false;
 
           const isWaitingReply = 
+            item.metadata?.uiBucket === 'bot_suggestion_pending' ||
             item.confirmationStatus === 'pending' || 
             item.metadata?.bot_suggestion?.status === 'pending' || 
             item.taskType === 'bot_handoff_followup' ||
@@ -1461,13 +1490,13 @@ export async function getAppointmentRows(filters?: AppointmentFilters): Promise<
           if (isWaitingReply) return false; // mutually exclusive
 
           if (filters.status === 'overdue') {
-            return dueTime < nowTime;
+            return !!dueTime && dueTime < nowTime;
           }
           if (filters.status === 'today') {
-            return dueTime >= nowTime && dueTime <= endOfTodayIstanbul;
+            return !!dueTime && dueTime >= nowTime && dueTime <= endOfTodayIstanbul;
           }
           if (filters.status === 'upcoming') {
-            return dueTime > endOfTodayIstanbul;
+            return !!dueTime && dueTime > endOfTodayIstanbul;
           }
           return true;
         });
@@ -2293,7 +2322,7 @@ export async function getAppointmentStats() {
 
         const proj = buildOperationsTaskProjection(taskObj, row);
         const isClinic = proj.appointmentType === 'clinic_visit';
-        const dueTime = proj.dueAtUtc ? new Date(proj.dueAtUtc).getTime() : 0;
+        const dueTime = proj.dueAtUtc ? new Date(proj.dueAtUtc).getTime() : null;
 
         const rawStatus = row.task_status;
         const isTerminal = rawStatus === 'completed' || rawStatus === 'cancelled' || taskObj.metadata?.appointment_result === 'cancelled';
@@ -2304,6 +2333,7 @@ export async function getAppointmentStats() {
         } else {
           // Check Cevap Bekleyenler
           const isWaitingReply = 
+            proj.uiBucket === 'bot_suggestion_pending' ||
             proj.confirmationStatus === 'pending' || 
             taskObj.metadata?.bot_suggestion?.status === 'pending' || 
             taskObj.task_type === 'bot_handoff_followup' ||
@@ -2313,10 +2343,10 @@ export async function getAppointmentStats() {
           if (isWaitingReply) {
             if (isClinic) stats.clinic_waiting_reply++; else stats.phone_waiting_reply++;
             stats.waiting_reply++;
-          } else if (dueTime < nowTime) {
+          } else if (dueTime && dueTime < nowTime) {
             if (isClinic) stats.clinic_overdue++; else stats.phone_overdue++;
             stats.overdue++;
-          } else if (dueTime <= endOfTodayIstanbul) {
+          } else if (dueTime && dueTime <= endOfTodayIstanbul) {
             if (isClinic) stats.clinic_today++; else stats.phone_today++;
             stats.today++;
           } else {
@@ -2802,8 +2832,5 @@ export async function rejectBotSuggestion(taskId: string) {
     }
   );
 }
-
-
-
 
 

@@ -3,6 +3,7 @@
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
 import { enqueueRetry } from "@/lib/retry";
+import { resolveCanonicalFollowUp } from "@/lib/domain/task/canonical-follow-up";
 import { CredentialsService } from "@/lib/services/credentials.service";
 import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 import { PatientNameSyncService } from "@/lib/services/patient-name-sync";
@@ -4250,24 +4251,6 @@ export async function getCrmPanelBundleAction(conversationId: string) {
         values: [ctx.tenantId, conversationId, activeOpportunityId || null]
       }) as any[];
 
-      const mapTaskCategory = (t: any): string => {
-        const type = t.task_type;
-        const apptType = t.metadata?.appointment_type;
-        if (type === 'call_patient' || apptType === 'phone_call' || (type === 'callback_scheduled' && apptType === 'phone_call')) {
-          return 'Arama Takibi';
-        }
-        if (type === 'clinic_visit' || apptType === 'clinic_visit' || (type === 'callback_scheduled' && apptType === 'clinic_visit')) {
-          return 'Randevu Takibi';
-        }
-        if (type === 'date_pending_followup' || type === 'appointment_reminder') {
-          return 'Hatırlatma / Geri Dönüş';
-        }
-        if (type?.includes('form') || type?.includes('missing') || type?.includes('info')) {
-          return 'Form / Eksik Bilgi Takibi';
-        }
-        return 'Hatırlatma / Geri Dönüş';
-      };
-
       const now = new Date();
       const istanbulDateStr = new Intl.DateTimeFormat('en-CA', {
         timeZone: 'Europe/Istanbul',
@@ -4278,14 +4261,20 @@ export async function getCrmPanelBundleAction(conversationId: string) {
       const endOfTodayIstanbul = new Date(`${istanbulDateStr}T23:59:59.999+03:00`);
 
       const activeTasks = activeTasksQueryRows.map(task => {
-        const due = new Date(task.due_at);
+        const canonical = resolveCanonicalFollowUp({
+          taskType: task.task_type,
+          status: task.status,
+          dueAt: task.due_at,
+          metadata: task.metadata,
+          now,
+        });
         let urgency = 1; // upcoming
         let group: 'overdue' | 'today' | 'upcoming' = 'upcoming';
 
-        if (due.getTime() < now.getTime()) {
+        if (canonical.isOverdue) {
           urgency = 3;
           group = 'overdue';
-        } else if (due.getTime() <= endOfTodayIstanbul.getTime()) {
+        } else if (canonical.isDueToday || (task.due_at && new Date(task.due_at).getTime() <= endOfTodayIstanbul.getTime())) {
           urgency = 2;
           group = 'today';
         }
@@ -4297,8 +4286,16 @@ export async function getCrmPanelBundleAction(conversationId: string) {
           description: task.description,
           due_at: task.due_at,
           status: task.status,
-          metadata: task.metadata || {},
-          category: mapTaskCategory(task),
+          metadata: {
+            ...(task.metadata || {}),
+            canonical_follow_up: {
+              lane: canonical.lane,
+              state: canonical.state,
+              label: canonical.displayLabel,
+              next_action: canonical.nextBestAction,
+            },
+          },
+          category: canonical.categoryLabel,
           group,
           urgency
         };

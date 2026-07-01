@@ -15495,7 +15495,7 @@ test("Başkent v92 T152: form first-contact UI uses simple operational buckets",
   assert(mod.getFirstContactUiBucket({ firstContactStatus: "patient_replied" }) === "needs_reply", "Patient replies should be grouped under reply-needed bucket");
   assert(mod.getFirstContactUiBucket({ firstContactStatus: "out_of_scope" }) === "blocked_or_invalid", "Out of scope should roll up to control required");
   assert(mod.getFirstContactUiBucket({ firstContactStatus: "needs_greeting", stage: "quarantine" }) === "control_required", "Quarantine should always require control");
-  assert(mod.getFirstContactFilterLabel("needs_reply") === "Cevap Geldi", "Inbound waiting filter should be action oriented");
+  assert(mod.getFirstContactFilterLabel("needs_reply") === "Yanıt Geldi", "Inbound waiting filter should be action oriented");
   assert(mod.getFirstContactFilterLabel("waiting_patient") === "Cevap Bekleniyor", "Sent filter should be shown as waiting for patient reply");
   assert(mod.getFirstContactFilterLabel("no_reply_waiting") === "Takip Gerekli", "No-reply filter should be follow-up oriented");
 });
@@ -15621,15 +15621,88 @@ test("Başkent v94 T156: form management separates template greeting from WhatsA
   assert(!manualEchoContent.includes("'whatsapp_form_summary_received'"), "Manual echo matcher should not treat WhatsApp form summaries as addressed greetings");
   assert(detailStateContent.includes("'form_greeting_template_sent'"), "Form detail should treat approved template sends as greeting sent");
   assert(detailStateContent.includes("'inbox_form_greeting_sent'"), "Form detail should treat inbox greeting sends as greeting sent");
-  assert(uiContent.includes("needs_reply: 'Cevap Geldi'"), "UI should use simple SaaS-facing reply label");
+  assert(uiContent.includes("needs_reply: 'Yanıt Geldi'"), "UI should use simple SaaS-facing reply label");
   assert(uiContent.includes("waiting_patient: 'Cevap Bekleniyor'"), "UI should use simple SaaS-facing waiting label");
-  assert(uiContent.includes("if (status === 'patient_replied') return 'needs_reply'"), "Patient replies should roll up to the Cevap Geldi bucket");
-  assert(tabsContent.includes("(statusCounts as any).patient_replied"), "Stats tab should add patient replies into Cevap Geldi count");
-  assert(tableContent.includes("'needs_reply': { label: 'Cevap Geldi'"), "Table badge should show Cevap Geldi");
+  assert(uiContent.includes("if (status === 'patient_replied') return 'needs_reply'"), "Patient replies should roll up to the Yanıt Geldi bucket");
+  assert(tabsContent.includes("(statusCounts as any).patient_replied"), "Stats tab should add patient replies into Yanıt Geldi count");
+  assert(tableContent.includes("getFirstContactUiMeta(form)"), "Table badge should use centralized Yanıt Geldi metadata");
   assert(!tableContent.includes("Kilit Gerekçesi"), "Form table should not expose technical lock tooltips");
   assert(tableContent.includes("Kurum canlı gönderime açılmamış."), "Form table should translate live-lock reasons to user-facing text");
   assert(bulkBarContent.includes("bg-white rounded-2xl"), "Bulk first-contact panel should use the light SaaS management surface");
   assert(!bulkBarContent.includes("bg-[#1D1D1F] text-white"), "Bulk first-contact panel should not use the old dark floating style");
+});
+
+test("Başkent v95 T157: canonical follow-up resolver separates phone, clinic, reply and review lanes", () => {
+  const { resolveCanonicalFollowUp } = require("../lib/domain/task/canonical-follow-up");
+  const now = new Date("2026-07-02T09:00:00.000Z");
+
+  const phone = resolveCanonicalFollowUp({
+    taskType: "callback_scheduled",
+    status: "pending",
+    dueAt: "2026-07-02T12:00:00.000Z",
+    metadata: { appointment_type: "phone_call" },
+    now,
+  });
+  assert(phone.lane === "phone_followup", `callback_scheduled phone_call should be phone follow-up, got ${phone.lane}`);
+  assert(phone.categoryLabel === "Arama Takibi", `Phone category should be Arama Takibi, got ${phone.categoryLabel}`);
+  assert(phone.appointmentType === "phone_call", `Phone appointmentType should stay phone_call, got ${phone.appointmentType}`);
+
+  const clinic = resolveCanonicalFollowUp({
+    taskType: "coordinator_review",
+    status: "pending",
+    metadata: { appointment_type: "clinic_visit" },
+    oppIntentType: "appointment_request",
+    now,
+  });
+  assert(clinic.lane === "clinic_appointment", `Clinic appointment should be clinic lane, got ${clinic.lane}`);
+  assert(clinic.categoryLabel === "Randevu Takibi", `Clinic category should be Randevu Takibi, got ${clinic.categoryLabel}`);
+  assert(clinic.nextBestAction === "continue_appointment_planning", `Clinic open action should continue appointment planning, got ${clinic.nextBestAction}`);
+
+  const reply = resolveCanonicalFollowUp({
+    taskType: "template_required_task",
+    status: "pending",
+    metadata: {},
+    now,
+  });
+  assert(reply.lane === "reply_followup", `Template task should be reply lane, got ${reply.lane}`);
+  assert(reply.state === "needs_template", `Template task should need template, got ${reply.state}`);
+  assert(reply.categoryLabel === "Cevap Takibi", `Reply category should be Cevap Takibi, got ${reply.categoryLabel}`);
+  assert(reply.journeyStatus === "Şablon Gerekli", `Template journey should be Şablon Gerekli, got ${reply.journeyStatus}`);
+
+  const review = resolveCanonicalFollowUp({
+    taskType: "bot_handoff_followup",
+    status: "pending",
+    metadata: {},
+    now,
+  });
+  assert(review.lane === "human_review", `Bot handoff should be human review lane, got ${review.lane}`);
+  assert(review.nextBestAction === "review_required", `Human review action should be review_required, got ${review.nextBestAction}`);
+});
+
+test("Başkent v95 T158: tracking screens consume canonical follow-up resolver", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const focusPath = path.join(process.cwd(), "src/app/actions/focus-queue.ts");
+  const trackingPath = path.join(process.cwd(), "src/app/actions/patient-tracking.ts");
+  const inboxPath = path.join(process.cwd(), "src/app/actions/inbox.ts");
+  const crmPanelPath = path.join(process.cwd(), "src/components/features/inbox/crm-panel.tsx");
+  const reminderPath = path.join(process.cwd(), "src/components/features/inbox/follow-up-reminder-modal.tsx");
+
+  const focusContent = fs.readFileSync(focusPath, "utf8");
+  const trackingContent = fs.readFileSync(trackingPath, "utf8");
+  const inboxContent = fs.readFileSync(inboxPath, "utf8");
+  const crmPanelContent = fs.readFileSync(crmPanelPath, "utf8");
+  const reminderContent = fs.readFileSync(reminderPath, "utf8");
+
+  assert(focusContent.includes("resolveCanonicalFollowUp"), "Focus queue should use canonical follow-up classification");
+  assert(trackingContent.includes("resolveCanonicalFollowUp"), "Patient tracking actions should use canonical follow-up classification");
+  assert(inboxContent.includes("canonical_follow_up"), "Inbox active tasks should expose canonical follow-up metadata");
+  assert(trackingContent.includes("'Cevap Gecikti'"), "Tracking colors should support reply overdue status");
+  assert(trackingContent.includes("'Kontrol Gerekli'"), "Tracking colors should support human review status");
+  assert(crmPanelContent.includes("task.category === 'Randevu Takibi' ? 'randevu'"), "CRM task links should route appointment follow-ups to randevu tab");
+  assert(crmPanelContent.includes("'hasta_takibi'"), "CRM task links should route reply/document/review follow-ups to hasta_takibi tab");
+  assert(reminderContent.includes("tab=hasta_takibi"), "Reminder modal should open an existing Takip Merkezi tab");
+  assert(!crmPanelContent.includes("'hatirlatma'"), "CRM task links should not point to the removed hatirlatma tab");
 });
 
 

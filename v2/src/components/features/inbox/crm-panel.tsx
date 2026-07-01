@@ -1648,6 +1648,9 @@ export function ContextPanel() {
                           <span className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold ${
                             task.category === 'Arama Takibi' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
                             task.category === 'Randevu Takibi' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                            task.category === 'Cevap Takibi' ? 'bg-sky-50 text-sky-700 border border-sky-100' :
+                            task.category === 'Evrak / Rapor Takibi' ? 'bg-orange-50 text-orange-700 border border-orange-100' :
+                            task.category === 'İnsan İncelemesi' ? 'bg-rose-50 text-rose-700 border border-rose-100' :
                             task.category === 'Hatırlatma / Geri Dönüş' ? 'bg-amber-50 text-amber-700 border border-amber-100' :
                             'bg-purple-50 text-purple-700 border border-purple-100'
                           }`}>
@@ -1681,7 +1684,8 @@ export function ContextPanel() {
                           <a
                             href={`/${tenantSlug}/takip?tab=${
                               task.category === 'Arama Takibi' ? 'telefon' :
-                              task.category === 'Randevu Takibi' ? 'randevu' : 'hatirlatma'
+                              task.category === 'Randevu Takibi' ? 'randevu' :
+                              'hasta_takibi'
                             }&opp=${oppId}`}
                             target="_blank"
                             rel="noopener noreferrer"

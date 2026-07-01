@@ -327,7 +327,7 @@ export function FollowUpReminderModal({
               </div>
               <div className="pt-2 flex flex-col gap-2">
                 <a
-                  href={`/${tenantSlug}/takip?tab=hatirlatma&opp=${opportunityId}`}
+                  href={`/${tenantSlug}/takip?tab=hasta_takibi&opp=${opportunityId}`}
                   className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
                 >
                   Takip Listesinde Aç

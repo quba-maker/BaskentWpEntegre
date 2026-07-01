@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { ChevronDown, ChevronRight, MessageCircle, Bot, StickyNote, CheckCircle2, XCircle } from "lucide-react";
+import { ChevronDown, MessageCircle, Bot, StickyNote, CheckCircle2, XCircle, LockKeyhole } from "lucide-react";
 import { getBestDate, getDisplayName, getAllPhones, getFormCountry, getStageInfo, STAGES } from "./utils";
-import { getFirstContactUiBucket } from "./first-contact-ui";
+import { getFirstContactUiMeta } from "./first-contact-ui";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 
 const BULK_SELECTION_LIMIT = 50;
@@ -89,16 +89,6 @@ export function FormListTable({
     const d = new Date(dateString);
     if (isNaN(d.getTime())) return "";
     return d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" });
-  };
-
-  const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
-    'needs_greeting': { label: 'Karşılama Bekliyor', color: '#FF9500', icon: '👋' },
-    'needs_reply': { label: 'Cevap Geldi', color: '#5856D6', icon: '💬' },
-    'waiting_patient': { label: 'Cevap Bekleniyor', color: '#34C759', icon: '✅' },
-    'no_reply_waiting': { label: 'Takip Gerekli', color: '#FF9500', icon: '⏳' },
-    'patient_replied': { label: 'Cevap Geldi', color: '#10B981', icon: '↩️' },
-    'blocked_or_invalid': { label: 'Kontrol Gerekli', color: '#FF3B30', icon: '⚠️' },
-    'control_required': { label: 'Kontrol Gerekli', color: '#FF9500', icon: '🔍' },
   };
 
   return (
@@ -283,19 +273,18 @@ export function FormListTable({
                   <td className="py-4 px-4 whitespace-nowrap">
                     <div className="flex flex-col items-start gap-1">
                       {(() => {
-                        const badgeKey = getFirstContactUiBucket(form);
-                        const badge = OUTREACH_BADGE_CONFIG[badgeKey];
-                        if (!badge) return <span className="text-[11px] text-[#86868B] italic">—</span>;
+                        const badge = getFirstContactUiMeta(form);
                         return (
                           <span 
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold border uppercase tracking-wide shadow-sm"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold border shadow-sm"
                             style={{ 
-                              backgroundColor: `${badge.color}15`,
+                              backgroundColor: badge.bg,
                               color: badge.color,
-                              borderColor: `${badge.color}25`
+                              borderColor: badge.border
                             }}
+                            title={badge.description}
                           >
-                            <span className="text-[11px]">{badge.icon}</span> {badge.label}
+                            {badge.label}
                           </span>
                         );
                       })()}
@@ -304,16 +293,16 @@ export function FormListTable({
                         const getAutopilotBadge = (category: string) => {
                           switch (category) {
                             case 'bot_auto_eligible':
-                              return { label: 'Cevap Geldi', color: '#34C759', icon: '💬' };
+                              return { label: 'Inbox Yanıtı', color: '#047857' };
                             case 'manual_draft_required':
-                              return { label: 'Taslak', color: '#FF9500', icon: '✍️' };
+                              return { label: 'Taslak', color: '#C2410C' };
                             case 'manual_template_required':
-                              return { label: 'Hazır Şablon', color: '#FFCC00', icon: '📄' };
+                              return { label: 'Hazır Şablon', color: '#B45309' };
                             case 'already_open_inbox':
                             case 'already_processed':
-                              return { label: 'Cevap Bekleniyor', color: '#007AFF', icon: '💬' };
+                              return { label: 'Cevap Bekleniyor', color: '#2563EB' };
                             default:
-                              return { label: 'Kontrol', color: '#FF3B30', icon: '🚫' };
+                              return { label: 'Kontrol', color: '#DC2626' };
                           }
                         };
                         const baseCat = form.autopilotDecision.baseCategory || form.autopilotDecision.category;
@@ -324,18 +313,18 @@ export function FormListTable({
                           const normalizedReason = (reason || '').toLowerCase();
                           switch (gState) {
                             case 'live_locked':
-                              return { label: 'Canlı Kapalı', icon: '🔒' };
+                              return { label: 'Canlı Kapalı' };
                             case 'dry_run':
-                              return { label: 'Test Modu', icon: '🧪' };
+                              return { label: 'Test Modu' };
                             case 'feature_disabled':
-                              return { label: 'Ayar Kapalı', icon: '🔒' };
+                              return { label: 'Ayar Kapalı' };
                             case 'allowlist_missing':
-                              return { label: 'Canlı İzin Yok', icon: '🔒' };
+                              return { label: 'İzin Eksik' };
                             case 'global_disabled':
-                              return { label: 'Otomasyon Kapalı', icon: '🔒' };
+                              return { label: 'Otomasyon Kapalı' };
                             default:
                               if (normalizedReason === 'tenant_not_allowlisted' || normalizedReason === 'tenant_not_found') {
-                                return { label: 'Canlı İzin Yok', icon: '🔒' };
+                                return { label: 'İzin Eksik' };
                               }
                               return null;
                           }
@@ -380,9 +369,9 @@ export function FormListTable({
 
                         return (
                           <div className="flex flex-col items-start gap-1">
-                            <div className="inline-block">
+                            <div className="inline-flex items-center gap-1">
                               <span 
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold border uppercase tracking-wider shadow-sm"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border"
                                 style={{ 
                                   backgroundColor: `${apBadge.color}15`,
                                   color: apBadge.color,
@@ -390,25 +379,17 @@ export function FormListTable({
                                 }}
                                 title={decisionReason}
                               >
-                                <span className="text-[10px]">{apBadge.icon}</span> {apBadge.label}
+                                {apBadge.label}
                               </span>
-                            </div>
-
-                            {gateBadge && (
-                              <div className="inline-block mt-0.5">
+                              {gateBadge && (
                                 <span 
-                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider text-slate-600 bg-slate-50 border-slate-200"
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border text-slate-600 bg-slate-50 border-slate-200"
                                   title={gateReasonText}
                                 >
-                                  <span className="text-[9px]">{gateBadge.icon}</span> {gateBadge.label}
+                                  <LockKeyhole className="w-3 h-3" /> {gateBadge.label}
                                 </span>
-                              </div>
-                            )}
-                            {gateBadge && (
-                              <span className="max-w-[220px] text-[10px] leading-snug text-[#86868B]">
-                                {gateReasonText}
-                              </span>
-                            )}
+                              )}
+                            </div>
                           </div>
                         );
                       })()}
@@ -522,19 +503,33 @@ function InlineStageSelector({ currentStage, stageInfo, onStageChange }: {
       </button>
       
       {dropdown.isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] border border-black/5 py-1 z-50">
-          {STAGES.map(s => (
-            <button
-              key={s.value}
-              onClick={() => { onStageChange(s.value); dropdown.setIsOpen(false); }}
-              className={`w-full text-left px-3 py-2 text-[12px] font-medium hover:bg-black/5 transition-colors flex items-center gap-2`}
-              style={{ color: s.color }}
-            >
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
-              {s.label}
-              {currentStage === s.value && <CheckCircle2 className="w-3.5 h-3.5 ml-auto text-indigo-500" />}
-            </button>
-          ))}
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 p-4"
+          onClick={(e) => { e.stopPropagation(); dropdown.setIsOpen(false); }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)] border border-slate-200 p-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-2 border-b border-slate-100">
+              <div className="text-[13px] font-bold text-slate-900">Durum / Aşama Seç</div>
+              <div className="text-[11px] font-medium text-slate-500 mt-0.5">Bu değişiklik form kaydının operasyon aşamasını günceller.</div>
+            </div>
+            <div className="py-1">
+              {STAGES.map(s => (
+                <button
+                  key={s.value}
+                  onClick={() => { onStageChange(s.value); dropdown.setIsOpen(false); }}
+                  className="w-full text-left px-3 py-2.5 text-[13px] font-semibold hover:bg-slate-50 transition-colors flex items-center gap-2 rounded-xl"
+                  style={{ color: s.color }}
+                >
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }} />
+                  {s.label}
+                  {currentStage === s.value && <CheckCircle2 className="w-4 h-4 ml-auto text-indigo-500" />}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1,6 +1,7 @@
 "use server";
 
 import { withActionGuard } from "@/lib/core/action-guard";
+import { resolveCanonicalFollowUp } from "@/lib/domain/task/canonical-follow-up";
 import { resolvePatientTimezone, formatDualClock, isOverdue, isToday } from "@/lib/utils/timezone";
 import { OperationItem } from "./operations"; // We can reuse or extend this type
 import { resolvePatientDisplayName } from "@/lib/utils/patient-name-resolver";
@@ -22,6 +23,9 @@ export type JourneyStatus =
   | 'Bot Cevap Bekliyor'
   | 'İnsan Devri Gerekli'
   | 'Danışman Arayacak'
+  | 'Bugün Aranacak'
+  | 'Arama Gecikti'
+  | 'Arama Teyidi Bekliyor'
   | 'Telefon Randevusu Planlandı'
   | 'Telefon Görüşmesi Bekliyor'
   | 'Telefon Görüşmesi Yapıldı'
@@ -30,10 +34,18 @@ export type JourneyStatus =
   | 'Tekrar Takip Gerekli'
   | 'Rapor Bekleniyor'
   | 'Doktor İncelemesi'
+  | 'Bugünkü Randevu'
+  | 'Randevu Gecikti'
+  | 'Randevu Teyidi Bekliyor'
+  | 'Randevu Tamamlandı'
   | 'Klinik Randevusu Alındı'
   | 'Teyit Bekliyor'
   | 'Randevu Yaklaşıyor'
   | 'Gelmedi / İptal'
+  | 'Şablon Gerekli'
+  | 'Cevap Gecikti'
+  | 'Cevap Bekleniyor'
+  | 'Kontrol Gerekli'
   | 'Kapatıldı';
 
 export type NextBestAction = 
@@ -45,7 +57,8 @@ export type NextBestAction =
   | 'call_today'
   | 'prepare_followup_draft'
   | 'scheduled_followup'
-  | 'continue_appointment_planning';
+  | 'continue_appointment_planning'
+  | 'review_required';
 
 export interface FocusQueueItem extends OperationItem {
   journeyStatus: JourneyStatus;
@@ -66,6 +79,20 @@ export interface FocusQueueItem extends OperationItem {
 
 // Compute journey status based on the data
 function computeJourneyStatus(row: any): JourneyStatus {
+  const canonical = resolveCanonicalFollowUp({
+    taskType: row.task_type,
+    status: row.task_status,
+    dueAt: row.task_due_at,
+    metadata: row.task_metadata,
+    oppStage: row.opp_stage,
+    oppIntentType: row.opp_intent_type,
+    convStatus: row.conv_status,
+    lastOutreachAction: row.last_outreach_action,
+  });
+  if (row.task_type && canonical.lane !== 'other') {
+    return canonical.journeyStatus as JourneyStatus;
+  }
+
   if (row.opp_stage) {
     if (row.opp_stage === 'new_lead') return 'Yeni';
     if (row.opp_stage === 'first_contact') return 'İlk İletişim';
@@ -101,6 +128,20 @@ function computeJourneyStatus(row: any): JourneyStatus {
 
 // Compute Next Best Action
 function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBestAction {
+  const canonical = resolveCanonicalFollowUp({
+    taskType: row.task_type,
+    status: row.task_status,
+    dueAt: row.task_due_at,
+    metadata: row.task_metadata,
+    oppStage: row.opp_stage,
+    oppIntentType: row.opp_intent_type,
+    convStatus: row.conv_status,
+    lastOutreachAction: row.last_outreach_action,
+  });
+  if (row.task_type && canonical.lane !== 'other') {
+    return canonical.nextBestAction as NextBestAction;
+  }
+
   if (journeyStatus === 'Geldi' || journeyStatus === 'Kapatıldı' || journeyStatus === 'Gelmedi / İptal' || journeyStatus === 'Uygun Değil') return 'no_action';
   
   if (row.task_due_at && !isOverdue(row.task_due_at) && !isToday(row.task_due_at)) {
@@ -128,6 +169,23 @@ function computeNextBestAction(row: any, journeyStatus: JourneyStatus): NextBest
 
 // Compute Priority Score
 function computePriorityScore(row: any, journeyStatus: JourneyStatus, nextBestAction: NextBestAction): number {
+  const canonical = resolveCanonicalFollowUp({
+    taskType: row.task_type,
+    status: row.task_status,
+    dueAt: row.task_due_at,
+    metadata: row.task_metadata,
+    oppStage: row.opp_stage,
+    oppIntentType: row.opp_intent_type,
+    convStatus: row.conv_status,
+    lastOutreachAction: row.last_outreach_action,
+  });
+  if (row.task_type && canonical.lane !== 'other') {
+    let canonicalScore = canonical.priorityBoost;
+    if (row.opp_priority === 'hot' || row.task_metadata?.priority === 'high') canonicalScore += 20;
+    if (row.opp_intent_type === 'appointment_request' && canonical.isClinic) canonicalScore += 20;
+    return canonicalScore;
+  }
+
   let score = 0;
   
   if (journeyStatus === 'Kapatıldı' || journeyStatus === 'Uygun Değil' || journeyStatus === 'Geldi' || journeyStatus === 'Gelmedi / İptal') return -200;
@@ -840,4 +898,3 @@ export async function saveBotDirective(opportunityId: string, directiveText: str
     } 
   };
 }
-
