@@ -6,6 +6,9 @@ import { Bot, ShieldAlert, Check, RefreshCw, AlertCircle, Save, Info } from "luc
 export interface ChannelSettings {
   auto_greeting_enabled: boolean;
   dry_run: boolean;
+  template_name?: string;
+  template_language?: string;
+  template_text?: string;
   [key: string]: any;
 }
 
@@ -25,6 +28,31 @@ interface AutoGreetingSettingsPanelProps {
   onSaveChannelConfig?: (channelId: string, settings: Partial<ChannelSettings>) => Promise<{ success: boolean; error?: string }>;
 }
 
+interface GreetingTemplate {
+  id: string;
+  name: string;
+  language: string;
+  body: string;
+  isDefault?: boolean;
+}
+
+const DEFAULT_FORM_GREETING_TEMPLATE_NAME = "tr_form_karsilama_v1";
+const DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE = "tr";
+const DEFAULT_FORM_GREETING_TEMPLATE_TEXT =
+  "Merhaba, ben Rüya. Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum.\n\nDoldurduğunuz form doğrultusunda sürecinizle ilgili size yardımcı olmak isteriz.\n\nMüsait olduğunuzda buradan bize dönüş yapabilirsiniz 🙏🏻";
+
+function getEffectiveTemplateName(config: any) {
+  return config?.template_name || config?.channels?.whatsapp?.template_name || DEFAULT_FORM_GREETING_TEMPLATE_NAME;
+}
+
+function getEffectiveTemplateLanguage(config: any) {
+  return config?.template_language || config?.channels?.whatsapp?.template_language || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE;
+}
+
+function getEffectiveTemplateText(config: any) {
+  return config?.template_text || config?.channels?.whatsapp?.template_text || DEFAULT_FORM_GREETING_TEMPLATE_TEXT;
+}
+
 export function AutoGreetingSettingsPanel({
   channelsConfig: initialChannelsConfig,
   envLocks: initialEnvLocks,
@@ -36,7 +64,10 @@ export function AutoGreetingSettingsPanel({
     dry_run: true,
     rollout_percentage: 100,
     department_mode: "all",
-    allowed_departments: []
+    allowed_departments: [],
+    template_name: DEFAULT_FORM_GREETING_TEMPLATE_NAME,
+    template_language: DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE,
+    template_text: DEFAULT_FORM_GREETING_TEMPLATE_TEXT
   });
 
   const [inboundConfig, setInboundConfig] = useState<any>({
@@ -57,6 +88,8 @@ export function AutoGreetingSettingsPanel({
 
   const [userRole, setUserRole] = useState<string>("viewer");
   const [tenantId, setTenantId] = useState<string>("");
+  const [greetingTemplates, setGreetingTemplates] = useState<GreetingTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errorText, setErrorText] = useState<string | null>(null);
 
@@ -119,6 +152,18 @@ export function AutoGreetingSettingsPanel({
           }
         } else {
           setErrorText(res.error || "Otopilot ayarları yüklenemedi.");
+        }
+
+        setTemplatesLoading(true);
+        try {
+          const { getGreetingTemplates } = await import("@/app/actions/outreach");
+          const templates = await getGreetingTemplates();
+          setGreetingTemplates(Array.isArray(templates) ? templates : []);
+        } catch (templateErr) {
+          console.warn("[SETTINGS_UI_TEMPLATES_LOAD_WARN]", templateErr);
+          setGreetingTemplates([]);
+        } finally {
+          setTemplatesLoading(false);
         }
       } catch (err) {
         console.error("[SETTINGS_UI_LOAD_ERROR]", err);
@@ -210,12 +255,18 @@ export function AutoGreetingSettingsPanel({
     setSuccessForm(false);
     try {
       const { saveFormAutopilotSettingsAction } = await import("@/app/actions/settings");
+      const templateName = getEffectiveTemplateName(formConfig);
+      const templateLanguage = getEffectiveTemplateLanguage(formConfig);
+      const templateText = getEffectiveTemplateText(formConfig);
       const res = await saveFormAutopilotSettingsAction(tenantId, {
         enabled: formConfig.enabled,
         dry_run: formConfig.dry_run,
         rollout_percentage: 100,
         department_mode: "all",
-        allowed_departments: []
+        allowed_departments: [],
+        template_name: templateName,
+        template_language: templateLanguage,
+        template_text: templateText
       });
       if (res.success) {
         setSuccessForm(true);
@@ -224,7 +275,10 @@ export function AutoGreetingSettingsPanel({
         if (onSaveChannelConfig) {
           await onSaveChannelConfig("whatsapp", {
             auto_greeting_enabled: formConfig.enabled,
-            dry_run: formConfig.dry_run
+            dry_run: formConfig.dry_run,
+            template_name: templateName,
+            template_language: templateLanguage,
+            template_text: templateText
           });
         }
       } else {
@@ -326,6 +380,49 @@ export function AutoGreetingSettingsPanel({
                   className="w-4.5 h-4.5 text-[#007AFF] rounded border-black/10 focus:ring-[#007AFF] cursor-pointer disabled:opacity-50"
                 />
               </div>
+
+              <div className="p-3.5 bg-white border border-black/5 rounded-xl space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <label className="text-xs font-bold text-[#1D1D1F]">Otomatik Gönderilecek Şablon</label>
+                    <p className="text-[10px] text-[#86868B] font-medium">
+                      Yeni form düşünce hastaya seçili onaylı WhatsApp şablonu gider.
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-1">
+                    {getEffectiveTemplateLanguage(formConfig)}
+                  </span>
+                </div>
+
+                <select
+                  disabled={!hasPermission || templatesLoading}
+                  value={`${getEffectiveTemplateName(formConfig)}::${getEffectiveTemplateLanguage(formConfig)}`}
+                  onChange={(e) => {
+                    const [name, language] = e.target.value.split("::");
+                    const selected = greetingTemplates.find((t) => t.name === name && t.language === language);
+                    setFormConfig((prev: any) => ({
+                      ...prev,
+                      template_name: selected?.name || name || DEFAULT_FORM_GREETING_TEMPLATE_NAME,
+                      template_language: selected?.language || language || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE,
+                      template_text: selected?.body || DEFAULT_FORM_GREETING_TEMPLATE_TEXT
+                    }));
+                  }}
+                  className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-semibold text-[#1D1D1F] disabled:opacity-50"
+                >
+                  <option value={`${DEFAULT_FORM_GREETING_TEMPLATE_NAME}::${DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE}`}>
+                    {DEFAULT_FORM_GREETING_TEMPLATE_NAME} · {DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE}
+                  </option>
+                  {greetingTemplates.map((template) => (
+                    <option key={`${template.id}-${template.name}-${template.language}`} value={`${template.name}::${template.language}`}>
+                      {template.name} · {template.language}{template.isDefault ? " · varsayılan" : ""}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="rounded-lg bg-[#F5F5F7] border border-black/5 p-3 text-[11px] text-[#3A3A3C] whitespace-pre-line leading-relaxed">
+                  {getEffectiveTemplateText(formConfig)}
+                </div>
+              </div>
             </div>
 
             {/* Save action button */}
@@ -417,4 +514,3 @@ export function AutoGreetingSettingsPanel({
     </div>
   );
 }
-

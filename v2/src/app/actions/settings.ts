@@ -7,6 +7,74 @@ import { withActionGuard } from "@/lib/core/action-guard";
 // QUBA AI — Settings Actions (Zero-Trust Migrated)
 // ==========================================
 
+const DEFAULT_FORM_GREETING_TEMPLATE_NAME = process.env.FORM_GREETING_TEMPLATE_NAME || 'tr_form_karsilama_v1';
+const DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE = process.env.FORM_GREETING_TEMPLATE_LANGUAGE || 'tr';
+const DEFAULT_FORM_GREETING_TEMPLATE_TEXT = process.env.FORM_GREETING_TEMPLATE_TEXT ||
+  "Merhaba, ben Rüya. Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum.\n\nDoldurduğunuz form doğrultusunda sürecinizle ilgili size yardımcı olmak isteriz.\n\nMüsait olduğunuzda buradan bize dönüş yapabilirsiniz 🙏🏻";
+
+function normalizeFormGreetingTemplateName(value: unknown) {
+  const clean = String(value || '').trim();
+  if (!clean || clean === 'tr_karsilama') return DEFAULT_FORM_GREETING_TEMPLATE_NAME;
+  return clean;
+}
+
+function defaultFormAutopilotConfig() {
+  return {
+    enabled: false,
+    dry_run: true,
+    rollout_percentage: 100,
+    department_mode: 'all',
+    allowed_departments: [] as string[],
+    template_name: DEFAULT_FORM_GREETING_TEMPLATE_NAME,
+    template_language: DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE,
+    template_text: DEFAULT_FORM_GREETING_TEMPLATE_TEXT,
+    channels: {
+      whatsapp: {
+        auto_greeting_enabled: false,
+        dry_run: true,
+        template_name: DEFAULT_FORM_GREETING_TEMPLATE_NAME,
+        template_language: DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE,
+        template_text: DEFAULT_FORM_GREETING_TEMPLATE_TEXT
+      }
+    }
+  };
+}
+
+function syncWhatsappFormGreetingConfig(config: any) {
+  if (!config.channels || typeof config.channels !== 'object') {
+    config.channels = {};
+  }
+
+  const existingWhatsapp = config.channels.whatsapp && typeof config.channels.whatsapp === 'object'
+    ? config.channels.whatsapp
+    : {};
+
+  const hasTopLevelTemplateName = config.template_name !== undefined && config.template_name !== null && String(config.template_name).trim() !== '';
+  const hasTopLevelTemplateLanguage = config.template_language !== undefined && config.template_language !== null && String(config.template_language).trim() !== '';
+  const hasTopLevelTemplateText = config.template_text !== undefined && config.template_text !== null && String(config.template_text).trim() !== '';
+
+  config.template_name = normalizeFormGreetingTemplateName(
+    hasTopLevelTemplateName ? config.template_name : existingWhatsapp.template_name
+  );
+  config.template_language = String(
+    hasTopLevelTemplateLanguage ? config.template_language : existingWhatsapp.template_language || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE
+  ).trim() || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE;
+  config.template_text = String(
+    hasTopLevelTemplateText ? config.template_text : existingWhatsapp.template_text || DEFAULT_FORM_GREETING_TEMPLATE_TEXT
+  );
+
+  config.channels.whatsapp = {
+    ...existingWhatsapp,
+    auto_greeting_enabled: config.enabled,
+    dry_run: config.dry_run,
+    template_name: config.template_name,
+    template_language: config.template_language,
+    template_text: config.template_text
+  };
+
+  return config;
+}
+
 export async function getTenantSettings() {
   return withActionGuard(
     { actionName: 'getTenantSettings' },
@@ -140,19 +208,7 @@ export async function getAutoGreetingSettingsAction() {
         values: [ctx.tenantId]
       }) as any[];
 
-      const defaultFormConfig = {
-        enabled: false,
-        dry_run: true,
-        rollout_percentage: 100,
-        department_mode: 'all',
-        allowed_departments: [] as string[],
-        channels: {
-          whatsapp: {
-            auto_greeting_enabled: false,
-            dry_run: true
-          }
-        }
-      };
+      const defaultFormConfig = defaultFormAutopilotConfig();
 
       let formAutopilotConfig = { ...defaultFormConfig };
       if (formRows.length > 0 && formRows[0].config) {
@@ -161,9 +217,14 @@ export async function getAutoGreetingSettingsAction() {
           : formRows[0].config;
         formAutopilotConfig = {
           ...defaultFormConfig,
-          ...parsedConfig
+          ...parsedConfig,
+          channels: {
+            ...defaultFormConfig.channels,
+            ...(parsedConfig.channels || {}),
+          }
         };
       }
+      formAutopilotConfig = syncWhatsappFormGreetingConfig(formAutopilotConfig);
 
       // 3. Fetch Inbound Autopilot Settings
       const inboundRows = await ctx.db.executeSafe({
@@ -194,7 +255,10 @@ export async function getAutoGreetingSettingsAction() {
       const channelsConfig = {
         whatsapp: {
           auto_greeting_enabled: formAutopilotConfig.enabled,
-          dry_run: formAutopilotConfig.dry_run
+          dry_run: formAutopilotConfig.dry_run,
+          template_name: formAutopilotConfig.template_name,
+          template_language: formAutopilotConfig.template_language,
+          template_text: formAutopilotConfig.template_text
         }
       };
 
@@ -240,13 +304,7 @@ export async function saveFormAutopilotSettingsAction(tenantId: string, settings
         values: [ctx.tenantId]
       }) as any[];
 
-      let currentConfig: any = {
-        enabled: false,
-        dry_run: true,
-        rollout_percentage: 100,
-        department_mode: 'all',
-        allowed_departments: []
-      };
+      let currentConfig: any = defaultFormAutopilotConfig();
       let rowId: string | null = null;
 
       if (rows.length > 0) {
@@ -257,7 +315,11 @@ export async function saveFormAutopilotSettingsAction(tenantId: string, settings
             : rows[0].config;
           currentConfig = {
             ...currentConfig,
-            ...parsedConfig
+            ...parsedConfig,
+            channels: {
+              ...currentConfig.channels,
+              ...(parsedConfig.channels || {}),
+            }
           };
         }
       }
@@ -265,21 +327,24 @@ export async function saveFormAutopilotSettingsAction(tenantId: string, settings
       const originalConfig = { ...currentConfig };
 
       // Apply patches (only valid config keys, no PII allowed)
-      const allowedKeys = ['enabled', 'dry_run', 'rollout_percentage', 'department_mode', 'allowed_departments'];
+      const allowedKeys = [
+        'enabled',
+        'dry_run',
+        'rollout_percentage',
+        'department_mode',
+        'allowed_departments',
+        'template_name',
+        'template_language',
+        'template_text'
+      ];
       for (const key of allowedKeys) {
         if (settingsPatch[key] !== undefined) {
           currentConfig[key] = settingsPatch[key];
         }
       }
 
-      // Synchronize channels object for legacy compatibility if enabled or dry_run changed
-      if (!currentConfig.channels || typeof currentConfig.channels !== 'object') {
-        currentConfig.channels = {};
-      }
-      currentConfig.channels.whatsapp = {
-        auto_greeting_enabled: currentConfig.enabled,
-        dry_run: currentConfig.dry_run
-      };
+      // Synchronize channels object for legacy compatibility if enabled, dry_run or template changed
+      currentConfig = syncWhatsappFormGreetingConfig(currentConfig);
 
       if (rowId) {
         await ctx.db.executeSafe({
@@ -429,14 +494,7 @@ export async function saveAutoGreetingChannelSettingsAction(channelId: string, s
         values: [ctx.tenantId]
       }) as any[];
 
-      let currentConfig: any = {
-        enabled: false,
-        dry_run: true,
-        rollout_percentage: 100,
-        department_mode: 'all',
-        allowed_departments: [],
-        channels: {}
-      };
+      let currentConfig: any = defaultFormAutopilotConfig();
       let rowId: string | null = null;
 
       if (rows.length > 0) {
@@ -447,7 +505,11 @@ export async function saveAutoGreetingChannelSettingsAction(channelId: string, s
             : rows[0].config;
           currentConfig = {
             ...currentConfig,
-            ...parsedConfig
+            ...parsedConfig,
+            channels: {
+              ...currentConfig.channels,
+              ...(parsedConfig.channels || {}),
+            }
           };
         }
       }
@@ -457,17 +519,36 @@ export async function saveAutoGreetingChannelSettingsAction(channelId: string, s
       }
 
       // Update specific channel config
+      const previousChannelConfig = currentConfig.channels[channelId] && typeof currentConfig.channels[channelId] === 'object'
+        ? currentConfig.channels[channelId]
+        : {};
       currentConfig.channels[channelId] = {
-        auto_greeting_enabled: settingsPatch.auto_greeting_enabled,
-        dry_run: settingsPatch.dry_run !== undefined ? settingsPatch.dry_run : true
+        ...previousChannelConfig,
+        ...(settingsPatch.auto_greeting_enabled !== undefined ? { auto_greeting_enabled: settingsPatch.auto_greeting_enabled } : {}),
+        ...(settingsPatch.dry_run !== undefined ? { dry_run: settingsPatch.dry_run } : {}),
+        ...(settingsPatch.template_name !== undefined ? { template_name: normalizeFormGreetingTemplateName(settingsPatch.template_name) } : {}),
+        ...(settingsPatch.template_language !== undefined ? { template_language: String(settingsPatch.template_language || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE).trim() || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE } : {}),
+        ...(settingsPatch.template_text !== undefined ? { template_text: String(settingsPatch.template_text || DEFAULT_FORM_GREETING_TEMPLATE_TEXT) } : {})
       };
 
       // Also sync top-level enabled/dry_run if updating whatsapp for backwards compatibility
       if (channelId === 'whatsapp') {
-        currentConfig.enabled = settingsPatch.auto_greeting_enabled;
+        if (settingsPatch.auto_greeting_enabled !== undefined) {
+          currentConfig.enabled = settingsPatch.auto_greeting_enabled;
+        }
         if (settingsPatch.dry_run !== undefined) {
           currentConfig.dry_run = settingsPatch.dry_run;
         }
+        if (settingsPatch.template_name !== undefined) {
+          currentConfig.template_name = normalizeFormGreetingTemplateName(settingsPatch.template_name);
+        }
+        if (settingsPatch.template_language !== undefined) {
+          currentConfig.template_language = String(settingsPatch.template_language || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE).trim() || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE;
+        }
+        if (settingsPatch.template_text !== undefined) {
+          currentConfig.template_text = String(settingsPatch.template_text || DEFAULT_FORM_GREETING_TEMPLATE_TEXT);
+        }
+        currentConfig = syncWhatsappFormGreetingConfig(currentConfig);
       }
 
       if (rowId) {
@@ -489,4 +570,3 @@ export async function saveAutoGreetingChannelSettingsAction(channelId: string, s
     return { success: true };
   });
 }
-

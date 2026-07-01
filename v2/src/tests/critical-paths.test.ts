@@ -15409,6 +15409,31 @@ test("Başkent v91 T150: template greeting logs count as addressed form lead", (
   assert(orchestratorContent.includes("unifiedContext?.contactMode === 'system_outbound_greeting'"), "Orchestrator system_outbound_greeting modunu korumalı");
 });
 
+test("Başkent v91 T151: automatic form greeting uses selected template settings", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const settingsPath = path.join(process.cwd(), "src/app/actions/settings.ts");
+  const sheetsPath = path.join(process.cwd(), "src/lib/services/sheets-ingestion.service.ts");
+  const panelPath = path.join(process.cwd(), "src/components/features/settings/AutoGreetingSettingsPanel.tsx");
+  const settingsContent = fs.readFileSync(settingsPath, "utf8");
+  const sheetsContent = fs.readFileSync(sheetsPath, "utf8");
+  const panelContent = fs.readFileSync(panelPath, "utf8");
+
+  assert(settingsContent.includes("'template_name'"), "Form autopilot settings should persist selected template name");
+  assert(settingsContent.includes("template_language"), "Form autopilot settings should persist selected template language");
+  assert(settingsContent.includes("template_text"), "Form autopilot settings should persist selected template preview/body");
+  assert(settingsContent.includes("syncWhatsappFormGreetingConfig"), "Legacy whatsapp channel config should stay synchronized");
+  assert(settingsContent.includes("hasTopLevelTemplateName"), "Whatsapp channel template should be preserved when top-level template is missing");
+  assert(settingsContent.includes("existingWhatsapp.template_name"), "Settings should support existing whatsapp template fallback");
+  assert(settingsContent.includes("settingsPatch.dry_run !== undefined ? { dry_run: settingsPatch.dry_run }"), "Legacy channel save should not force dry_run=true when patch omits it");
+  assert(panelContent.includes("Otomatik Gönderilecek Şablon"), "Auto greeting panel should expose a template selector");
+  assert(panelContent.includes("getGreetingTemplates"), "Auto greeting panel should load approved greeting templates");
+  assert(sheetsContent.includes("form_autopilot_for_open_meta_window"), "Sheets webhook should read form autopilot settings");
+  assert(sheetsContent.includes("formAutopilotConfig.template_name"), "Sheets webhook should use selected template name");
+  assert(sheetsContent.includes("whatsappConfig.template_name"), "Sheets webhook should support whatsapp channel template fallback");
+  assert(sheetsContent.includes("normalizeFormGreetingTemplateName"), "Legacy tr_karsilama should normalize to current approved template");
+});
+
 
 async function runAllTests() {
   try {

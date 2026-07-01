@@ -8,6 +8,27 @@ import * as crypto from 'crypto';
 
 const log = logger.withContext({ module: 'SheetsIngestion' });
 
+const DEFAULT_FORM_GREETING_TEMPLATE_NAME = process.env.FORM_GREETING_TEMPLATE_NAME || 'tr_form_karsilama_v1';
+const DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE = process.env.FORM_GREETING_TEMPLATE_LANGUAGE || 'tr';
+const DEFAULT_FORM_GREETING_TEMPLATE_TEXT = process.env.FORM_GREETING_TEMPLATE_TEXT ||
+  "Merhaba, ben Rüya. Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum.\n\nDoldurduğunuz form doğrultusunda sürecinizle ilgili size yardımcı olmak isteriz.\n\nMüsait olduğunuzda buradan bize dönüş yapabilirsiniz 🙏🏻";
+
+function normalizeFormGreetingTemplateName(value: unknown) {
+  const clean = String(value || '').trim();
+  if (!clean || clean === 'tr_karsilama') return DEFAULT_FORM_GREETING_TEMPLATE_NAME;
+  return clean;
+}
+
+function parseJsonConfig(value: any) {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return null;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // FIELD DETECTION PRIORITY TABLES
 // Single source of truth — used by both single-row (webhook)
@@ -581,12 +602,41 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
         greetingLang = profileRes[0].greeting_language || 'auto';
       }
 
-      if (META_ACCESS_TOKEN && autoGreetingEnabled) {
-        const templateName = process.env.FORM_GREETING_TEMPLATE_NAME || 'tr_form_karsilama_v1';
-        const templateLanguage = process.env.FORM_GREETING_TEMPLATE_LANGUAGE || 'tr';
-        const welcomeMsg = process.env.FORM_GREETING_TEMPLATE_TEXT ||
-          "Merhaba, ben Rüya. Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum.\n\nDoldurduğunuz form doğrultusunda sürecinizle ilgili size yardımcı olmak isteriz.\n\nMüsait olduğunuzda buradan bize dönüş yapabilirsiniz 🙏🏻";
+      let templateName = DEFAULT_FORM_GREETING_TEMPLATE_NAME;
+      let templateLanguage = DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE;
+      let welcomeMsg = DEFAULT_FORM_GREETING_TEMPLATE_TEXT;
 
+      try {
+        const formAutopilotRows = await db.executeSafe({
+          text: `SELECT config FROM ai_module_settings
+                 WHERE tenant_id = $1::uuid AND module_name = 'form_autopilot_for_open_meta_window'
+                 LIMIT 1`,
+          values: [tenantId]
+        }) as any[];
+
+        const formAutopilotConfig = parseJsonConfig(formAutopilotRows?.[0]?.config);
+        if (formAutopilotConfig) {
+          const whatsappConfig = formAutopilotConfig.channels?.whatsapp || {};
+          autoGreetingEnabled = autoGreetingEnabled
+            && formAutopilotConfig.enabled !== false
+            && whatsappConfig.auto_greeting_enabled !== false;
+          templateName = normalizeFormGreetingTemplateName(
+            formAutopilotConfig.template_name || whatsappConfig.template_name
+          );
+          templateLanguage = String(
+            formAutopilotConfig.template_language || whatsappConfig.template_language || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE
+          ).trim() || DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE;
+          welcomeMsg = String(
+            formAutopilotConfig.template_text || whatsappConfig.template_text || DEFAULT_FORM_GREETING_TEMPLATE_TEXT
+          );
+        }
+      } catch (settingsErr) {
+        log.warn('[INGEST_AUTO_GREETING_SETTINGS] Falling back to default template config', {
+          error: settingsErr instanceof Error ? settingsErr.message : String(settingsErr)
+        });
+      }
+
+      if (META_ACCESS_TOKEN && autoGreetingEnabled) {
         const sendWhatsApp = async (phoneToTry: string): Promise<{ ok: boolean; providerMessageId?: string }> => {
           try {
             if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
