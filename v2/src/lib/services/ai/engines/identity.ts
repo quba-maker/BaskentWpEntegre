@@ -811,6 +811,7 @@ export class IdentityEngine {
       };
       const conversationMetaForOutreach = parseMeta(conversationRow?.metadata);
       const opportunityMetaForOutreach = parseMeta(opportunity?.metadata);
+      let hasOnlyWhatsappFormSummaryContext = false;
       if (lead || conversationId) {
         try {
           const leadIds = new Set<string>();
@@ -858,13 +859,20 @@ export class IdentityEngine {
 	            'manual_whatsapp_greeting_echo_confirmed',
 	            'whatsapp_app_opened_for_greeting',
 	            'outreach_form_greeting_template_sent',
-	            'whatsapp_form_summary_received',
 	          ];
           const greetingRow = outreachRows.find((r: any) => greetingActions.includes(r.action));
           let greetingSent = !!greetingRow;
           let greetingTemplateName = parseMeta(greetingRow?.metadata)?.template_name || null;
 
-          if (!greetingSent) {
+          const summaryGreetingTemplateName = conversationMetaForOutreach.greeting_template_name;
+          hasOnlyWhatsappFormSummaryContext = !!(
+            conversationMetaForOutreach.whatsapp_form_summary_received_at &&
+            !conversationMetaForOutreach.form_greeted_at &&
+            !opportunityMetaForOutreach.form_greeted_at &&
+            (!summaryGreetingTemplateName || summaryGreetingTemplateName === 'whatsapp_form_summary_received')
+          );
+
+          if (!greetingSent && !hasOnlyWhatsappFormSummaryContext) {
             greetingSent = !!(
               conversationMetaForOutreach.form_greeted_at ||
               conversationMetaForOutreach.form_context_handled === true ||
@@ -1018,11 +1026,14 @@ export class IdentityEngine {
         } : null,
         outreachContext,
         formAlreadyAddressed: !!(
-          outreachContext?.greetingSent === true ||
-          conversationMetaForOutreach.form_greeted_at ||
-          conversationMetaForOutreach.form_context_handled === true ||
-          opportunityMetaForOutreach.form_greeted_at ||
-          opportunityMetaForOutreach.form_context_handled === true
+          !hasOnlyWhatsappFormSummaryContext &&
+          (
+            outreachContext?.greetingSent === true ||
+            conversationMetaForOutreach.form_greeted_at ||
+            conversationMetaForOutreach.form_context_handled === true ||
+            opportunityMetaForOutreach.form_greeted_at ||
+            opportunityMetaForOutreach.form_context_handled === true
+          )
         ),
         contactMode: outreachContext?.greetingSent === true
           ? 'system_outbound_greeting'

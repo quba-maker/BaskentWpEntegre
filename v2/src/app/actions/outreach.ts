@@ -358,7 +358,7 @@ export async function checkGreetingReadinessCore(
       FROM outreach_logs ol
       LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id::text = ol.tenant_id
       WHERE ol.tenant_id = $1::text
-        AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'outreach_form_greeting_template_sent', 'whatsapp_form_summary_received', 'manual_whatsapp_greeting_echo_confirmed')
+        AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'outreach_form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed')
         AND (
           ol.lead_id = $2::uuid
           OR (ol.opportunity_id = $3::text AND $3 IS NOT NULL)
@@ -1218,7 +1218,7 @@ export async function sendFormGreetingTemplateAction(
 	          FROM outreach_logs ol
 	          LEFT JOIN leads l ON l.id::text = ol.lead_id::text AND l.tenant_id::text = ol.tenant_id::text
 	          WHERE ol.tenant_id::text = $1::text
-	            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'whatsapp_form_summary_received')
+	            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
 	            AND (
 	              ol.lead_id::text = $2::text
 	              OR (ol.opportunity_id::text = $3::text AND $3 IS NOT NULL)
@@ -1803,8 +1803,7 @@ export async function prepareSmartGreetingDraftCore(
     'form_greeting_template_sent',
     'manual_whatsapp_greeting_echo_confirmed',
     'inbox_form_greeting_sent',
-    'outreach_form_greeting_template_sent',
-    'whatsapp_form_summary_received'
+    'outreach_form_greeting_template_sent'
   ];
   
   // Soft duplicates definition

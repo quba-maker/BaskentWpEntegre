@@ -15537,7 +15537,7 @@ test("Başkent v93 T153: WhatsApp click-to-form summaries are compacted before A
   assert(compactHistory[0].content !== sample, "Geçmişteki ham form özeti kompakt hale getirilmeli");
 });
 
-test("Başkent v93 T154: live worker treats WhatsApp form summaries as addressed form context", () => {
+test("Başkent v93 T154: live worker routes WhatsApp form summaries to natural AI reply", () => {
   const fs = require("fs");
   const path = require("path");
   const workerPath = path.join(process.cwd(), "src/lib/queue/worker.ts");
@@ -15545,15 +15545,17 @@ test("Başkent v93 T154: live worker treats WhatsApp form summaries as addressed
 
   assert(workerContent.includes("detectWhatsAppFormSummaryMessage(content)"), "Immediate worker WhatsApp form özetini algılamalı");
   assert(workerContent.includes("buildCompactWhatsAppFormSummaryForAi(formSummary)"), "Immediate worker ham form metnini AI için kompaktlaştırmalı");
-  assert(workerContent.includes("'whatsapp_form_summary_received'"), "WhatsApp form özeti outreach ilk temas sinyali olarak kaydedilmeli");
-  assert(workerContent.includes("'form_context_handled', true"), "WhatsApp form özeti gelince form karşılaması yapılmış sayılmalı");
+  assert(workerContent.includes("'whatsapp_form_summary_received'"), "WhatsApp form özeti outreach bağlam sinyali olarak kaydedilmeli");
+  assert(workerContent.includes("'whatsapp_form_summary_context_loaded', true"), "WhatsApp form özeti AI bağlamı olarak işaretlenmeli");
+  assert(!workerContent.includes("'form_context_handled', true"), "WhatsApp form özeti şablon karşılama gönderilmiş gibi sayılmamalı");
+  assert(!workerContent.includes("'greeting_template_name', COALESCE(metadata->>'greeting_template_name', 'whatsapp_form_summary_received')"), "WhatsApp form özeti greeting template metadata'sı yazmamalı");
   assert(workerContent.includes("compactWhatsAppFormSummaryHistory(rawHistoryForAi)"), "Immediate history form özetlerini kompakt kullanmalı");
   assert(workerContent.includes("inboundText: aiInboundText"), "Immediate orchestrator ham form metni yerine AI metnini kullanmalı");
   assert(workerContent.includes("latestInboundForAi"), "Delayed worker son inbound form özetini kompakt kullanmalı");
   assert(workerContent.includes("rawHistory = compactRawHistory"), "Delayed worker geçmişi kompakt form özetleriyle sürdürmeli");
 });
 
-test("Başkent v93 T155: form greeting duplicate guards respect WhatsApp summaries and text ids", () => {
+test("Başkent v93 T155: form greeting duplicate guards keep WhatsApp summaries separate from sent greetings", () => {
   const fs = require("fs");
   const path = require("path");
   const identityPath = path.join(process.cwd(), "src/lib/services/ai/engines/identity.ts");
@@ -15565,14 +15567,18 @@ test("Başkent v93 T155: form greeting duplicate guards respect WhatsApp summari
 
   assert(identityContent.includes("lead_id::text = ANY"), "Identity outreach lookup UUID/text çakışmasına düşmemeli");
   assert(identityContent.includes("conversation_id::text ="), "Identity conversation lookup text güvenli olmalı");
-  assert(identityContent.includes("'whatsapp_form_summary_received'"), "Identity WhatsApp form özetini greetingSent kabul etmeli");
+  const greetingActionsStart = identityContent.indexOf("const greetingActions = [");
+  const greetingActionsEnd = identityContent.indexOf("const greetingRow", greetingActionsStart);
+  const greetingActionsBlock = identityContent.slice(greetingActionsStart, greetingActionsEnd);
+  assert(!greetingActionsBlock.includes("whatsapp_form_summary_received"), "Identity WhatsApp form özetini greetingSent kabul etmemeli");
+  assert(identityContent.includes("hasOnlyWhatsappFormSummaryContext"), "Identity eski WhatsApp form özeti kayıtlarını gerçek greeting'den ayırmalı");
   assert(outreachContent.includes("ol.lead_id::text = $2::text"), "Toplu karşılama duplicate guard lead id'yi text güvenli kıyaslamalı");
-  assert(outreachContent.includes("whatsapp_form_summary_received"), "Toplu karşılama WhatsApp form özeti alınan kişiye tekrar şablon göndermemeli");
+  assert(outreachContent.includes("sendFormGreetingTemplateAction:inboundBlock"), "Toplu karşılama WhatsApp'tan yazan kişiyi inbound guard ile engellemeli");
   assert(sheetsContent.includes("INGEST_AUTO_GREETING_SKIP_INBOUND_EXISTS"), "Sheets webhook son WhatsApp inbound varsa otomatik şablonu atlamalı");
   assert(sheetsContent.includes("RIGHT(phone_number, 10) = ANY($2::text[])"), "Sheets webhook telefon suffix sorgusu tip güvenli olmalı");
 });
 
-test("Başkent v94 T156: form management treats WhatsApp form summaries as first contact handled", () => {
+test("Başkent v94 T156: form management separates template greeting from WhatsApp form summaries", () => {
   const fs = require("fs");
   const path = require("path");
   const resolverPath = path.join(process.cwd(), "src/lib/utils/first-contact-status-resolver.ts");
@@ -15591,7 +15597,7 @@ test("Başkent v94 T156: form management treats WhatsApp form summaries as first
   const tabsContent = fs.readFileSync(tabsPath, "utf8");
   const tableContent = fs.readFileSync(tablePath, "utf8");
 
-  assert(resolverContent.includes("'whatsapp_form_summary_received'"), "First contact resolver should treat WhatsApp form summaries as hard duplicate greetings");
+  assert(!resolverContent.includes("'whatsapp_form_summary_received'"), "First contact resolver should not treat WhatsApp form summaries as hard duplicate greetings");
   assert(resolverContent.includes("'outreach_form_greeting_template_sent'"), "First contact resolver should include action-result event names too");
   assert(formsContent.includes("RIGHT(REGEXP_REPLACE(COALESCE(metadata->>'phone', metadata->>'target_phone', ''), '\\\\D', '', 'g'), 10)"), "Form list should match summary/greeting logs by sanitized phone fallback");
   assert(formsContent.includes("action IN (${hardDuplicateActionsSql})"), "Form list/counts should use the shared hard duplicate action set");
@@ -15599,8 +15605,8 @@ test("Başkent v94 T156: form management treats WhatsApp form summaries as first
   assert(formsContent.includes("updateLeadNotes(id: string"), "Lead notes should keep UUID as string");
   assert(formsContent.includes("updateLeadStage(id: string"), "Lead stage updates should keep UUID as string");
   assert(formsContent.includes("id = $1::uuid"), "Lead detail/update queries should cast UUID explicitly");
-  assert(outreachContent.includes("'whatsapp_form_summary_received'"), "Outreach duplicate guard should block repeat greetings after WhatsApp form summaries");
-  assert(manualEchoContent.includes("'whatsapp_form_summary_received'"), "Manual echo matcher should also treat WhatsApp form summaries as addressed");
+  assert(!outreachContent.includes("'whatsapp_form_summary_received'"), "Outreach duplicate guard should not mark WhatsApp form summaries as sent greetings");
+  assert(!manualEchoContent.includes("'whatsapp_form_summary_received'"), "Manual echo matcher should not treat WhatsApp form summaries as addressed greetings");
   assert(uiContent.includes("needs_reply: 'Cevap Geldi'"), "UI should use simple SaaS-facing reply label");
   assert(uiContent.includes("waiting_patient: 'Cevap Bekleniyor'"), "UI should use simple SaaS-facing waiting label");
   assert(uiContent.includes("if (status === 'patient_replied') return 'needs_reply'"), "Patient replies should roll up to the Cevap Geldi bucket");

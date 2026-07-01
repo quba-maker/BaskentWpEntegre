@@ -172,7 +172,7 @@ export function buildCompactWhatsAppFormSummaryForAi(
   const lines = [
     "[WhatsApp form özeti]",
     "Hasta Meta/WhatsApp form özetini sohbetten gönderdi. Bunu normal sohbet cümlesi değil, mevcut form başvurusu olarak değerlendir.",
-    "Bu mesaj geldiyse ayrıca otomatik şablon karşılama isteme; form karşılaması/ilk temas zaten hasta tarafından başlatılmış sayılır.",
+    "Bu mesaj hastanın ilk temasıdır; ayrıca otomatik şablon isteme. Sohbet içinde doğal, kısa ve form bilgilerine bağlı ilk yanıt ver.",
     f.formName ? `Form: ${f.formName}` : null,
     f.fullName ? `Ad: ${f.fullName}` : null,
     phone ? `Telefon/WhatsApp: ${phone}` : null,
@@ -184,7 +184,7 @@ export function buildCompactWhatsAppFormSummaryForAi(
     f.callbackPreference ? `Arama tercihi: ${f.callbackPreference}` : null,
     f.reports ? `Tetkik/rapor: ${f.reports}` : null,
     f.formLink ? `Form linki: ${f.formLink}` : null,
-    "Yanıt verirken formu tekrar okumaya çalışma; hastanın asıl talebine doğal şekilde cevap ver ve gerekiyorsa tek net takip sorusu sor.",
+    "Yanıt verirken formu tekrar okumaya çalışma, kurum/isim karşılama cümlesini tekrar etme; hastanın asıl talebine doğal şekilde cevap ver ve gerekiyorsa tek net takip sorusu sor.",
   ].filter(Boolean);
 
   return lines.join("\n").slice(0, 1800);

@@ -1303,12 +1303,11 @@ export class QueueWorkerEngine {
 	                patient_name = COALESCE(NULLIF(patient_name, ''), NULLIF($3, ''), patient_name),
 	                country = COALESCE(NULLIF(country, ''), NULLIF($4, ''), country),
 	                metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
-	                  'form_context_handled', true,
+	                  'whatsapp_form_summary_context_loaded', true,
 	                  'whatsapp_form_summary_received_at', $5::text,
 	                  'whatsapp_form_summary_source', 'meta_click_to_whatsapp_form',
 	                  'whatsapp_form_summary_provider_message_id', $6::text,
-	                  'whatsapp_form_summary_fields', $7::jsonb,
-	                  'greeting_template_name', COALESCE(metadata->>'greeting_template_name', 'whatsapp_form_summary_received')
+	                  'whatsapp_form_summary_fields', $7::jsonb
 	                )
 	            WHERE id = $1::uuid AND tenant_id = $2::uuid
 	          `,

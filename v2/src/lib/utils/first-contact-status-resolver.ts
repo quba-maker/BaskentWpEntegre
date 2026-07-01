@@ -59,8 +59,7 @@ export const FIRST_CONTACT_HARD_DUPLICATE_ACTIONS = [
   'greeting_sent',
   'template_sent',
   'form_greeting_template_sent',
-  'outreach_form_greeting_template_sent',
-  'whatsapp_form_summary_received'
+  'outreach_form_greeting_template_sent'
 ];
 
 export const FIRST_CONTACT_GREETING_ACTIONS = FIRST_CONTACT_HARD_DUPLICATE_ACTIONS;
@@ -139,8 +138,7 @@ export function resolveFirstContactStatus(
       log.action === 'greeting_sent' || 
       log.action === 'template_sent' || 
       log.action === 'form_greeting_template_sent' ||
-      log.action === 'outreach_form_greeting_template_sent' ||
-      log.action === 'whatsapp_form_summary_received'
+      log.action === 'outreach_form_greeting_template_sent'
     ) {
       phoneObj.hasApiGreetingSent = true;
     }
