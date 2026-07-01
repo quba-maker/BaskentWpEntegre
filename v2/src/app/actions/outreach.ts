@@ -26,6 +26,15 @@ const DEFAULT_FORM_GREETING_TEMPLATE_NAME = process.env.FORM_GREETING_TEMPLATE_N
 const DEFAULT_FORM_GREETING_TEMPLATE_LANGUAGE = process.env.FORM_GREETING_TEMPLATE_LANGUAGE || 'tr';
 const DEFAULT_FORM_GREETING_TEMPLATE_TEXT = process.env.FORM_GREETING_TEMPLATE_TEXT ||
   "Merhaba, ben Rüya. Başkent Üniversitesi Konya Hastanesi’nden sizinle iletişime geçiyorum.\n\nDoldurduğunuz form doğrultusunda sürecinizle ilgili size yardımcı olmak isteriz.\n\nMüsait olduğunuzda buradan bize dönüş yapabilirsiniz 🙏🏻";
+const FORM_GREETING_SENT_ACTIONS = [
+  'greeting_sent',
+  'template_sent',
+  'form_greeting_template_sent',
+  'outreach_form_greeting_template_sent',
+  'manual_whatsapp_greeting_echo_confirmed',
+  'inbox_form_greeting_sent',
+] as const;
+const FORM_GREETING_SENT_ACTIONS_SQL = FORM_GREETING_SENT_ACTIONS.map((action) => `'${action}'`).join(', ');
 
 function normalizeFormGreetingTemplateName(templateName: string): string {
   const clean = String(templateName || '').trim();
@@ -136,7 +145,7 @@ export async function prepareGreetingDraft(leadId: string) {
       // ── 2. Check if greeting already sent (informational for UI) ──
       const existingGreeting = await ctx.db.executeSafe({
         text: `SELECT id FROM outreach_logs 
-               WHERE lead_id = $1 AND tenant_id = $2 AND action = 'greeting_sent'
+               WHERE lead_id = $1 AND tenant_id = $2 AND action IN (${FORM_GREETING_SENT_ACTIONS_SQL})
                LIMIT 1`,
         values: [leadId, ctx.tenantId]
       }) as any[];
@@ -358,7 +367,7 @@ export async function checkGreetingReadinessCore(
       FROM outreach_logs ol
       LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id::text = ol.tenant_id
       WHERE ol.tenant_id = $1::text
-        AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'outreach_form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed')
+        AND ol.action IN (${FORM_GREETING_SENT_ACTIONS_SQL})
         AND (
           ol.lead_id = $2::uuid
           OR (ol.opportunity_id = $3::text AND $3 IS NOT NULL)
@@ -598,7 +607,7 @@ export async function sendGreetingMessage(leadId: string, message: string) {
       // ── 2. Duplicate guard ──
       const existingGreeting = await ctx.db.executeSafe({
         text: `SELECT id FROM outreach_logs 
-               WHERE lead_id = $1 AND tenant_id = $2 AND action = 'greeting_sent'
+               WHERE lead_id = $1 AND tenant_id = $2 AND action IN (${FORM_GREETING_SENT_ACTIONS_SQL})
                LIMIT 1`,
         values: [leadId, ctx.tenantId]
       }) as any[];
@@ -1218,7 +1227,7 @@ export async function sendFormGreetingTemplateAction(
 	          FROM outreach_logs ol
 	          LEFT JOIN leads l ON l.id::text = ol.lead_id::text AND l.tenant_id::text = ol.tenant_id::text
 	          WHERE ol.tenant_id::text = $1::text
-	            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
+	            AND ol.action IN (${FORM_GREETING_SENT_ACTIONS_SQL})
 	            AND (
 	              ol.lead_id::text = $2::text
 	              OR (ol.opportunity_id::text = $3::text AND $3 IS NOT NULL)

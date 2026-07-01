@@ -3228,7 +3228,7 @@ test("P0.14 T5: FF kapalı ama baseEligible true ise UI 'Teknik olarak uygun ama
     assert(decision.finalActionAllowed === false, "Final action should not be allowed when FF is disabled");
 
     const pres = FormDecisionPresenter.present(decision);
-    assert(pres.badgeText === 'Bot Uygun', "Badge should show technical status");
+    assert(pres.badgeText === 'Cevap Geldi', "Badge should show the operator action, not a technical bot status");
   } finally {
     process.env.FORM_AUTOPILOT_FOR_OPEN_META_WINDOW_ENABLED = oldFlag;
     process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
@@ -3272,7 +3272,7 @@ test("P0.14 T6: Dry-run açık ise UI 'dry-run açık' gösterimi", async () => 
     assert(decision.finalActionAllowed === false, "Final action should not be allowed during phase lock");
 
     const pres = FormDecisionPresenter.present(decision);
-    assert(pres.badgeText === 'Bot Uygun', "Badge should indicate technical status");
+    assert(pres.badgeText === 'Cevap Geldi', "Badge should remain action-oriented during locked/test states");
   } finally {
     process.env.FORM_AUTOPILOT_PHASE_LOCK_OUTBOUND_BLOCKED = oldLock;
   }
@@ -9822,7 +9822,7 @@ test("P0.30 - Form Yönetimi Status / Matching / 24h Window / Template Gate Fix"
       reason: 'phase_lock_enabled',
       userFriendlyReason: 'Canlı gönderim kilidi aktif.'
     });
-    assert(presWithCategory.title === "Otomatik Karşılama Aktif", `Expected 'Otomatik Karşılama Aktif', got '${presWithCategory.title}'`);
+    assert(presWithCategory.title === "Inbox’tan Yanıtlanabilir", `Expected 'Inbox’tan Yanıtlanabilir', got '${presWithCategory.title}'`);
 
     const presWithoutCategory = FormDecisionPresenter.present({
       source: 'form',
@@ -9836,7 +9836,7 @@ test("P0.30 - Form Yönetimi Status / Matching / 24h Window / Template Gate Fix"
       reason: 'phase_lock_enabled',
       userFriendlyReason: 'Canlı gönderim kilidi aktif.'
     } as any);
-    assert(presWithoutCategory.title === "Analiz Hatası", `Expected 'Analiz Hatası', got '${presWithoutCategory.title}'`);
+    assert(presWithoutCategory.title === "Kontrol Gerekli", `Expected 'Kontrol Gerekli', got '${presWithoutCategory.title}'`);
   } finally {
     process.env.FORM_AUTOPILOT_ALLOWED_TENANTS = oldAllowed;
     (global as any).mockDb = originalMockDb;
@@ -15590,6 +15590,7 @@ test("Başkent v94 T156: form management separates template greeting from WhatsA
   const uiPath = path.join(process.cwd(), "src/components/features/forms/first-contact-ui.ts");
   const tabsPath = path.join(process.cwd(), "src/components/features/forms/FormStatsTabs.tsx");
   const tablePath = path.join(process.cwd(), "src/components/features/forms/FormListTable.tsx");
+  const detailStatePath = path.join(process.cwd(), "src/components/features/forms/hooks/useFormDetailState.ts");
 
   const resolverContent = fs.readFileSync(resolverPath, "utf8");
   const formsContent = fs.readFileSync(formsPath, "utf8");
@@ -15598,6 +15599,7 @@ test("Başkent v94 T156: form management separates template greeting from WhatsA
   const uiContent = fs.readFileSync(uiPath, "utf8");
   const tabsContent = fs.readFileSync(tabsPath, "utf8");
   const tableContent = fs.readFileSync(tablePath, "utf8");
+  const detailStateContent = fs.readFileSync(detailStatePath, "utf8");
 
   assert(!resolverContent.includes("'whatsapp_form_summary_received'"), "First contact resolver should not treat WhatsApp form summaries as hard duplicate greetings");
   assert(resolverContent.includes("'outreach_form_greeting_template_sent'"), "First contact resolver should include action-result event names too");
@@ -15608,7 +15610,11 @@ test("Başkent v94 T156: form management separates template greeting from WhatsA
   assert(formsContent.includes("updateLeadStage(id: string"), "Lead stage updates should keep UUID as string");
   assert(formsContent.includes("id = $1::uuid"), "Lead detail/update queries should cast UUID explicitly");
   assert(!outreachContent.includes("'whatsapp_form_summary_received'"), "Outreach duplicate guard should not mark WhatsApp form summaries as sent greetings");
+  assert(outreachContent.includes("FORM_GREETING_SENT_ACTIONS"), "Outreach duplicate guards should share one greeting-sent action family");
+  assert(outreachContent.includes("'inbox_form_greeting_sent'"), "Outreach duplicate guard should include inbox greeting proofs");
   assert(!manualEchoContent.includes("'whatsapp_form_summary_received'"), "Manual echo matcher should not treat WhatsApp form summaries as addressed greetings");
+  assert(detailStateContent.includes("'form_greeting_template_sent'"), "Form detail should treat approved template sends as greeting sent");
+  assert(detailStateContent.includes("'inbox_form_greeting_sent'"), "Form detail should treat inbox greeting sends as greeting sent");
   assert(uiContent.includes("needs_reply: 'Cevap Geldi'"), "UI should use simple SaaS-facing reply label");
   assert(uiContent.includes("waiting_patient: 'Cevap Bekleniyor'"), "UI should use simple SaaS-facing waiting label");
   assert(uiContent.includes("if (status === 'patient_replied') return 'needs_reply'"), "Patient replies should roll up to the Cevap Geldi bucket");

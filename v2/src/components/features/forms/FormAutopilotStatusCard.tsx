@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Sparkles, Bot, AlertTriangle, Check, ExternalLink, Globe, HelpCircle } from "lucide-react";
+import { Sparkles, MessageCircle, AlertTriangle, Check, ExternalLink, Globe, HelpCircle } from "lucide-react";
 import { GreetingAutomationDecision } from "@/lib/services/automation/first-contact-decision-resolver";
 import { FormDecisionPresenter } from "@/lib/services/forms/form-autopilot-decision-presenter";
 
@@ -37,7 +37,7 @@ export function FormAutopilotStatusCard({
         <div>
           <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Durum Belirlenemedi</h4>
           <p className="text-[11px] text-gray-400 mt-1 leading-relaxed">
-            Lead için otopilot/karşılama durum verisi bulunmamaktadır.
+            Bu form için ilk temas durumu henüz hesaplanamadı.
           </p>
         </div>
       </div>
@@ -62,8 +62,8 @@ export function FormAutopilotStatusCard({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-black/5 pb-3">
         <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
-          <Bot className="w-4 h-4 text-blue-600" />
-          Karşılama Otopilotu
+          <MessageCircle className="w-4 h-4 text-blue-600" />
+          İlk Temas Durumu
         </span>
         <span 
           className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full border tracking-wider ${badgeColorClasses[badgeColor]}`}
@@ -102,7 +102,7 @@ export function FormAutopilotStatusCard({
         <div className="p-3 bg-amber-500/[0.04] border border-amber-500/10 rounded-xl flex items-start gap-2.5">
           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-[11px] leading-relaxed text-amber-800 font-semibold">
-            <span className="font-bold">Güvenlik Engeli:</span> {decision.userFriendlyReason || decision.reason}
+            <span className="font-bold">Gönderim Engeli:</span> {decision.userFriendlyReason || decision.reason}
           </div>
         </div>
       )}
@@ -120,13 +120,13 @@ export function FormAutopilotStatusCard({
           }`}
         >
           {presentation.buttonAction === 'go_to_inbox' && (
-            <>Konuşmaya Git <ExternalLink className="w-4 h-4" /></>
+            <>Konuşmayı Aç <ExternalLink className="w-4 h-4" /></>
           )}
           {presentation.buttonAction === 'prepare_draft' && (
-            <>Taslak Oluştur <Sparkles className="w-4 h-4" /></>
+            <>Taslak Hazırla <Sparkles className="w-4 h-4" /></>
           )}
           {presentation.buttonAction === 'select_template' && (
-            <>Şablon Seç <Check className="w-4 h-4" /></>
+            <>Hazır Şablon Seç <Check className="w-4 h-4" /></>
           )}
         </button>
       )}

@@ -304,16 +304,16 @@ export function FormListTable({
                         const getAutopilotBadge = (category: string) => {
                           switch (category) {
                             case 'bot_auto_eligible':
-                              return { label: 'Bot Uygun', color: '#34C759', icon: '🤖' };
+                              return { label: 'Cevap Geldi', color: '#34C759', icon: '💬' };
                             case 'manual_draft_required':
-                              return { label: 'Taslak Gerekli', color: '#FF9500', icon: '✍️' };
+                              return { label: 'Taslak', color: '#FF9500', icon: '✍️' };
                             case 'manual_template_required':
-                              return { label: 'Şablon Gerekli', color: '#FFCC00', icon: '📄' };
+                              return { label: 'Hazır Şablon', color: '#FFCC00', icon: '📄' };
                             case 'already_open_inbox':
                             case 'already_processed':
-                              return { label: "Inbox'tan Devam", color: '#007AFF', icon: '💬' };
+                              return { label: 'Cevap Bekleniyor', color: '#007AFF', icon: '💬' };
                             default:
-                              return { label: 'Uygun Değil', color: '#FF3B30', icon: '🚫' };
+                              return { label: 'Kontrol', color: '#FF3B30', icon: '🚫' };
                           }
                         };
                         const baseCat = form.autopilotDecision.baseCategory || form.autopilotDecision.category;

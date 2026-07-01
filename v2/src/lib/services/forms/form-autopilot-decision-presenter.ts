@@ -41,20 +41,20 @@ const CONFIDENCE_MAP: Record<string, string> = {
 };
 
 const GATE_STATE_MAP: Record<string, string> = {
-  open: 'Canlı Gönderim Açık',
-  live_locked: 'Canlı Gönderim Kilitli',
-  dry_run: 'Dry-Run Modu Aktif',
+  open: 'Gönderim açık',
+  live_locked: 'Canlı gönderim kapalı',
+  dry_run: 'Test modu aktif',
   feature_disabled: 'Ayar Kapalı',
-  allowlist_missing: 'Yetkilendirme Eksik',
-  global_disabled: 'Güvenlik Kilidi Aktif'
+  allowlist_missing: 'Firma izni eksik',
+  global_disabled: 'Genel gönderim kapalı'
 };
 
 const GATE_REASON_MAP: Record<string, string> = {
-  phase_lock_enabled: 'Canlı Gönderim Kilitli (Env Lock)',
-  dry_run_enabled: 'Dry-run Aktif (Simülasyon)',
-  feature_flag_disabled: 'Otomatik Karşılama Ayarı Kapalı (FF)',
-  allowlist_missing: 'Kurum İzni Bulunmuyor (Allowlist)',
-  global_disabled: 'Genel Sistem Kilidi Açık (Global)'
+  phase_lock_enabled: 'Canlı gönderim bu ortamda kapalı',
+  dry_run_enabled: 'Bu işlem sadece test ediliyor',
+  feature_flag_disabled: 'Otomatik ilk temas ayarı kapalı',
+  allowlist_missing: 'Bu firma için canlı izin tanımlı değil',
+  global_disabled: 'Genel gönderim kilidi açık'
 };
 
 export class FormDecisionPresenter {
@@ -76,20 +76,20 @@ export class FormDecisionPresenter {
 
     switch (decision.baseCategory) {
       case 'bot_auto_eligible':
-        presentation.badgeText = 'Bot Uygun';
+        presentation.badgeText = 'Cevap Geldi';
         presentation.badgeColor = 'green';
-        presentation.title = 'Otomatik Karşılama Aktif';
-        presentation.description = 'Hasta WhatsApp üzerinden yazdı ve Meta 24 saat penceresi açık. Sistem otomatik cevap verebilir.';
-        presentation.buttonText = 'İletişimi Gör';
+        presentation.title = 'Inbox’tan Yanıtlanabilir';
+        presentation.description = 'Hasta WhatsApp üzerinden yazmış. Konuşma penceresi açık olduğu için bu kişiyle inbox üzerinden devam edilebilir.';
+        presentation.buttonText = 'Konuşmayı Aç';
         presentation.buttonAction = 'go_to_inbox';
         break;
 
       case 'manual_draft_required':
-        presentation.badgeText = 'Taslak Gerekli';
+        presentation.badgeText = 'Karşılama Bekliyor';
         presentation.badgeColor = 'orange';
-        presentation.title = 'İlk Temas Başlatılmalı';
-        presentation.description = decision.userFriendlyReason || 'Hasta henüz WhatsApp’tan yazmadı. Manuel bir taslak mesaj hazırlanması gerekir.';
-        presentation.buttonText = 'Mesaj Taslağı Hazırla';
+        presentation.title = 'İlk Mesaj Hazırlanabilir';
+        presentation.description = decision.userFriendlyReason || 'Bu kişiyle henüz WhatsApp konuşması başlamamış. İlk temas için taslak hazırlanabilir.';
+        presentation.buttonText = 'Taslak Hazırla';
         presentation.buttonAction = 'prepare_draft';
         presentation.showLanguageSuggestion = !!decision.language;
         presentation.suggestedLanguageText = `Önerilen dil: ${defaultLang}`;
@@ -97,11 +97,11 @@ export class FormDecisionPresenter {
         break;
 
       case 'manual_template_required':
-        presentation.badgeText = 'Şablon Gerekli';
+        presentation.badgeText = 'Hazır Şablon';
         presentation.badgeColor = 'yellow';
-        presentation.title = '24s Penceresi Kapalı';
-        presentation.description = decision.userFriendlyReason || '24 saatlik müşteri penceresi kapandığı için serbest metin gönderilemez, onaylı şablon (template) seçilmelidir.';
-        presentation.buttonText = 'Şablon Seç';
+        presentation.title = 'Onaylı Şablon Kullanılmalı';
+        presentation.description = decision.userFriendlyReason || 'Serbest mesaj penceresi kapalı. İlk temas için onaylı WhatsApp şablonu kullanılmalı.';
+        presentation.buttonText = 'Hazır Şablon Seç';
         presentation.buttonAction = 'select_template';
         presentation.showLanguageSuggestion = !!decision.language;
         presentation.suggestedLanguageText = `Önerilen dil: ${defaultLang}`;
@@ -109,11 +109,11 @@ export class FormDecisionPresenter {
         break;
 
       case 'already_open_inbox':
-        presentation.badgeText = "Inbox'tan Devam";
+        presentation.badgeText = 'Cevap Bekleniyor';
         presentation.badgeColor = 'blue';
-        presentation.title = 'İnsan Temsilci Devraldı';
-        presentation.description = 'Bu konuşma bir insan temsilci veya otopilot tarafından devralınmış durumda. Otomatik bot devre dışıdır.';
-        presentation.buttonText = 'Konuşmaya Git';
+        presentation.title = 'İletişim Başlamış';
+        presentation.description = 'Bu kişiyle daha önce iletişim kurulmuş. Devam gerekiyorsa konuşmayı açabilirsiniz.';
+        presentation.buttonText = 'Konuşmayı Aç';
         presentation.buttonAction = 'go_to_inbox';
         break;
 
@@ -122,8 +122,8 @@ export class FormDecisionPresenter {
       default:
         presentation.badgeText = 'Uygun Değil';
         presentation.badgeColor = 'red';
-        presentation.title = 'Analiz Hatası';
-        presentation.description = decision.userFriendlyReason || 'Lead bilgisi veya konuşma parametreleri eksik olduğu için durum belirlenemedi.';
+        presentation.title = 'Kontrol Gerekli';
+        presentation.description = decision.userFriendlyReason || 'Telefon, form veya konuşma bilgisi eksik görünüyor. Gönderimden önce kontrol edilmeli.';
         presentation.buttonText = 'Detayları İncele';
         presentation.buttonAction = 'none';
         break;

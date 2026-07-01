@@ -10,12 +10,12 @@ interface FormStatsTabsProps {
 
 export function FormStatsTabs({ firstContactFilter, setFirstContactFilter, statusCounts }: FormStatsTabsProps) {
   const tabs = [
-    { value: 'all', label: FIRST_CONTACT_UI_LABELS.all, icon: '📁' },
-    { value: 'needs_greeting', label: FIRST_CONTACT_UI_LABELS.needs_greeting, icon: '👋' },
-    { value: 'needs_reply', label: FIRST_CONTACT_UI_LABELS.needs_reply, icon: '💬' },
-    { value: 'no_reply_waiting', label: FIRST_CONTACT_UI_LABELS.no_reply_waiting, icon: '⏳' },
-    { value: 'waiting_patient', label: FIRST_CONTACT_UI_LABELS.waiting_patient, icon: '✅' },
-    { value: 'blocked_or_invalid', label: FIRST_CONTACT_UI_LABELS.blocked_or_invalid, icon: '⚠️' }
+    { value: 'all', label: FIRST_CONTACT_UI_LABELS.all },
+    { value: 'needs_greeting', label: FIRST_CONTACT_UI_LABELS.needs_greeting },
+    { value: 'needs_reply', label: FIRST_CONTACT_UI_LABELS.needs_reply },
+    { value: 'waiting_patient', label: FIRST_CONTACT_UI_LABELS.waiting_patient },
+    { value: 'no_reply_waiting', label: FIRST_CONTACT_UI_LABELS.no_reply_waiting },
+    { value: 'blocked_or_invalid', label: FIRST_CONTACT_UI_LABELS.blocked_or_invalid }
   ];
 
   return (
@@ -45,7 +45,6 @@ export function FormStatsTabs({ firstContactFilter, setFirstContactFilter, statu
                 : 'text-[#86868B] hover:text-[#1D1D1F] hover:bg-white/40'
             }`}
           >
-            <span>{tab.icon}</span>
             <span>{tab.label}</span>
             {typeof count === 'number' && (
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${

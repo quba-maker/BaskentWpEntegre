@@ -12,6 +12,15 @@ import {
   type OutreachLogEntry 
 } from "@/app/actions/outreach";
 
+const GREETING_SENT_ACTIONS = new Set([
+  'greeting_sent',
+  'template_sent',
+  'form_greeting_template_sent',
+  'outreach_form_greeting_template_sent',
+  'manual_whatsapp_greeting_echo_confirmed',
+  'inbox_form_greeting_sent',
+]);
+
 export function useFormDetailState(selectedForm: any, onFormUpdate: () => void) {
   const [selectedPhone, setSelectedPhone] = useState("");
   const [detailData, setDetailData] = useState<any>(null);
@@ -51,7 +60,7 @@ export function useFormDetailState(selectedForm: any, onFormUpdate: () => void) 
     try {
       const history = await getOutreachHistory(leadId);
       setOutreachTimeline(history);
-      const hasGreeting = history.some((h: OutreachLogEntry) => h.action === 'greeting_sent');
+      const hasGreeting = history.some((h: OutreachLogEntry) => GREETING_SENT_ACTIONS.has(h.action));
       setGreetingSent(hasGreeting);
     } catch (_) {
       setOutreachTimeline([]);
