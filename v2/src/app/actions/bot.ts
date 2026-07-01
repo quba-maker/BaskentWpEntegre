@@ -21,9 +21,6 @@ type SandboxFormInput = {
   rawText?: string;
 };
 
-type SandboxBrainMode = 'legacy' | 'v2' | 'hybrid' | 'pure';
-type NormalizedSandboxBrainMode = 'legacy' | 'v2';
-
 const SANDBOX_MODEL_IDS = new Set([
   'gemini-3.5-flash',
   'gemini-2.5-flash',
@@ -34,11 +31,6 @@ const SANDBOX_MODEL_IDS = new Set([
 function normalizeSandboxModelOverride(value: unknown): string | null {
   const modelId = String(value || '').trim();
   return SANDBOX_MODEL_IDS.has(modelId) ? modelId : null;
-}
-
-function normalizeSandboxBrainMode(value: unknown): NormalizedSandboxBrainMode {
-  if (value === 'v2' || value === 'pure') return 'v2';
-  return 'legacy';
 }
 
 function normalizeSandboxFormKey(label: string): string {
@@ -172,37 +164,6 @@ function buildSandboxUnifiedContext(input?: SandboxFormInput | null) {
     patient_known_facts: ConversationKnownFactsResolver.formatFacts(resolvedFacts),
   };
 }
-
-function buildPureQubaSandboxPrompt(input: {
-  qubaBrainDirective: string;
-  knowledgePrices?: string | null;
-  knowledgeRules?: string | null;
-}) {
-  const lines = [
-    '--- QUBA SAAS BRAIN TEST PROMPT ---',
-    'Bu testte eski uzun Sistem Prompt kullanılmaz.',
-    'Yanıtı yalnızca SaaS Brain kurulumu, doğrulanmış bilgi bankası, fiyat politikası, konuşma geçmişi ve test form bağlamına göre üret.',
-    'Hasta karşısında teknik prompt, sistem, brain, sandbox veya model tartışmasına girme.',
-    'Doğal, kısa, kurumsal ve insan gibi konuş. Gereksiz kimlik tekrarları, mekanik kalıplar ve kapanışlar kullanma.',
-    input.qubaBrainDirective,
-  ];
-
-  if (input.knowledgeRules?.trim()) {
-    lines.push('[DOĞRULANMIŞ BİLGİ/KURALLAR]');
-    lines.push(input.knowledgeRules.trim());
-    lines.push('[/DOĞRULANMIŞ BİLGİ/KURALLAR]');
-  }
-
-  if (input.knowledgePrices?.trim()) {
-    lines.push('[FİYAT POLİTİKASI]');
-    lines.push(input.knowledgePrices.trim());
-    lines.push('[/FİYAT POLİTİKASI]');
-  }
-
-  return lines.filter(Boolean).join('\n');
-}
-
-
 
 // ==========================================
 // READ: getBotSettings (V2 Primary)
@@ -623,7 +584,6 @@ export async function testBotPrompt(
   channelId?: string,
   options?: {
     sandboxForm?: SandboxFormInput | null;
-    sandboxBrainMode?: SandboxBrainMode;
     sandboxModelOverride?: string | null;
   }
 ) {
@@ -749,47 +709,20 @@ export async function testBotPrompt(
       const sandboxUnifiedContext = buildSandboxUnifiedContext(options?.sandboxForm || null);
 
       const { BrainV2ShadowPlanner } = await import("@/lib/services/ai/brain-v2-shadow-planner");
-      const { QubaBrainCompiler, QubaV2GateEngine, resolveQubaBrainRolloutMode, shouldApplyQubaBrainSandboxDirective } = await import("@/lib/brain/core");
+      const { QubaBrainCompiler, resolveQubaBrainRolloutMode } = await import("@/lib/brain/core");
       const qubaBrainProfile = QubaBrainCompiler.compile(mockBrain as any);
       const qubaBrainRolloutMode = resolveQubaBrainRolloutMode(mockBrain as any);
-      const qubaBrainCoreApplied = shouldApplyQubaBrainSandboxDirective(qubaBrainRolloutMode);
-      const qubaBrainDirective = qubaBrainCoreApplied ? QubaBrainCompiler.buildDirective(qubaBrainProfile) : '';
-      const sandboxBrainMode = normalizeSandboxBrainMode(options?.sandboxBrainMode);
-      const qubaV2GateResult = sandboxBrainMode === 'v2'
-        ? QubaV2GateEngine.build({
-            inboundText: lastMessage?.content || '',
-            history: historyMessages,
-            brain: mockBrain as any,
-            profile: qubaBrainProfile,
-            now: new Date(),
-            latestForm: sandboxUnifiedContext?.latestForm,
-            opportunity: sandboxUnifiedContext?.opportunity,
-            conversation: sandboxUnifiedContext?.conversation
-          })
-        : null;
-      const brainV2ShadowPlan = qubaV2GateResult
-        ? QubaV2GateEngine.toLegacyShadowPlan(qubaV2GateResult)
-        : BrainV2ShadowPlanner.build({
-            inboundText: lastMessage?.content || '',
-            history: historyMessages,
-            brain: mockBrain as any,
-            channel: 'whatsapp',
-            now: new Date(),
-            latestForm: sandboxUnifiedContext?.latestForm,
-            opportunity: sandboxUnifiedContext?.opportunity,
-            conversation: sandboxUnifiedContext?.conversation
-          });
-      const brainV2SandboxDirective = qubaV2GateResult
-        ? QubaV2GateEngine.buildSandboxPromptDirective(qubaV2GateResult)
-        : BrainV2ShadowPlanner.buildSandboxPromptDirective(brainV2ShadowPlan);
-      const effectiveQubaBrainCoreApplied = sandboxBrainMode === 'v2' && qubaBrainCoreApplied;
-      const sandboxSystemPrompt = sandboxBrainMode === 'v2'
-        ? `${buildPureQubaSandboxPrompt({
-            qubaBrainDirective: qubaBrainDirective || QubaBrainCompiler.buildDirective(qubaBrainProfile),
-            knowledgePrices: activePrompt.knowledge_prices,
-            knowledgeRules: activePrompt.knowledge_rules,
-          })}${brainV2SandboxDirective}`
-        : rawSystemPrompt;
+      const brainV2ShadowPlan = BrainV2ShadowPlanner.build({
+        inboundText: lastMessage?.content || '',
+        history: historyMessages,
+        brain: mockBrain as any,
+        channel: 'whatsapp',
+        now: new Date(),
+        latestForm: sandboxUnifiedContext?.latestForm,
+        opportunity: sandboxUnifiedContext?.opportunity,
+        conversation: sandboxUnifiedContext?.conversation
+      });
+      const sandboxSystemPrompt = rawSystemPrompt;
       const sandboxPromptHash = crypto.createHash('sha256').update(sandboxSystemPrompt).digest('hex');
       const sandboxBrain = {
         ...mockBrain,
@@ -876,19 +809,19 @@ export async function testBotPrompt(
           responseDelaySeconds: profile?.response_delay_seconds !== null && profile?.response_delay_seconds !== undefined ? profile.response_delay_seconds : 5,
           responseStyle: profile?.response_style || 'balanced',
           maxResponseTokens: maxTokens,
-          qubaBrainCoreApplied: effectiveQubaBrainCoreApplied,
+          qubaBrainCoreApplied: false,
           qubaBrainRolloutMode,
-          sandboxBrainMode,
-          sandboxPromptSource: sandboxBrainMode === 'v2' ? 'v2_quba_brain' : 'v3_single_prompt',
-          v3SinglePromptApplied: sandboxBrainMode !== 'v2',
+          sandboxPromptSource: 'v3_single_prompt',
+          v3SinglePromptApplied: true,
           sandboxModelOverride,
           legacySystemPromptChars: rawSystemPrompt.length,
           sandboxSystemPromptChars: sandboxSystemPrompt.length,
           missingGeminiApiKey,
           qubaBrainProfile,
-          qubaV2GateEngineApplied: sandboxBrainMode === 'v2',
-          qubaV2GateResult,
-          brainV2ShadowPlanApplied: true,
+          qubaV2GateEngineApplied: false,
+          qubaV2GateResult: null,
+          brainV2ShadowPlanApplied: false,
+          brainV2ShadowPlanGenerated: true,
           sandboxFormApplied: !!sandboxUnifiedContext?.latestForm,
           sandboxForm: sandboxUnifiedContext?.latestForm || null,
           sandboxPatientKnownFacts: sandboxUnifiedContext?.patient_known_facts || [],

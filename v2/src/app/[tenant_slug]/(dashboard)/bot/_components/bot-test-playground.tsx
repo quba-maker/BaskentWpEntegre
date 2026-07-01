@@ -26,7 +26,6 @@ interface BotTestPlaygroundProps {
         formName?: string;
         rawText?: string;
       } | null;
-      sandboxBrainMode?: 'legacy' | 'v2';
       sandboxModelOverride?: string | null;
     }
   ) => Promise<{ success: boolean; reply: string; metadata?: any }>;
@@ -154,7 +153,6 @@ export function BotTestPlayground({ activeChannel, botGroupId, currentAiSettings
             sandboxForm: sandboxFormEnabled && sandboxFormText.trim()
               ? { formName: sandboxFormName, rawText: sandboxFormText }
               : null,
-            sandboxBrainMode: 'legacy',
           }
         );
         if (result) {

@@ -685,7 +685,8 @@ test("BOT TEST: Doğru tenant botGroupId ile doğru prompt çözmeli ve db mutat
   assert(res.metadata.sandboxMode === true, "Should be sandboxMode");
   assert(res.metadata.toolExecution === 'sandbox', "Tool execution mode mismatch");
   assert(res.metadata.brainV2ShadowPlan?.mode === 'shadow', "Brain v2 shadow plan should be returned in sandbox metadata");
-  assert(res.metadata.brainV2ShadowPlanApplied === true, "Brain v2 plan should be applied to sandbox prompt");
+  assert(res.metadata.brainV2ShadowPlanGenerated === true, "Brain v2 plan should be generated as non-blocking diagnostics");
+  assert(res.metadata.v3SinglePromptApplied === true, "V3 single prompt should be the only sandbox response source");
 });
 
 
@@ -14424,7 +14425,7 @@ test("Başkent v84 T115: Bot test UI exposes V3 prompt diagnostics without old V
   assert(!code.includes("Brain v2 Gölge Planı"), "Old V2 shadow wording should not return to the simplified V3 panel");
 });
 
-test("Başkent v84 T116: Brain v2 sandbox directive injects must-answer topics without touching live worker", () => {
+test("Başkent v84 T116: Brain v2 planner helper stays diagnostic-only in V3 sandbox", () => {
   const { BrainV2ShadowPlanner } = require("../lib/services/ai/brain-v2-shadow-planner");
   const { createTenantBrain } = require("../lib/brain/tenant-brain");
   const fs = require("fs");
@@ -14458,8 +14459,9 @@ test("Başkent v84 T116: Brain v2 sandbox directive injects must-answer topics w
   assert(directive.includes("kendini veya kurumu tekrar tanıtma"), directive);
   assert(directive.includes('"olur", "evet"'), directive);
   assert(directive.includes("Hangi konuda bilgi almak istiyorsunuz?"), directive);
-  assert(botActionCode.includes("buildSandboxPromptDirective"), "testBotPrompt should apply the sandbox directive");
-  assert(botActionCode.includes("brainV2ShadowPlanApplied: true"), "metadata should expose applied flag");
+  assert(!botActionCode.includes("buildSandboxPromptDirective"), "V3 testBotPrompt should not inject Brain v2 directives into the patient-facing prompt");
+  assert(botActionCode.includes("brainV2ShadowPlanGenerated: true"), "metadata should expose generated diagnostics");
+  assert(botActionCode.includes("brainV2ShadowPlanApplied: false"), "metadata should state diagnostics are not injected into the V3 prompt");
   assert(!orchestratorCode.includes("BRAIN V2 TEST REHBERI"), "live orchestrator must not contain sandbox-only Brain v2 prompt injection");
 });
 
@@ -15141,8 +15143,8 @@ test("Başkent v88 T134e: Sandbox exposes only the simplified V3 test path", () 
   const botActionCode = fs.readFileSync(path.resolve(__dirname, "../app/actions/bot.ts"), "utf-8");
   const playgroundCode = fs.readFileSync(path.resolve(__dirname, "../app/[tenant_slug]/(dashboard)/bot/_components/bot-test-playground.tsx"), "utf-8");
 
-  assert(botActionCode.includes("SandboxBrainMode"), "Server may keep internal mode support for compatibility");
-  assert(botActionCode.includes("buildPureQubaSandboxPrompt"), "Test action should build a pure Brain prompt without legacy system prompt");
+  assert(!botActionCode.includes("SandboxBrainMode"), "Server should not keep selectable old sandbox modes");
+  assert(!botActionCode.includes("buildPureQubaSandboxPrompt"), "V3 sandbox should not build a second pure Brain prompt");
   assert(playgroundCode.includes("Test edilecek sistem"), "Panel should label the selected test system");
   assert(playgroundCode.includes("V3 Tek Prompt aktif"), "Panel should show V3 as the only visible test path");
   assert(playgroundCode.includes("Kullanılan AI ayarı"), "Panel should use the main AI settings instead of a separate test-model selector");
@@ -15150,7 +15152,7 @@ test("Başkent v88 T134e: Sandbox exposes only the simplified V3 test path", () 
   assert(!playgroundCode.includes("Yeni V2 Brain"), "Panel should not offer the segmented V2 Brain test");
   assert(!playgroundCode.includes("V3_TEST_MODELS"), "Panel should not keep a separate test model list");
   assert(!playgroundCode.includes("sandboxModelOverride:"), "Panel should not override the model selected in AI settings");
-  assert(playgroundCode.includes("sandboxBrainMode"), "Panel should pass the selected mode into the sandbox action");
+  assert(!playgroundCode.includes("sandboxBrainMode"), "Panel should not pass old sandbox mode switches");
   assert(!playgroundCode.includes("Karma güvenli test"), "Panel should not expose the old confusing hybrid label");
   assert(!playgroundCode.includes("Saf SaaS Brain"), "Panel should not expose the old confusing pure label");
   assert(!playgroundCode.includes("TEST EDİLEN SİSTEM"), "Panel should avoid duplicate status tiles");
@@ -15216,8 +15218,8 @@ test("Başkent v89 T137: V3 sandbox hides old independent V2 gate controls", () 
   assert(gateCode.includes("usedLegacyRuntimeGates: false"), "V2 gate engine should declare no legacy runtime gates");
   assert(!gateCode.includes("ConversationIntentRouter"), "Independent V2 gate engine must not import the legacy intent router");
   assert(!gateCode.includes("MultiIntentConsultantComposer"), "Independent V2 gate engine must not import legacy multi-intent composer");
-  assert(botActionCode.includes("QubaV2GateEngine.build"), "Sandbox V2 path should build the independent gate result");
-  assert(botActionCode.includes("qubaV2GateEngineApplied"), "Sandbox metadata should expose V2 gate usage");
+  assert(!botActionCode.includes("QubaV2GateEngine.build"), "V3 sandbox should not build an independent V2 gate result");
+  assert(botActionCode.includes("qubaV2GateEngineApplied: false"), "Sandbox metadata should explicitly show V2 gate is not applied");
   assert(playgroundCode.includes("V3 Hafif Kontrol"), "Test panel should show lightweight V3 technical diagnostics");
   assert(playgroundCode.includes("Kontrol rolü:"), "Test panel should explain the diagnostic role");
   assert(playgroundCode.includes("Cevap yazmaz"), "Diagnostics should not be framed as a patient-facing answer writer");
@@ -15233,7 +15235,7 @@ test("Başkent v89 T138: sandbox returns V2 diagnostics even when Gemini key is 
   assert(botActionCode.includes("const missingGeminiApiKey = !process.env.GEMINI_API_KEY"), "Sandbox should track missing Gemini key without returning before diagnostics");
   assert(botActionCode.includes("Yerel sandbox debug bilgileri üretildi"), "Missing key reply should explain diagnostics were still produced");
   assert(botActionCode.includes("missingGeminiApiKey,"), "Sandbox metadata should expose missing Gemini key state");
-  assert(botActionCode.indexOf("QubaV2GateEngine.build") < botActionCode.indexOf("if (!missingGeminiApiKey)"), "V2 gate result should be built before model availability gates the LLM call");
+  assert(botActionCode.indexOf("BrainV2ShadowPlanner.build") < botActionCode.indexOf("if (!missingGeminiApiKey)"), "Diagnostic shadow plan should be built before model availability gates the LLM call");
 });
 
 test("Başkent v90 T139: final auditor repairs trust/forgetfulness escape with known care context", () => {

@@ -28,7 +28,10 @@ export function FormStatsTabs({ firstContactFilter, setFirstContactFilter, statu
             : tab.value === 'needs_reply'
               ? ((statusCounts as any).waiting_inbox_reply || 0) + ((statusCounts as any).patient_replied || 0)
             : tab.value === 'waiting_patient'
-              ? (statusCounts as any).sent
+              ? ((statusCounts as any).sent || 0)
+                + ((statusCounts as any).waiting_patient || 0)
+                + ((statusCounts as any).manual_greeting_confirmed || 0)
+                + ((statusCounts as any).inbox_greeting_sent || 0)
             : (statusCounts as any)[tab.value]
           : null;
 
