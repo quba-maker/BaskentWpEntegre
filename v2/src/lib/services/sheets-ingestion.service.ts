@@ -636,8 +636,41 @@ export async function ingestSheetRow(params: IngestRowParams): Promise<IngestRow
         });
       }
 
-      if (META_ACCESS_TOKEN && autoGreetingEnabled) {
-        const sendWhatsApp = async (phoneToTry: string): Promise<{ ok: boolean; providerMessageId?: string }> => {
+	      if (autoGreetingEnabled) {
+	        try {
+	          const phoneSuffixes = [phone1, phone2].filter(Boolean).map((phone) => String(phone).slice(-10));
+	          const recentInboundRows = await db.executeSafe({
+	            text: `
+	              SELECT id, provider_message_id, created_at
+	              FROM messages
+	              WHERE tenant_id = $1::uuid
+	                AND direction = 'in'
+	                AND RIGHT(phone_number, 10) = ANY($2::text[])
+	                AND created_at > NOW() - INTERVAL '2 hours'
+	              ORDER BY created_at DESC
+	              LIMIT 1
+	            `,
+	            values: [tenantId, phoneSuffixes],
+	          }) as any[];
+
+	          if (recentInboundRows.length > 0) {
+	            autoGreetingEnabled = false;
+	            log.info('[INGEST_AUTO_GREETING_SKIP_INBOUND_EXISTS] Recent inbound WhatsApp form/message already opened the conversation; template greeting skipped', {
+	              tenantId,
+	              phoneSuffix: phone1.slice(-4),
+	              providerMessageId: recentInboundRows[0]?.provider_message_id || null,
+	              inboundAt: recentInboundRows[0]?.created_at || null,
+	            });
+	          }
+	        } catch (inboundGuardErr) {
+	          log.warn('[INGEST_AUTO_GREETING_INBOUND_GUARD_FAILED] Non-fatal; continuing with existing greeting rules', {
+	            error: inboundGuardErr instanceof Error ? inboundGuardErr.message : String(inboundGuardErr),
+	          });
+	        }
+	      }
+
+	      if (META_ACCESS_TOKEN && autoGreetingEnabled) {
+	        const sendWhatsApp = async (phoneToTry: string): Promise<{ ok: boolean; providerMessageId?: string }> => {
           try {
             if (creds.provider === '360dialog' || creds.provider === '360dialog_whatsapp') {
               const res = await ThreeSixtyDialogService.sendTemplate(

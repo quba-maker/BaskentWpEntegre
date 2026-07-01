@@ -17,6 +17,12 @@ import { CredentialsService } from "@/lib/services/credentials.service";
 import { isThreeSixtyProvider } from "@/lib/core/provider-aliases";
 import { getTraceContext } from "@/lib/core/trace-context";
 import { redis } from "@/lib/redis";
+import {
+  buildCompactWhatsAppFormSummaryForAi,
+  compactWhatsAppFormSummaryHistory,
+  detectWhatsAppFormSummaryMessage,
+  type WhatsAppFormSummaryDetection,
+} from "@/lib/utils/whatsapp-form-summary";
 
 export async function commitResponseProcessed(
   db: any, 
@@ -881,6 +887,8 @@ export class QueueWorkerEngine {
     let mediaId: string | null = null;
     let mediaUrl: string | null = null;
     let mediaMetadata: Record<string, any> | null = null;
+    let inboundFormSummary: WhatsAppFormSummaryDetection | null = null;
+    let aiInboundTextOverride: string | null = null;
 
     if (channel === 'whatsapp') {
       const dbTemp = withTenantDB(tenantId);
@@ -948,10 +956,10 @@ export class QueueWorkerEngine {
         }
       }
 
-      switch (msgType) {
-        case 'text':
-          content = incomingMsg.text?.body || '';
-          break;
+	      switch (msgType) {
+	        case 'text':
+	          content = incomingMsg.text?.body || '';
+	          break;
         case 'image':
           mediaType = 'image';
           mediaId = incomingMsg.image?.id || null;
@@ -1099,14 +1107,34 @@ export class QueueWorkerEngine {
           native.interactive_payload = incomingMsg.interactive;
           this.log.info(`[NATIVE_INTERACTIVE_DETECTED] type=${incomingMsg.interactive?.type || 'interactive'} id=${incomingMsg.interactive?.button_reply?.id || incomingMsg.interactive?.list_reply?.id || 'unknown'}`, { traceId });
           break;
-        default:
-          content = '';
-          break;
-      }
-      
-      // Inject native payload into mediaMetadata (which serves as our JSONB metadata column)
-      if (!mediaMetadata) mediaMetadata = {};
-      mediaMetadata.native = native;
+	        default:
+	          content = '';
+	          break;
+	      }
+
+	      if (msgType === 'text' && content) {
+	        const formSummary = detectWhatsAppFormSummaryMessage(content);
+	        if (formSummary.isFormSummary) {
+	          inboundFormSummary = formSummary;
+	          aiInboundTextOverride = buildCompactWhatsAppFormSummaryForAi(formSummary);
+	          native.whatsapp_form_summary = {
+	            detected: true,
+	            source: 'meta_click_to_whatsapp_form',
+	            score: formSummary.score,
+	            form_link: formSummary.formLink || null,
+	            fields: formSummary.fields,
+	          };
+	          this.log.info(`[WHATSAPP_FORM_SUMMARY_DETECTED] Inbound Meta/WhatsApp form summary compacted for AI`, {
+	            traceId,
+	            score: formSummary.score,
+	            fieldCount: formSummary.fields.rawFields.length,
+	          });
+	        }
+	      }
+
+	      // Inject native payload into mediaMetadata (which serves as our JSONB metadata column)
+	      if (!mediaMetadata) mediaMetadata = {};
+	      mediaMetadata.native = native;
 
     } else {
       // Messenger / Instagram
@@ -1256,27 +1284,83 @@ export class QueueWorkerEngine {
       traceCtx.conversationId = conversationId;
     }
 
-    if (isDuplicate) {
-      this.log.warn(`[DUPLICATE_DROPPED] Message already processed`, { providerMessageId, traceId });
-      AIEventEmitter.emit({ tenantId, customerId, type: 'duplicate_message_dropped', category: 'pipeline', severity: 'warning', payload: { providerMessageId } });
-      return;
-    }
+	    if (isDuplicate) {
+	      this.log.warn(`[DUPLICATE_DROPPED] Message already processed`, { providerMessageId, traceId });
+	      AIEventEmitter.emit({ tenantId, customerId, type: 'duplicate_message_dropped', category: 'pipeline', severity: 'warning', payload: { providerMessageId } });
+	      return;
+	    }
 
-    // Passive Learning Capture: log incoming patient message as reaction/frustration signal
-    if (direction === 'in') {
-      try {
-        const { TenantLearningCaptureService } = await import('../services/ai/tenant-learning-capture.service');
+	    if (direction === 'in' && inboundFormSummary?.isFormSummary && conversationId) {
+	      try {
+	        const greetedAtIso = new Date().toISOString();
+	        const fields = inboundFormSummary.fields;
+	        await db.executeSafe({
+	          text: `
+	            UPDATE conversations
+	            SET status = 'bot',
+	                autopilot_enabled = true,
+	                bot_activated_at = COALESCE(bot_activated_at, NOW()),
+	                patient_name = COALESCE(NULLIF(patient_name, ''), NULLIF($3, ''), patient_name),
+	                country = COALESCE(NULLIF(country, ''), NULLIF($4, ''), country),
+	                metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+	                  'form_context_handled', true,
+	                  'whatsapp_form_summary_received_at', $5::text,
+	                  'whatsapp_form_summary_source', 'meta_click_to_whatsapp_form',
+	                  'whatsapp_form_summary_provider_message_id', $6::text,
+	                  'whatsapp_form_summary_fields', $7::jsonb,
+	                  'greeting_template_name', COALESCE(metadata->>'greeting_template_name', 'whatsapp_form_summary_received')
+	                )
+	            WHERE id = $1::uuid AND tenant_id = $2::uuid
+	          `,
+	          values: [
+	            conversationId,
+	            tenantId,
+	            fields.fullName || profileName || '',
+	            fields.country || '',
+	            greetedAtIso,
+	            providerMessageId || '',
+	            JSON.stringify(fields),
+	          ],
+	        });
+
+	        await db.executeSafe({
+	          text: `
+	            INSERT INTO outreach_logs (tenant_id, conversation_id, action, channel, actor_id, metadata)
+	            VALUES ($1::uuid, $2::uuid, 'whatsapp_form_summary_received', 'whatsapp', 'system', $3::jsonb)
+	          `,
+	          values: [
+	            tenantId,
+	            conversationId,
+	            JSON.stringify({
+	              source: 'meta_click_to_whatsapp_form',
+	              provider_message_id: providerMessageId,
+	              phone: phoneNumber,
+	              form_link: fields.formLink || null,
+	              form_name: fields.formName || null,
+	              field_count: fields.rawFields.length,
+	            }),
+	          ],
+	        });
+	      } catch (summaryErr) {
+	        this.log.error(`[WHATSAPP_FORM_SUMMARY_MARK_FAILED] Non-fatal form summary mark failed`, summaryErr instanceof Error ? summaryErr : new Error(String(summaryErr)), { traceId });
+	      }
+	    }
+
+	    // Passive Learning Capture: log incoming patient message as reaction/frustration signal
+	    if (direction === 'in') {
+	      try {
+	        const { TenantLearningCaptureService } = await import('../services/ai/tenant-learning-capture.service');
         await TenantLearningCaptureService.logPatientReaction(db, {
-          tenantId,
-          channelId: metadata.channelId,
-          conversationId: conversationId!,
-          messageId: messageId!,
-          patientMessageText: content
-        });
-      } catch (captureErr) {
-        this.log.error('TenantLearningCaptureService.logPatientReaction error bypassed', captureErr as Error);
-      }
-    }
+	          tenantId,
+	          channelId: metadata.channelId,
+	          conversationId: conversationId!,
+	          messageId: messageId!,
+	          patientMessageText: aiInboundTextOverride || content
+	        });
+	      } catch (captureErr) {
+	        this.log.error('TenantLearningCaptureService.logPatientReaction error bypassed', captureErr as Error);
+	      }
+	    }
 
     // P0.17: Conversation-level soft mutex (immediate path)
     // Prevents double-response when user sends rapid consecutive messages.
@@ -2285,13 +2369,15 @@ export class QueueWorkerEngine {
       }
     }
 
-    // Fetch conversation history first so we can use it for language detection and AI orchestration
-    const history = await convService.getHistory(phoneNumber, 10, conversationIdVal || conversationId || undefined);
+	    // Fetch conversation history first so we can use it for language detection and AI orchestration
+	    const aiInboundText = aiInboundTextOverride || content || '';
+	    const rawHistoryForAi = await convService.getHistory(phoneNumber, 10, conversationIdVal || conversationId || undefined);
+	    const history = compactWhatsAppFormSummaryHistory(rawHistoryForAi);
 
-    // Run programmatic language detection
-    let languageContext = null;
-    try {
-      languageContext = detectLanguage(content, history);
+	    // Run programmatic language detection
+	    let languageContext = null;
+	    try {
+	      languageContext = detectLanguage(aiInboundText, history);
       
       // Safe metadata logging (no customer phone number or medical data)
       this.log.info(`[LANGUAGE_DETECTED] Ingestion language determined`, {
@@ -2314,8 +2400,8 @@ export class QueueWorkerEngine {
     // ── WHATSAPP REPLY & AI CONTEXT INJECTION (P1.1) ──
     const hasQuotedReply = !!(mediaMetadata?.native?.quoted_message_snapshot || mediaMetadata?.native?.reply_to_provider_message_id);
 
-    if (content && !hasQuotedReply) {
-      const lowerContent = content.toLowerCase().trim();
+	    if (aiInboundText && !hasQuotedReply && !inboundFormSummary?.isFormSummary) {
+	      const lowerContent = aiInboundText.toLowerCase().trim();
       // P0.18: Greeting tokens are now configurable per-tenant via brain.context.config.greetingTokens
       // Falls back to Turkish defaults for backward compatibility
       const defaultGreetings = ['merhaba', 'merhabalar', 'selam', 'iyi günler', 'iyi akşamlar', 'iyi sabahlar', 'günaydın', 'kolay gelsin', 'iyi çalışmalar'];
@@ -2330,18 +2416,18 @@ export class QueueWorkerEngine {
         if (!isInitialFormWelcome) {
           if (!unifiedContext) unifiedContext = {};
           unifiedContext.isGreetingOnly = true;
-          this.log.info(`[CONTEXT_COMPRESSION] Detected greeting_only mode for content: "${content}"`, { traceId });
-        }
-      }
-    }
+	          this.log.info(`[CONTEXT_COMPRESSION] Detected greeting_only mode for content: "${aiInboundText}"`, { traceId });
+	        }
+	      }
+	    }
 
-    const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
-    const availabilityResult = TurkishReplyQualityGate.detectPatientProvidedAvailability(content || '');
+	    const { TurkishReplyQualityGate } = await import('@/lib/services/ai/turkish-quality-gate');
+	    const availabilityResult = TurkishReplyQualityGate.detectPatientProvidedAvailability(aiInboundText);
 
-    if (!unifiedContext) unifiedContext = {};
-    unifiedContext.quotedContext = mediaMetadata?.native?.quoted_message_snapshot || null;
-    unifiedContext.history = history;
-    unifiedContext.currentMessageText = content || '';
+	    if (!unifiedContext) unifiedContext = {};
+	    unifiedContext.quotedContext = mediaMetadata?.native?.quoted_message_snapshot || null;
+	    unifiedContext.history = history;
+	    unifiedContext.currentMessageText = aiInboundText;
     unifiedContext.currentMessageMediaType = mediaType || null;
     unifiedContext.patientProvidedAvailability = availabilityResult.available;
     unifiedContext.patientProvidedHasTime = availabilityResult.hasTime;
@@ -2363,7 +2449,7 @@ export class QueueWorkerEngine {
     // 6. Build System Prompt & History strictly via TenantBrain
     let systemPromptText = PromptBuilder.buildSystemPrompt(brain, targetPhase, false, unifiedContext);
     
-    let finalUserContent = String(content);
+	    let finalUserContent = String(aiInboundText);
     if (mediaMetadata?.native?.quoted_message_snapshot) {
       const snapshot = mediaMetadata.native.quoted_message_snapshot;
       const quotedSender = snapshot.sender_label || (snapshot.direction === 'in' ? 'Hasta' : 'Bot');
@@ -2394,8 +2480,8 @@ Gönderen: ${quotedSender}
 Mesaj tipi: ${quotedType}
 İçerik: "${quotedText}"
 
-Hastanın bu alıntıya yazdığı yeni mesaj:
-"${content}"
+	Hastanın bu alıntıya yazdığı yeni mesaj:
+	"${aiInboundText}"
 
 ÖNEMLİ:
 Bu mesaj bir WhatsApp yanıtıdır. Hastanın yazdığı yeni metin kısa, belirsiz, nokta, soru işareti veya tek kelime olsa bile, cevabını öncelikle alıntılanan mesaja göre ver.
@@ -2405,8 +2491,8 @@ Alıntılanan mesajı kısa ve sade şekilde açıkla veya alıntılanan mesajı
 Genel CRM özetine gereksiz sapma.
 Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için gerekiyorsa kısa kullan.`;
 
-      finalUserContent = `${quotedContextPrompt}\n\n${content}`;
-      this.log.info(`[QUOTED_AI_CONTEXT_INJECTED] hasQuotedSnapshot=true messageType=${quotedType} senderLabel=${quotedSender} currentTextLength=${content.length} quotedTextLength=${quotedText.length}`, { traceId });
+	      finalUserContent = `${quotedContextPrompt}\n\n${aiInboundText}`;
+	      this.log.info(`[QUOTED_AI_CONTEXT_INJECTED] hasQuotedSnapshot=true messageType=${quotedType} senderLabel=${quotedSender} currentTextLength=${aiInboundText.length} quotedTextLength=${quotedText.length}`, { traceId });
     }
 
     // In future phases, history and AI Orchestrator will use brain.namespaces.memory()
@@ -2499,10 +2585,10 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
       // Execute the unified AI Response Orchestrator
       const { AIResponseOrchestrator } = await import('@/lib/services/ai/ai-response-orchestrator');
-      const orchestratorResult = await AIResponseOrchestrator.run({
-        tenantId,
-        phoneNumber,
-        inboundText: content || '',
+	      const orchestratorResult = await AIResponseOrchestrator.run({
+	        tenantId,
+	        phoneNumber,
+	        inboundText: aiInboundText,
         mediaType,
         mediaMetadata,
         brain,
@@ -4278,9 +4364,13 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       return;
     }
 
-    const latestInboundProviderId = latestInboundQuery[0].provider_message_id;
-    const latestInboundContent = latestInboundQuery[0].content || '';
-    const latestInboundCreatedAt = latestInboundQuery[0].created_at ? new Date(latestInboundQuery[0].created_at) : null;
+	    const latestInboundProviderId = latestInboundQuery[0].provider_message_id;
+	    const latestInboundContent = latestInboundQuery[0].content || '';
+	    const latestInboundCreatedAt = latestInboundQuery[0].created_at ? new Date(latestInboundQuery[0].created_at) : null;
+	    const latestInboundFormSummary = detectWhatsAppFormSummaryMessage(latestInboundContent);
+	    const latestInboundForAi = latestInboundFormSummary.isFormSummary
+	      ? buildCompactWhatsAppFormSummaryForAi(latestInboundFormSummary)
+	      : latestInboundContent;
 
     const burstQuietMsRaw = parseInt(process.env.WHATSAPP_BURST_QUIET_MS || process.env.WHATSAPP_AUTOPILOT_DEBOUNCE_MS || '12000', 10);
     const burstQuietMs = Math.max(5000, Math.min(30000, Number.isFinite(burstQuietMsRaw) ? burstQuietMsRaw : 12000));
@@ -4440,11 +4530,11 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     }
 
     // All checks pass! Now run Stop Rules / Deterministic responses BEFORE LLM generation.
-    const normalizedContent = latestInboundContent
-      .replace(/İ/g, 'i')
-      .replace(/I/g, 'ı')
-      .toLowerCase()
-      .trim();
+	    const normalizedContent = latestInboundForAi
+	      .replace(/İ/g, 'i')
+	      .replace(/I/g, 'ı')
+	      .toLowerCase()
+	      .trim();
 
     const postponePatterns = [
       /tarih.*netle/i,
@@ -4622,29 +4712,31 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
     }
 
-    let combinedInboundText = latestInboundContent || '';
-    try {
-      const { ConversationService } = await import('../services/conversation.service');
-      const convService = new ConversationService(db);
-      rawHistory = await convService.getHistory(phoneNumber, 10, conversationId);
+	    let combinedInboundText = latestInboundForAi || '';
+	    try {
+	      const { ConversationService } = await import('../services/conversation.service');
+	      const convService = new ConversationService(db);
+	      rawHistory = await convService.getHistory(phoneNumber, 10, conversationId);
+	      const compactRawHistory = compactWhatsAppFormSummaryHistory(rawHistory);
 
-      // Find all consecutive user messages at the end of rawHistory and combine them chronologically
-      const unrepliedUserContents: string[] = [];
-      for (let i = rawHistory.length - 1; i >= 0; i--) {
-        if (rawHistory[i].role === 'user') {
-          unrepliedUserContents.unshift(rawHistory[i].content);
-        } else {
-          break;
-        }
-      }
+	      // Find all consecutive user messages at the end of rawHistory and combine them chronologically
+	      const unrepliedUserContents: string[] = [];
+	      for (let i = compactRawHistory.length - 1; i >= 0; i--) {
+	        if (compactRawHistory[i].role === 'user') {
+	          unrepliedUserContents.unshift(compactRawHistory[i].content);
+	        } else {
+	          break;
+	        }
+	      }
       if (unrepliedUserContents.length > 0) {
         combinedInboundText = unrepliedUserContents.join('\n');
       }
 
-      const { ConversationTurnAggregator } = await import('../services/ai/conversation-turn-aggregator');
-      history = await ConversationTurnAggregator.aggregate(tenantId, phoneNumber, rawHistory, 10);
-      unifiedContext.history = history;
-      unifiedContext.currentMessageText = combinedInboundText;
+	      const { ConversationTurnAggregator } = await import('../services/ai/conversation-turn-aggregator');
+	      history = await ConversationTurnAggregator.aggregate(tenantId, phoneNumber, compactRawHistory, 10);
+	      rawHistory = compactRawHistory;
+	      unifiedContext.history = history;
+	      unifiedContext.currentMessageText = combinedInboundText;
     } catch (e) {
       this.log.error(`[DEBOUNCE_WORKER] Error fetching conversation history`, e as Error, { traceId });
     }
@@ -4666,11 +4758,11 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         channel,
         channelId: resolvedChannelId || metadata.channelId || undefined,
         conversationId,
-        customerId,
-        sandbox: false,
-        history: rawHistory,
-        workerPath: 'worker_delayed'
-      });
+	        customerId,
+	        sandbox: false,
+	        history: rawHistory,
+	        workerPath: 'worker_delayed'
+	      });
 
       if (orchestratorResult.deduplicated) {
         this.log.info(`[DEBOUNCE_WORKER] Deduplicated execution for conversation ${conversationId}, exit`, { traceId });

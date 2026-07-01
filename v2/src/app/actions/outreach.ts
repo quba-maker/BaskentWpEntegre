@@ -1212,20 +1212,20 @@ export async function sendFormGreetingTemplateAction(
         conversationId = convRes[0]?.id || null;
       }
 
-      const dupLogs = await ctx.db.executeSafe({
-        text: `/* sendFormGreetingTemplateAction:duplicateLogs */
-          SELECT ol.action 
-          FROM outreach_logs ol
-          LEFT JOIN leads l ON l.id = ol.lead_id AND l.tenant_id::text = ol.tenant_id
-          WHERE ol.tenant_id = $1
-            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')
-            AND (
-              ol.lead_id = $2::uuid
-              OR (ol.opportunity_id = $3 AND $3 IS NOT NULL)
-              OR (ol.conversation_id = $4 AND $4 IS NOT NULL)
-              OR (
-                RIGHT(ol.metadata->>'phone', 10) = RIGHT($5, 10)
-                AND (l.form_name = $6 OR ol.metadata->>'form_name' = $6)
+	      const dupLogs = await ctx.db.executeSafe({
+	        text: `/* sendFormGreetingTemplateAction:duplicateLogs */
+	          SELECT ol.action
+	          FROM outreach_logs ol
+	          LEFT JOIN leads l ON l.id::text = ol.lead_id::text AND l.tenant_id::text = ol.tenant_id::text
+	          WHERE ol.tenant_id::text = $1::text
+	            AND ol.action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'whatsapp_form_summary_received')
+	            AND (
+	              ol.lead_id::text = $2::text
+	              OR (ol.opportunity_id::text = $3::text AND $3 IS NOT NULL)
+	              OR (ol.conversation_id::text = $4::text AND $4 IS NOT NULL)
+	              OR (
+	                RIGHT(ol.metadata->>'phone', 10) = RIGHT($5, 10)
+	                AND (l.form_name = $6 OR ol.metadata->>'form_name' = $6)
               )
             )
           LIMIT 1

@@ -15451,6 +15451,81 @@ test("Başkent v92 T152: form first-contact UI uses simple operational buckets",
   assert(mod.getFirstContactFilterLabel("no_reply_waiting") === "Takip Gerekli", "No-reply filter should be follow-up oriented");
 });
 
+test("Başkent v93 T153: WhatsApp click-to-form summaries are compacted before AI", async () => {
+  const {
+    detectWhatsAppFormSummaryMessage,
+    buildCompactWhatsAppFormSummaryForAi,
+    compactWhatsAppFormSummaryHistory,
+  } = await import("../lib/utils/whatsapp-form-summary");
+
+  const sample = [
+    "Link:",
+    "https://fb.me/6XrSGq8Et",
+    "",
+    "Hallo! Ich habe dein Formular ausgefüllt und würde gerne mehr über dein Unternehmen erfahren.",
+    "",
+    "Hangi ülkede yaşıyorsunuz?: Almanya",
+    "Mevcut kalp sağlığı durumunuzu nasıl özetlersiniz?: Daha önce Anjiyo/Stent/Bypass oldum, kontrol istiyorum.",
+    "WhatsApp number: +4917661655183",
+    "Date of birth: 07/19/1969",
+    "Türkiye'ye (Konya'ya) geliş planınız ne zaman?: Henüz belli değil, sadece bilgi almak istiyorum.",
+    "Full name: Emrah Kartal",
+    "Elinizde Avrupa'da veya Türkiye'de çekilmiş güncel tetkikiniz var mı?: Evet, raporlarım (EKG, Kan, Efor vb.) var.",
+    "Tedavi planlamanız ve ön görüşme için sizi ne zaman arayalım?: Akşam saatlerinde (18:00 sonrası)",
+    "Phone number: +4917661655183",
+  ].join("\n");
+
+  const detected = detectWhatsAppFormSummaryMessage(sample);
+  assert(detected.isFormSummary, "Meta/WhatsApp form özeti form mesajı olarak tanınmalı");
+  assert(detected.fields.fullName === "Emrah Kartal", "Form özetinden ad soyad çekilmeli");
+  assert(detected.fields.country === "Almanya", "Form özetinden ülke çekilmeli");
+  assert(Boolean(detected.fields.complaint?.includes("Anjiyo")), "Form özetinden şikayet/talep çekilmeli");
+
+  const compact = buildCompactWhatsAppFormSummaryForAi(detected);
+  assert(compact.includes("[WhatsApp form özeti]"), "AI'ye açık form özeti etiketi gitmeli");
+  assert(compact.includes("Emrah Kartal"), "Kompakt özet hastanın adını korumalı");
+  assert(compact.includes("Anjiyo/Stent/Bypass"), "Kompakt özet ana sağlık talebini korumalı");
+  assert(compact.length <= 1800, "Kompakt özet 1800 karakter sınırını aşmamalı");
+
+  const compactHistory = compactWhatsAppFormSummaryHistory([{ role: "user", content: sample }]);
+  assert(compactHistory[0].content !== sample, "Geçmişteki ham form özeti kompakt hale getirilmeli");
+});
+
+test("Başkent v93 T154: live worker treats WhatsApp form summaries as addressed form context", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const workerPath = path.join(process.cwd(), "src/lib/queue/worker.ts");
+  const workerContent = fs.readFileSync(workerPath, "utf8");
+
+  assert(workerContent.includes("detectWhatsAppFormSummaryMessage(content)"), "Immediate worker WhatsApp form özetini algılamalı");
+  assert(workerContent.includes("buildCompactWhatsAppFormSummaryForAi(formSummary)"), "Immediate worker ham form metnini AI için kompaktlaştırmalı");
+  assert(workerContent.includes("'whatsapp_form_summary_received'"), "WhatsApp form özeti outreach ilk temas sinyali olarak kaydedilmeli");
+  assert(workerContent.includes("'form_context_handled', true"), "WhatsApp form özeti gelince form karşılaması yapılmış sayılmalı");
+  assert(workerContent.includes("compactWhatsAppFormSummaryHistory(rawHistoryForAi)"), "Immediate history form özetlerini kompakt kullanmalı");
+  assert(workerContent.includes("inboundText: aiInboundText"), "Immediate orchestrator ham form metni yerine AI metnini kullanmalı");
+  assert(workerContent.includes("latestInboundForAi"), "Delayed worker son inbound form özetini kompakt kullanmalı");
+  assert(workerContent.includes("rawHistory = compactRawHistory"), "Delayed worker geçmişi kompakt form özetleriyle sürdürmeli");
+});
+
+test("Başkent v93 T155: form greeting duplicate guards respect WhatsApp summaries and text ids", () => {
+  const fs = require("fs");
+  const path = require("path");
+  const identityPath = path.join(process.cwd(), "src/lib/services/ai/engines/identity.ts");
+  const outreachPath = path.join(process.cwd(), "src/app/actions/outreach.ts");
+  const sheetsPath = path.join(process.cwd(), "src/lib/services/sheets-ingestion.service.ts");
+  const identityContent = fs.readFileSync(identityPath, "utf8");
+  const outreachContent = fs.readFileSync(outreachPath, "utf8");
+  const sheetsContent = fs.readFileSync(sheetsPath, "utf8");
+
+  assert(identityContent.includes("lead_id::text = ANY"), "Identity outreach lookup UUID/text çakışmasına düşmemeli");
+  assert(identityContent.includes("conversation_id::text ="), "Identity conversation lookup text güvenli olmalı");
+  assert(identityContent.includes("'whatsapp_form_summary_received'"), "Identity WhatsApp form özetini greetingSent kabul etmeli");
+  assert(outreachContent.includes("ol.lead_id::text = $2::text"), "Toplu karşılama duplicate guard lead id'yi text güvenli kıyaslamalı");
+  assert(outreachContent.includes("whatsapp_form_summary_received"), "Toplu karşılama WhatsApp form özeti alınan kişiye tekrar şablon göndermemeli");
+  assert(sheetsContent.includes("INGEST_AUTO_GREETING_SKIP_INBOUND_EXISTS"), "Sheets webhook son WhatsApp inbound varsa otomatik şablonu atlamalı");
+  assert(sheetsContent.includes("RIGHT(phone_number, 10) = ANY($2::text[])"), "Sheets webhook telefon suffix sorgusu tip güvenli olmalı");
+});
+
 
 async function runAllTests() {
   try {

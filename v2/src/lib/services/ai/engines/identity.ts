@@ -831,14 +831,14 @@ export class IdentityEngine {
 
           const clauses: string[] = [];
           const values: any[] = [tenantId];
-          if (leadIds.size > 0) {
-            values.push(Array.from(leadIds));
-            clauses.push(`lead_id = ANY($${values.length}::uuid[])`);
-          }
-          if (conversationId) {
-            values.push(conversationId);
-            clauses.push(`conversation_id = $${values.length}::uuid`);
-          }
+	          if (leadIds.size > 0) {
+	            values.push(Array.from(leadIds));
+	            clauses.push(`lead_id::text = ANY($${values.length}::text[])`);
+	          }
+	          if (conversationId) {
+	            values.push(conversationId);
+	            clauses.push(`conversation_id::text = $${values.length}::text`);
+	          }
 
           let outreachRows: any[] = [];
           if (clauses.length > 0) {
@@ -855,10 +855,11 @@ export class IdentityEngine {
             'template_sent',
             'form_greeting_template_sent',
             'inbox_form_greeting_sent',
-            'manual_whatsapp_greeting_echo_confirmed',
-            'whatsapp_app_opened_for_greeting',
-            'outreach_form_greeting_template_sent',
-          ];
+	            'manual_whatsapp_greeting_echo_confirmed',
+	            'whatsapp_app_opened_for_greeting',
+	            'outreach_form_greeting_template_sent',
+	            'whatsapp_form_summary_received',
+	          ];
           const greetingRow = outreachRows.find((r: any) => greetingActions.includes(r.action));
           let greetingSent = !!greetingRow;
           let greetingTemplateName = parseMeta(greetingRow?.metadata)?.template_name || null;
