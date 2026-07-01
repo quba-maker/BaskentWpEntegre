@@ -1768,6 +1768,69 @@ export class QueueWorkerEngine {
       }
     };
 
+    const markAutopilotTransientError = async (reason: string, details?: string) => {
+      if (!conversationIdVal) return;
+
+      const nowIso = new Date().toISOString();
+      this.log.warn(`[AUTOPILOT_TRANSIENT_ERROR] Keeping autopilot enabled. Reason: ${reason} | Details: ${details || 'none'}`, {
+        tenantId,
+        conversationId: conversationIdVal,
+        traceId,
+      });
+
+      await db.executeSafe({
+        text: `
+          UPDATE conversations
+          SET status = CASE WHEN status = 'human' THEN status ELSE 'bot' END,
+              autopilot_enabled = true,
+              metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                'autopilot_last_error_reason', $1::text,
+                'autopilot_last_error_details', $2::text,
+                'autopilot_last_error_at', $3::text,
+                'autopilot_error_kept_enabled', true
+              )
+          WHERE id = $4 AND tenant_id = $5
+        `,
+        values: [reason, details || null, nowIso, conversationIdVal, tenantId]
+      });
+
+      await db.executeSafe({
+        text: `INSERT INTO ai_audit_logs (tenant_id, action, reasoning_summary, result_summary)
+               VALUES ($1, $2, $3, $4::jsonb)`,
+        values: [
+          tenantId,
+          'autopilot_transient_error',
+          `Autopilot stayed enabled after transient error. Reason: ${reason}. Details: ${details || ''}`,
+          JSON.stringify({
+            conversation_id: conversationIdVal,
+            phone: phoneNumber,
+            channel_id: resolvedChannelId,
+            tenant_id: tenantId,
+            enabled: true,
+            user_id: 'system_worker',
+            timestamp: nowIso,
+            reason,
+            details: details || null
+          })
+        ]
+      }).catch((auditErr: unknown) => {
+        this.log.warn(`[AUTOPILOT_TRANSIENT_ERROR_AUDIT_FAILED] Non-fatal: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`, { traceId });
+      });
+
+      try {
+        const { RealtimePublisher } = await import("@/lib/realtime/publisher");
+        await RealtimePublisher.publishMetadataUpdated(tenantId, {
+          conversationId: conversationIdVal,
+          userId: "system_worker",
+          isBotActive: true,
+          autopilotEnabled: true,
+          status: "bot"
+        });
+      } catch (realtimeErr) {
+        this.log.warn(`[AUTOPILOT_TRANSIENT_ERROR_REALTIME_FAILED] Non-fatal: ${realtimeErr instanceof Error ? realtimeErr.message : String(realtimeErr)}`, { traceId });
+      }
+    };
+
     if (!shouldProceedWithBot) {
       this.log.info(`[SKIP] Conversation is handled by human or autopilot/auto-reply is disabled`, { phoneNumber, traceId });
       
@@ -2688,7 +2751,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
        });
        const err = new Error(`CREDENTIAL_MISSING: No ${channel} credentials for tenant ${tenantId}`);
        if (isAutopilotResponding) {
-         await disableAutopilot('error', err.message);
+         await markAutopilotTransientError('credential_missing', err.message);
          return;
        }
        throw err;
@@ -2734,11 +2797,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
     } catch (e: any) {
        this.log.error(`[SEND_FAILED] Meta API rejection for ${channel}`, e, { traceId });
        if (isAutopilotResponding) {
-         const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
-         await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationIdVal || conversationId!, db).catch(cbErr => {
-           console.error("Failed to update circuit breaker on send error:", cbErr);
-         });
-         await disableAutopilot('error', e.message || String(e));
+         await markAutopilotTransientError('send_failed', e.message || String(e));
          
          // Save the failed outgoing message to the DB so the UI shows it failed
          try {
@@ -4943,27 +5002,20 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
       }
 
     } catch (llmErr: any) {
-      if (conversationId) {
-        try {
-          const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
-          await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
-        } catch (cbErr) {
-          console.error("Failed to update circuit breaker on delayed worker error:", cbErr);
-        }
-      }
-      if (
+      const isTransientAiUnavailable =
         llmErr instanceof AIBillingExhaustedError ||
         llmErr instanceof AIQuotaExhaustedError ||
         llmErr instanceof AICircuitOpenError ||
         llmErr instanceof AIUnavailableError ||
-        llmErr.message?.includes('CIRCUIT_OPEN')
-      ) {
+        llmErr.message?.includes('CIRCUIT_OPEN');
+
+      if (isTransientAiUnavailable) {
         if (!conversationId) {
           this.log.warn(`[DEBOUNCE_WORKER_AI_UNAVAILABLE_SKIP] AI unavailable but conversation ID is missing. Skipped DB update.`, { tenantId, traceId });
           return;
         }
 
-        this.log.warn(`[DEBOUNCE_WORKER_AI_UNAVAILABLE] AI pipeline is unavailable, taking over to human. Reason: ${llmErr.message}`, { traceId, tenantId });
+        this.log.warn(`[DEBOUNCE_WORKER_AI_UNAVAILABLE] AI pipeline is unavailable; keeping autopilot enabled for the next inbound. Reason: ${llmErr.message}`, { traceId, tenantId });
         
         const nowIso = new Date().toISOString();
         const reason = llmErr instanceof AIBillingExhaustedError ? 'billing_exhausted' 
@@ -4974,24 +5026,19 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
         await db.executeSafe({
           text: `
             UPDATE conversations 
-            SET status = 'human',
-                autopilot_enabled = false,
-                metadata = jsonb_set(
-                             jsonb_set(
-                               jsonb_set(
-                                 jsonb_set(
-                                   jsonb_set(COALESCE(metadata, '{}'::jsonb), '{ai_unavailable}', 'true'),
-                                   '{ai_unavailable_reason}', $1
-                                 ),
-                                 '{ai_unavailable_provider}', '"gemini"'
-                               ),
-                               '{ai_unavailable_model}', $2
-                             ),
-                             '{ai_unavailable_at}', $3
-                           )
+            SET status = CASE WHEN status = 'human' THEN status ELSE 'bot' END,
+                autopilot_enabled = true,
+                metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                  'ai_unavailable', true,
+                  'ai_unavailable_reason', $1::text,
+                  'ai_unavailable_provider', 'gemini',
+                  'ai_unavailable_model', $2::text,
+                  'ai_unavailable_at', $3::text,
+                  'autopilot_error_kept_enabled', true
+                )
             WHERE id = $4 AND tenant_id = $5
           `,
-          values: [JSON.stringify(reason), JSON.stringify(llmModel), JSON.stringify(nowIso), conversationId, tenantId]
+          values: [reason, llmModel, nowIso, conversationId, tenantId]
         });
 
         // Insert non-patient-visible system message/alert
@@ -5000,7 +5047,7 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
             INSERT INTO messages (tenant_id, conversation_id, phone_number, direction, content, channel, provider_message_id, status)
             VALUES ($1, $2, $3, 'system', $4, $5, 'system_alert', 'delivered')
           `,
-          values: [tenantId, conversationId, phoneNumber, `Yapay zeka servis dışı kaldığı için görüşme müşteri temsilcisine devredildi. (AI Unavailable: ${reason})`, channel]
+          values: [tenantId, conversationId, phoneNumber, `Yapay zeka geçici olarak yanıt üretemedi. Otopilot açık bırakıldı; sonraki mesajda tekrar denenecek. (AI Unavailable: ${reason})`, channel]
         });
 
         // Emit AI response failed event
@@ -5016,6 +5063,16 @@ Eski task/randevu detaylarını sadece alıntılanan mesajı açıklamak için g
 
         return; // exit cleanly
       }
+
+      if (conversationId) {
+        try {
+          const { AutopilotCircuitBreakerService } = await import("@/lib/services/automation/autopilot-circuit-breaker.service");
+          await AutopilotCircuitBreakerService.recordFallback(tenantId, conversationId, db);
+        } catch (cbErr) {
+          console.error("Failed to update circuit breaker on delayed worker error:", cbErr);
+        }
+      }
+
       this.log.error(`[DEBOUNCE_WORKER] LLM or send failed`, llmErr as Error, { traceId });
       throw llmErr;
     }

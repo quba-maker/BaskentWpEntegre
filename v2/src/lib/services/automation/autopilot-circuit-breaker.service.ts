@@ -3,7 +3,7 @@ import { TenantDB } from "@/lib/core/tenant-db";
 /**
  * Service to manage conversation-level autopilot circuit breaker.
  * If fallback responses (or quality gate violations) reach 3 consecutive events,
- * the circuit breaker trips, disabling autopilot for that specific conversation.
+ * the circuit breaker raises a review flag. Hard-disabling autopilot is opt-in.
  * 
  * Safe Fail: If updating the database fails, throws an error to halt the send pipeline immediately.
  */
@@ -12,8 +12,9 @@ export class AutopilotCircuitBreakerService {
   /**
    * Records a fallback event for a conversation.
    * Increments `consecutive_fallback_count` inside conversation metadata.
-   * If it reaches 3, trips the circuit breaker: sets `autopilot_enabled = false`, `status = 'human'`,
-   * and `metadata.human_review_required = true`.
+   * If it reaches 3, trips the circuit breaker review flag and sets `metadata.human_review_required = true`.
+   * By default, autopilot stays enabled so transient model/gateway issues do not silently stop the bot.
+   * Set `AUTOPILOT_CIRCUIT_BREAKER_HARD_DISABLE=true` to restore hard handover behavior.
    * 
    * Throws an error if the database update is unsuccessful, halting message transmission.
    */
@@ -42,19 +43,23 @@ export class AutopilotCircuitBreakerService {
 
       if (currentFallbacks >= 3) {
         tripped = true;
-        // Trip circuit breaker
+        // Trip circuit breaker review state
         metadata.consecutive_fallback_count = 0; // reset
         metadata.human_review_required = true;
         metadata.circuit_breaker_tripped_at = new Date().toISOString();
+        metadata.circuit_breaker_hard_disabled = process.env.AUTOPILOT_CIRCUIT_BREAKER_HARD_DISABLE === 'true';
+        metadata.autopilot_error_kept_enabled = !metadata.circuit_breaker_hard_disabled;
 
         const updateResult = await db.executeSafe({
           text: `
             UPDATE conversations 
-            SET autopilot_enabled = false, status = 'human', metadata = $1 
+            SET autopilot_enabled = CASE WHEN $4::boolean THEN false ELSE COALESCE(autopilot_enabled, true) END,
+                status = CASE WHEN $4::boolean THEN 'human' ELSE status END,
+                metadata = $1 
             WHERE id = $2 AND tenant_id = $3
             RETURNING id
           `,
-          values: [JSON.stringify(metadata), conversationId, tenantId]
+          values: [JSON.stringify(metadata), conversationId, tenantId, metadata.circuit_breaker_hard_disabled]
         }) as any[];
 
         if (updateResult.length === 0) {
@@ -69,11 +74,14 @@ export class AutopilotCircuitBreakerService {
           `,
           values: [
             tenantId,
-            'CIRCUIT_BREAKER_TRIPPED',
-            'Autopilot circuit breaker tripped after 3 consecutive fallbacks. Autopilot disabled.',
+            metadata.circuit_breaker_hard_disabled ? 'CIRCUIT_BREAKER_TRIPPED' : 'CIRCUIT_BREAKER_REVIEW_REQUIRED',
+            metadata.circuit_breaker_hard_disabled
+              ? 'Autopilot circuit breaker tripped after 3 consecutive fallbacks. Autopilot disabled.'
+              : 'Autopilot circuit breaker review flag raised after 3 consecutive fallbacks. Autopilot kept enabled.',
             JSON.stringify({
               conversationId,
               consecutive_fallback_count: currentFallbacks,
+              autopilot_disabled: metadata.circuit_breaker_hard_disabled,
               timestamp: new Date().toISOString()
             })
           ]

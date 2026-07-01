@@ -1367,6 +1367,7 @@ export async function sendFormGreetingTemplateAction(
       }
 
       // 6. Write messages record
+      const formGreetingSentAt = new Date().toISOString();
       if (finalConvId) {
         await ctx.db.executeSafe({
           text: `/* sendFormGreetingTemplateAction:insertMessage */
@@ -1387,9 +1388,27 @@ export async function sendFormGreetingTemplateAction(
                      message_count = COALESCE(message_count, 0) + 1,
                      status = 'bot',
                      autopilot_enabled = true,
-                     bot_activated_at = COALESCE(bot_activated_at, NOW())
+                     bot_activated_at = COALESCE(bot_activated_at, NOW()),
+                     metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                       'form_greeted_at', $4::text,
+                       'form_context_handled', true,
+                       'greeting_template_name', $5::text,
+                       'greeting_template_language', $6::text,
+                       'form_greeting_source', 'manual_form_greeting_template',
+                       'form_greeting_lead_id', $7::text,
+                       'form_greeting_provider_message_id', $8::text
+                     )
                  WHERE id = $2::uuid AND tenant_id = $3::uuid`,
-          values: [effectiveTemplateText, finalConvId, ctx.tenantId]
+          values: [
+            effectiveTemplateText,
+            finalConvId,
+            ctx.tenantId,
+            formGreetingSentAt,
+            templateName,
+            effectiveLanguageCode,
+            lead.id,
+            providerMessageId || null
+          ]
         });
       }
 

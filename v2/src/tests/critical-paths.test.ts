@@ -7193,8 +7193,10 @@ test("P2.02: SHA-256 rollout bucket uniform ve deterministik dağılım sağlama
   assert(bucket3 >= 0 && bucket3 < 100, "Bucket must be in range 0-99");
 });
 
-test("P2.03: AutopilotCircuitBreakerService ardışık 3 fallback’te devreyi açmalı ve DB başarısızlığında durmalı", async () => {
+test("P2.03: AutopilotCircuitBreakerService ardışık 3 fallback’te varsayılan olarak botu kapatmadan inceleme işareti koymalı", async () => {
   const { AutopilotCircuitBreakerService } = await import("../lib/services/automation/autopilot-circuit-breaker.service");
+  const previousHardDisable = process.env.AUTOPILOT_CIRCUIT_BREAKER_HARD_DISABLE;
+  delete process.env.AUTOPILOT_CIRCUIT_BREAKER_HARD_DISABLE;
 
   const mockDb = {
     executeSafeCalls: [] as any[],
@@ -7211,9 +7213,29 @@ test("P2.03: AutopilotCircuitBreakerService ardışık 3 fallback’te devreyi a
   const res = await AutopilotCircuitBreakerService.recordFallback("tenant-123", "conv-123", mockDb as any);
   assert(res.tripped === true, "Circuit breaker should trip on 3rd fallback");
 
-  // Verify update query sets autopilot_enabled = false
-  const updateQuery = mockDb.executeSafeCalls.find(q => q.text.replace(/\s+/g, ' ').includes("UPDATE conversations SET autopilot_enabled = false"));
-  assert(!!updateQuery, "Should query DB to disable autopilot");
+  const updateQuery = mockDb.executeSafeCalls.find(q => q.text.replace(/\s+/g, ' ').includes("UPDATE conversations"));
+  assert(!!updateQuery, "Should update conversation metadata");
+  assert(updateQuery.values[3] === false, "Default circuit breaker should not hard-disable autopilot");
+  const updateMetadata = JSON.parse(updateQuery.values[0]);
+  assert(updateMetadata.human_review_required === true, "Should mark conversation for human review");
+  assert(updateMetadata.autopilot_error_kept_enabled === true, "Should keep autopilot enabled by default");
+
+  process.env.AUTOPILOT_CIRCUIT_BREAKER_HARD_DISABLE = 'true';
+  const hardDb = {
+    executeSafeCalls: [] as any[],
+    executeSafe: async (query: any) => {
+      hardDb.executeSafeCalls.push(query);
+      const text = query.text.replace(/\s+/g, ' ');
+      if (text.includes("SELECT autopilot_enabled")) {
+        return [{ autopilot_enabled: true, metadata: { consecutive_fallback_count: 2 } }];
+      }
+      return [{ id: "conv-123" }];
+    }
+  };
+  const hardRes = await AutopilotCircuitBreakerService.recordFallback("tenant-123", "conv-123", hardDb as any);
+  assert(hardRes.tripped === true, "Hard mode should still trip on 3rd fallback");
+  const hardUpdateQuery = hardDb.executeSafeCalls.find(q => q.text.replace(/\s+/g, ' ').includes("UPDATE conversations"));
+  assert(hardUpdateQuery.values[3] === true, "Hard-disable env should restore old handover behavior");
 
   // Verify safe fail: database error during update throws error to halt execution
   const failingDb = {
@@ -7227,6 +7249,11 @@ test("P2.03: AutopilotCircuitBreakerService ardışık 3 fallback’te devreyi a
     assert(err.message.includes("Circuit breaker state update failed"), "Should wrap error and halt");
   }
   assert(hasThrown === true, "Should fail-closed and throw on DB failure");
+  if (previousHardDisable === undefined) {
+    delete process.env.AUTOPILOT_CIRCUIT_BREAKER_HARD_DISABLE;
+  } else {
+    process.env.AUTOPILOT_CIRCUIT_BREAKER_HARD_DISABLE = previousHardDisable;
+  }
 });
 
 test("P2.04: HumanTakeoverGuard son 30 dk giden temsilci mesajında veya son mesaj giden temsilciyse otopilotu kilitlemeli", async () => {
