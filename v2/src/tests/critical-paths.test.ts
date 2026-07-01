@@ -125,6 +125,52 @@ test("AUTH: middleware ve session local fallback secret aynı olmalı", async ()
   assert(middlewareContent.includes('process.env.AUTH_SECRET || "fallback_secret_for_build_only"'), "Middleware local fallback secret session ile aynı olmalı");
 });
 
+test("AUTH: tenant kullanıcısı platform_admin ise tenant admin olarak normalize edilmeli", async () => {
+  const roles = await import("../lib/auth/roles");
+  assert(roles.normalizeSessionRole("platform_admin", "baskent") === "admin", "Başkent kullanıcısı platform_admin kalmamalı");
+  assert(roles.normalizeSessionRole("superadmin", "baskent") === "admin", "Legacy superadmin tenant içinde admin'e düşmeli");
+  assert(roles.normalizeSessionRole("platform_admin", "admin") === "platform_admin", "Platform tenant'ında platform_admin korunmalı");
+  assert(roles.normalizeSessionRole("owner", "baskent") === "owner", "Tenant owner rolü korunmalı");
+});
+
+test("AUTH: platform admin aksiyonları owner rolüne açık olmamalı", async () => {
+  const fs = await import("fs");
+  const path = await import("path");
+  const adminActionsPath = path.resolve(__dirname, "../app/actions/admin.ts");
+  const billingActionsPath = path.resolve(__dirname, "../app/actions/billing.ts");
+
+  const adminContent = fs.readFileSync(adminActionsPath, "utf-8");
+  const billingContent = fs.readFileSync(billingActionsPath, "utf-8");
+  assert(!adminContent.includes("roles: ['owner', 'platform_admin']"), "Admin aksiyonlarında owner platform yetkisi almamalı");
+  assert(adminContent.includes("roles: ['platform_admin']"), "Admin aksiyonları platform_admin ile sınırlı olmalı");
+  assert(!billingContent.includes("roles: ['owner', 'platform_admin']"), "Platform fatura/kullanım aksiyonları owner'a açık olmamalı");
+});
+
+test("AUTH: firma kullanıcıları platform_admin rolü atayamaz", async () => {
+  const roles = await import("../lib/auth/roles");
+  let rejected = false;
+  try {
+    roles.normalizeTenantAssignableRole("platform_admin");
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "Tenant içinden platform_admin atanması reddedilmeli");
+  assert(roles.normalizeTenantAssignableRole("admin") === "admin", "admin tenant atanabilir rol olmalı");
+});
+
+test("AUTH: middleware owner rolünü platform admin gibi görmemeli", async () => {
+  const fs = await import("fs");
+  const path = await import("path");
+  const middlewarePath = path.resolve(__dirname, "../middleware.ts");
+  const guardPath = path.resolve(__dirname, "../lib/core/action-guard.ts");
+  const middlewareContent = fs.readFileSync(middlewarePath, "utf-8");
+  const guardContent = fs.readFileSync(guardPath, "utf-8");
+
+  assert(!middlewareContent.includes("userRole === 'platform_admin' || userRole === 'owner'"), "Middleware owner'ı platform admin gibi kabul etmemeli");
+  assert(!middlewareContent.includes("isTempOwner"), "Geçici owner bypass kalmamalı");
+  assert(guardContent.includes('TEST_USER_ROLE || "admin"'), "Test bypass varsayılanı platform_admin olmamalı");
+});
+
 test("SECURITY: Null tenant bypass olmamalı", async () => {
   const fs = await import("fs");
   const path = await import("path");

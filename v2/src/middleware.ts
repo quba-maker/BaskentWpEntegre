@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
+import { PLATFORM_ADMIN_ROLE, normalizeSessionRole } from "@/lib/auth/roles";
 
 // ==========================================
 // QUBA AI — Route Protection Middleware
@@ -15,13 +16,13 @@ const PUBLIC_ROUTES = ["/login", "/privacy", "/terms", "/data-deletion", "/legal
 // Hangi yollar hangi rollere açık?
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   '/admin': ['platform_admin'], // Sadece Quba Medya Süper Admin'i
-  '/users': ['platform_admin', 'admin'],
-  '/settings': ['platform_admin', 'admin'],
-  '/integrations': ['platform_admin', 'admin'],
-  '/bot': ['platform_admin', 'admin', 'agent'],
-  '/inbox': ['platform_admin', 'admin', 'agent', 'viewer'],
-  '/forms': ['platform_admin', 'admin', 'agent', 'viewer'],
-  '/': ['platform_admin', 'admin', 'agent', 'viewer'],
+  '/users': ['platform_admin', 'owner', 'admin'],
+  '/settings': ['platform_admin', 'owner', 'admin'],
+  '/integrations': ['platform_admin', 'owner', 'admin'],
+  '/bot': ['platform_admin', 'owner', 'admin', 'manager', 'agent'],
+  '/inbox': ['platform_admin', 'owner', 'admin', 'manager', 'agent', 'viewer'],
+  '/forms': ['platform_admin', 'owner', 'admin', 'manager', 'agent', 'viewer'],
+  '/': ['platform_admin', 'owner', 'admin', 'manager', 'agent', 'viewer'],
 };
 
 export async function middleware(req: NextRequest) {
@@ -68,14 +69,14 @@ export async function middleware(req: NextRequest) {
       try {
         const { payload } = await jwtVerify(token, SECRET);
         const tSlug = payload.tenantSlug as string;
-        const userRole = payload.role as string;
+        const userRole = normalizeSessionRole(payload.role as string, tSlug);
         
         if (cleanPath === '/login') {
           if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] User already logged in, redirecting /login -> /${tSlug}`);
           return NextResponse.redirect(new URL(`/${tSlug}`, req.url));
         } else {
           // cleanPath === '/'
-          if (userRole === 'platform_admin') {
+          if (userRole === PLATFORM_ADMIN_ROLE) {
             return NextResponse.redirect(new URL("/admin", req.url));
           }
           if (tSlug) {
@@ -113,8 +114,8 @@ export async function middleware(req: NextRequest) {
 
   try {
     const { payload } = await jwtVerify(token, SECRET);
-    const userRole = payload.role as string;
     const sessionTenantSlug = payload.tenantSlug as string;
+    const userRole = normalizeSessionRole(payload.role as string, sessionTenantSlug);
 
     // URL Analizi (Path-based routing) — UI pages only
     // Örn: /baskent/forms -> parts = ['baskent', 'forms']
@@ -124,7 +125,7 @@ export async function middleware(req: NextRequest) {
 
     // Kök dizin erişimi (Örn: Sadece ai.qubamedya.com girildiyse)
     if (!urlTenantSlug) {
-       if (userRole === 'platform_admin') return NextResponse.redirect(new URL("/admin", req.url));
+       if (userRole === PLATFORM_ADMIN_ROLE) return NextResponse.redirect(new URL("/admin", req.url));
        return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }
 
@@ -134,7 +135,7 @@ export async function middleware(req: NextRequest) {
     // Ancak platform_admin başka bir tenant slug'ına (örn: /baskent) girdiğinde auto-impersonation
     // tetiklenebilmesi için bu isolation geçidine izin veriyoruz.
     if (urlTenantSlug !== sessionTenantSlug && urlTenantSlug !== 'admin') {
-      if (userRole === 'platform_admin') {
+      if (userRole === PLATFORM_ADMIN_ROLE) {
         // Platform admin can bypass the isolation gate for auto-impersonation dynamic alignment
         return NextResponse.next();
       }
@@ -144,7 +145,7 @@ export async function middleware(req: NextRequest) {
 
     // Admin Rota Kontrolü
     if (urlTenantSlug === 'admin') {
-      if (userRole === 'platform_admin' || userRole === 'owner') {
+      if (userRole === PLATFORM_ADMIN_ROLE) {
         return NextResponse.redirect(new URL(`/${sessionTenantSlug}/admin`, req.url));
       } else {
         if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Non-admin attempted to access /admin`);
@@ -153,7 +154,7 @@ export async function middleware(req: NextRequest) {
     }
     
     if (baseRoute === '/admin') {
-      if (userRole !== 'platform_admin' && userRole !== 'owner') {
+      if (userRole !== PLATFORM_ADMIN_ROLE) {
         if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Non-admin attempted to access baseRoute /admin`);
         return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
       }
@@ -161,9 +162,8 @@ export async function middleware(req: NextRequest) {
 
     // Diğer sayfalar için yetki matrisi kontrolü
     const allowedRoles = ROLE_PERMISSIONS[baseRoute];
-    const isTempOwner = userRole === 'owner';
     
-    if (allowedRoles && !allowedRoles.includes(userRole) && !isTempOwner) {
+    if (allowedRoles && !allowedRoles.includes(userRole)) {
       if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Role permission denied for ${baseRoute}. Role: ${userRole}`);
       return NextResponse.redirect(new URL(`/${sessionTenantSlug}`, req.url));
     }

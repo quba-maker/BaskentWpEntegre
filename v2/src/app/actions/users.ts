@@ -2,6 +2,7 @@
 
 import { withActionGuard } from "@/lib/core/action-guard";
 import { getPublicBaseUrl } from "@/lib/core/url";
+import { normalizeTenantAssignableRole } from "@/lib/auth/roles";
 
 // ==========================================
 // QUBA AI — Kullanıcı Yönetimi
@@ -28,6 +29,7 @@ export async function createUser(data: {
   role: string;
 }) {
   return withActionGuard({ actionName: 'createUser', roles: ['owner', 'admin'] }, async (ctx) => {
+    const role = normalizeTenantAssignableRole(data.role);
     const existing = await ctx.db.executeSafe(
       `SELECT id FROM users WHERE email = $1 AND tenant_id = $2`,
       [data.email, ctx.tenantId]
@@ -41,7 +43,7 @@ export async function createUser(data: {
     await ctx.db.executeSafe(
       `INSERT INTO users (tenant_id, email, password_hash, name, role, is_active)
       VALUES ($1, $2, $3, $4, $5, true)`,
-      [ctx.tenantId, data.email, hash, data.name, data.role]
+      [ctx.tenantId, data.email, hash, data.name, role]
     );
     return true;
   });
@@ -50,10 +52,20 @@ export async function createUser(data: {
 export async function updateUserRole(userId: string, newRole: string) {
   return withActionGuard({ actionName: 'updateUserRole', roles: ['owner', 'admin'] }, async (ctx) => {
     if (userId === ctx.userId) throw new Error("Kendi rolünüzü değiştiremezsiniz.");
+    const role = normalizeTenantAssignableRole(newRole);
+
+    const target = await ctx.db.executeSafe(
+      `SELECT role FROM users WHERE id = $1 AND tenant_id = $2`,
+      [userId, ctx.tenantId]
+    );
+    if (target.length === 0) throw new Error("Kullanıcı bulunamadı.");
+    if (target[0].role === 'owner' && ctx.role !== 'owner') {
+      throw new Error("Firma sahibinin rolünü yalnızca firma sahibi değiştirebilir.");
+    }
 
     await ctx.db.executeSafe(
       `UPDATE users SET role = $1 WHERE id = $2 AND tenant_id = $3`,
-      [newRole, userId, ctx.tenantId]
+      [role, userId, ctx.tenantId]
     );
     return true;
   });
@@ -64,10 +76,13 @@ export async function toggleUserActive(userId: string) {
     if (userId === ctx.userId) throw new Error("Kendinizi deaktif edemezsiniz.");
 
     const user = await ctx.db.executeSafe(
-      `SELECT is_active FROM users WHERE id = $1 AND tenant_id = $2`,
+      `SELECT is_active, role FROM users WHERE id = $1 AND tenant_id = $2`,
       [userId, ctx.tenantId]
     );
     if (user.length === 0) throw new Error("Kullanıcı bulunamadı.");
+    if (user[0].role === 'owner' && ctx.role !== 'owner') {
+      throw new Error("Firma sahibini yalnızca firma sahibi pasifleştirebilir.");
+    }
 
     await ctx.db.executeSafe(
       `UPDATE users SET is_active = $1 WHERE id = $2 AND tenant_id = $3`,
@@ -80,6 +95,14 @@ export async function toggleUserActive(userId: string) {
 export async function deleteUser(userId: string) {
   return withActionGuard({ actionName: 'deleteUser', roles: ['owner', 'admin'] }, async (ctx) => {
     if (userId === ctx.userId) throw new Error("Kendinizi silemezsiniz.");
+    const target = await ctx.db.executeSafe(
+      `SELECT role FROM users WHERE id = $1 AND tenant_id = $2`,
+      [userId, ctx.tenantId]
+    );
+    if (target.length === 0) throw new Error("Kullanıcı bulunamadı.");
+    if (target[0].role === 'owner' && ctx.role !== 'owner') {
+      throw new Error("Firma sahibini yalnızca firma sahibi silebilir.");
+    }
 
     await ctx.db.executeSafe(
       `DELETE FROM users WHERE id = $1 AND tenant_id = $2`,

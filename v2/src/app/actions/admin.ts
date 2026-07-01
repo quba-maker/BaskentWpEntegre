@@ -3,15 +3,16 @@
 import { sql } from "@/lib/db";
 import { withActionGuard } from "@/lib/core/action-guard";
 import { logAudit } from "@/lib/audit";
+import { normalizeTenantSetupRole } from "@/lib/auth/roles";
 
 // ==========================================
 // QUBA AI — Super Admin Actions
-// Sadece "owner" / "platform_admin" erişebilir
+// Sadece Quba platform_admin erişebilir
 // Cross-tenant sorgular raw SQL kullanır (kasıtlı)
 // ==========================================
 
 export async function getAllTenants() {
-  return withActionGuard({ actionName: 'getAllTenants', roles: ['owner', 'platform_admin'], requireTenant: false }, async (ctx) => {
+  return withActionGuard({ actionName: 'getAllTenants', roles: ['platform_admin'], requireTenant: false }, async (ctx) => {
     const tenants = await sql`
       SELECT t.*,
         COALESCE(cv.cnt, 0) as conversation_count,
@@ -33,7 +34,7 @@ export async function createTenant(data: {
   industry?: string;
   plan?: string;
 }) {
-  return withActionGuard({ actionName: 'createTenant', roles: ['owner', 'platform_admin'], requireTenant: false }, async (ctx) => {
+  return withActionGuard({ actionName: 'createTenant', roles: ['platform_admin'], requireTenant: false }, async (ctx) => {
     const slug = data.slug.toLowerCase().trim();
     const RESERVED_SLUGS = ['admin', 'api', 'login', 'setup', 'privacy', 'terms', 'app', 'dashboard', 'settings', 'webhook', 'sse', 'health', 'status', 'billing', 'support', 'docs', 'help'];
 
@@ -88,7 +89,7 @@ export async function createTenant(data: {
 }
 
 export async function toggleTenantStatus(tenantId: string) {
-  return withActionGuard({ actionName: 'toggleTenantStatus', roles: ['owner', 'platform_admin'], requireTenant: false }, async (ctx) => {
+  return withActionGuard({ actionName: 'toggleTenantStatus', roles: ['platform_admin'], requireTenant: false }, async (ctx) => {
     const tenant = await sql`SELECT status FROM tenants WHERE id = ${tenantId}`;
     const newStatus = tenant[0]?.status === "active" ? "suspended" : "active";
     await sql`UPDATE tenants SET status = ${newStatus}, updated_at = NOW() WHERE id = ${tenantId}`;
@@ -111,7 +112,7 @@ export async function updateTenantConfig(tenantId: string, config: {
   timezone?: string;
   primary_color?: string;
 }) {
-  return withActionGuard({ actionName: 'updateTenantConfig', roles: ['owner', 'platform_admin'], requireTenant: false }, async (ctx) => {
+  return withActionGuard({ actionName: 'updateTenantConfig', roles: ['platform_admin'], requireTenant: false }, async (ctx) => {
     await sql`
       UPDATE tenants SET
         ai_model = COALESCE(${config.ai_model || null}, ai_model),
@@ -158,9 +159,10 @@ export async function createTenantUser(tenantId: string, user: {
   name: string;
   role?: string;
 }) {
-  return withActionGuard({ actionName: 'createTenantUser', roles: ['owner', 'platform_admin'], requireTenant: false }, async (ctx) => {
+  return withActionGuard({ actionName: 'createTenantUser', roles: ['platform_admin'], requireTenant: false }, async (ctx) => {
     const existing = await sql`SELECT id FROM users WHERE email = ${user.email} AND tenant_id = ${tenantId}`;
     if (existing.length > 0) throw new Error("Bu e-posta bu firmada zaten kayıtlı.");
+    const tenantRole = normalizeTenantSetupRole(user.role || 'admin');
 
     const bcryptModule = await import("bcryptjs");
     const bcrypt = (bcryptModule as any).default || bcryptModule;
@@ -168,7 +170,7 @@ export async function createTenantUser(tenantId: string, user: {
 
     await sql`
       INSERT INTO users (tenant_id, email, password_hash, name, role)
-      VALUES (${tenantId}, ${user.email}, ${hash}, ${user.name}, ${user.role || 'admin'})
+      VALUES (${tenantId}, ${user.email}, ${hash}, ${user.name}, ${tenantRole})
     `;
 
     logAudit({
@@ -177,7 +179,7 @@ export async function createTenantUser(tenantId: string, user: {
       userEmail: ctx.email,
       action: "tenant_user_created",
       entityType: "user",
-      details: { email: user.email, role: user.role || 'admin', forTenant: tenantId },
+      details: { email: user.email, role: tenantRole, forTenant: tenantId },
     });
 
     return true;
@@ -185,7 +187,7 @@ export async function createTenantUser(tenantId: string, user: {
 }
 
 export async function verifyTenantSetup(tenantId: string) {
-  return withActionGuard({ actionName: 'verifyTenantSetup', roles: ['owner', 'platform_admin'], requireTenant: false }, async (ctx) => {
+  return withActionGuard({ actionName: 'verifyTenantSetup', roles: ['platform_admin'], requireTenant: false }, async (ctx) => {
     const tenant = await sql`SELECT * FROM tenants WHERE id = ${tenantId}`;
     if (tenant.length === 0) throw new Error("Tenant bulunamadı.");
     const t = tenant[0];

@@ -75,7 +75,7 @@ export async function getUsageStats() {
  * NOT: Bu action cross-tenant data gerektirir, bu nedenle raw sql kullanır
  */
 export async function getAllTenantsUsage() {
-  return withActionGuard({ actionName: 'getAllTenantsUsage', roles: ['owner', 'platform_admin'] }, async (ctx) => {
+  return withActionGuard({ actionName: 'getAllTenantsUsage', roles: ['platform_admin'], requireTenant: false }, async (ctx) => {
     // Cross-tenant sorgu — platform admin bypass ile çalışır
     const stats = await sql`
       SELECT 

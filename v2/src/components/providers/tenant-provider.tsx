@@ -59,8 +59,8 @@ export function TenantProvider({
       'manage_settings': ['platform_admin', 'owner', 'admin']
     };
     
-    // Super admins can do anything
-    if (role === 'platform_admin' || role === 'owner') return true;
+    // Platform admin Quba AI genel yönetim rolüdür; tenant owner yalnızca matris kadar yetkilidir.
+    if (role === 'platform_admin') return true;
     
     const allowedRoles = matrix[action] || [];
     return allowedRoles.includes(role);

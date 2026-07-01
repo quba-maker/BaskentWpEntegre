@@ -6,6 +6,7 @@ import { withTenantDB } from "@/lib/core/tenant-db";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { logAudit } from "@/lib/audit";
 import { logger } from "@/lib/core/logger";
+import { PLATFORM_ADMIN_ROLE, normalizeSessionRole } from "@/lib/auth/roles";
 
 // ==========================================
 // QUBA AI — Session Yönetimi (JWT + Cookie)
@@ -21,7 +22,7 @@ export interface Session {
   userId: string;
   email: string;
   name: string;
-  role: string; // "owner" | "admin" | "agent" | "superadmin" | "platform_admin"
+  role: string; // "platform_admin" yalnızca Quba platform tenant'ı içindir; firma içi roller: owner/admin/manager/agent/viewer
   tenantId: string;
   tenantSlug: string;
   tenantName: string;
@@ -75,7 +76,7 @@ export async function getSession(): Promise<Session | null> {
     const db = withTenantDB(session.tenantId);
     const user = await db.executeSafe({
       text: `
-        SELECT u.is_active, u.role, t.status as tenant_status, t.name as tenant_name
+        SELECT u.is_active, u.role, t.status as tenant_status, t.name as tenant_name, t.slug as tenant_slug
         FROM users u
         JOIN tenants t ON u.tenant_id = t.id
         WHERE u.id = $1 AND u.tenant_id = $2
@@ -104,13 +105,23 @@ export async function getSession(): Promise<Session | null> {
       return null;
     }
     
-    // Rol değişmişse session'ı güncelle
-    if (user[0].role !== session.role) {
-      session.role = user[0].role;
+    const normalizedRole = normalizeSessionRole(String(user[0].role || ""), String(user[0].tenant_slug || session.tenantSlug || ""));
+
+    if (normalizedRole !== user[0].role) {
+      logger.withContext({ module: 'Auth' }).warn("Session role normalized for tenant boundary", {
+        rawRole: user[0].role,
+        effectiveRole: normalizedRole,
+        tenantSlug: user[0].tenant_slug,
+      });
+    }
+
+    // Rol değişmişse veya tenant sınırına göre normalize edildiyse session'ı güncelle
+    if (normalizedRole !== session.role) {
+      session.role = normalizedRole;
     }
     
     // Eğer platform_admin başka bir tenant'ı impersonate ediyorsa, context'i değiştir (Fakat DB doğrulamasını orijinal kullanıcıyla geçtikten sonra)
-    if (session.role === 'platform_admin' && session.impersonatedTenantId) {
+    if (session.role === PLATFORM_ADMIN_ROLE && session.impersonatedTenantId) {
       const impCheck = await db.executeSafe({
         text: `SELECT status, name FROM tenants WHERE id = $1`,
         values: [session.impersonatedTenantId]
@@ -189,11 +200,21 @@ export async function login(
     if (process.env.NODE_ENV !== 'production') console.log(`[AUTH AUDIT] Tenant resolved: ${user.tenant_slug}`);
 
     // Session oluştur
+    const effectiveRole = normalizeSessionRole(user.role, user.tenant_slug);
+    if (effectiveRole !== user.role) {
+      logger.withContext({ module: 'Auth' }).warn("Login role normalized for tenant boundary", {
+        rawRole: user.role,
+        effectiveRole,
+        tenantSlug: user.tenant_slug,
+        userEmail: user.email,
+      });
+    }
+
     const session: Session = {
       userId: user.id,
       email: user.email,
       name: user.name,
-      role: user.role,
+      role: effectiveRole,
       tenantId: user.tenant_id,
       tenantSlug: user.tenant_slug,
       tenantName: user.tenant_name,
@@ -225,7 +246,7 @@ export async function login(
       userId: user.id,
       userEmail: user.email,
       action: "login_success",
-      details: { role: user.role, tenantSlug: user.tenant_slug },
+      details: { role: effectiveRole, rawRole: user.role, tenantSlug: user.tenant_slug },
     });
 
     return { success: true, tenantSlug: user.tenant_slug, mustChangePassword: user.must_change_password === true };
@@ -250,7 +271,7 @@ export async function logout() {
 export async function startImpersonation(targetTenantId: string, targetTenantSlug: string) {
   const session = await getSession();
   // Güvenlik: Sadece gerçek platform_admin bu eylemi gerçekleştirebilir!
-  if (!session || session.role !== 'platform_admin') {
+  if (!session || session.role !== PLATFORM_ADMIN_ROLE) {
     throw new Error("Unauthorized: Only Platform Admins can impersonate tenants.");
   }
 

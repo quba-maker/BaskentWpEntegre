@@ -2,6 +2,7 @@ import { getSession } from "@/lib/auth/session";
 import { logger } from "./logger";
 import { withTenantDB, TenantDB } from "./tenant-db";
 import { getTraceContext, runWithTrace, generateTraceId, TraceContext } from "@/lib/core/trace-context";
+import { PLATFORM_ADMIN_ROLE, type UserRole } from "@/lib/auth/roles";
 
 // ==========================================
 // QUBA AI — Zero-Trust Server Action Guard
@@ -15,7 +16,7 @@ export interface ActionContext {
   db: TenantDB; // Her action otomatik olarak güvenli DB instance'ı alır
 }
 
-type AllowedRoles = 'owner' | 'admin' | 'agent' | 'viewer' | 'platform_admin';
+type AllowedRoles = UserRole;
 
 export interface GuardOptions {
   roles?: AllowedRoles[];
@@ -53,7 +54,7 @@ export async function withActionGuard<T>(
       session = {
         userId: process.env.TEST_USER_ID || "test-user-id",
         tenantId: process.env.TEST_TENANT_ID,
-        role: process.env.TEST_USER_ROLE || "platform_admin",
+        role: process.env.TEST_USER_ROLE || "admin",
         email: "test@quba.ai",
         tenantSlug: "test-tenant"
       };
@@ -90,7 +91,7 @@ export async function withActionGuard<T>(
 
         // 3. RBAC Check
         if (options.roles && !options.roles.includes(session.role as AllowedRoles)) {
-          if (session.role !== 'platform_admin') { // Platform admin her şeyi ezer
+          if (session.role !== PLATFORM_ADMIN_ROLE) { // Sadece gerçek platform admin platform işlemlerinde bypass eder
             log.warn("Permission denied", { userId: session.userId, required: options.roles, actual: session.role });
             console.warn(`[GUARD_FORENSIC] ${options.actionName} BLOCKED: Permission denied. Required: ${options.roles.join(',')}, Actual: ${session.role}`);
             return { success: false, error: "Bu işlem için yetkiniz yok.", statusCode: 403 };
@@ -108,7 +109,7 @@ export async function withActionGuard<T>(
           tenantId: session.tenantId!, // Zaten yukarıda guard ettik
           role: session.role,
           email: session.email,
-          db: options.requireTenant !== false ? withTenantDB(session.tenantId!, session.role === 'platform_admin') : null as any,
+          db: options.requireTenant !== false ? withTenantDB(session.tenantId!, session.role === PLATFORM_ADMIN_ROLE) : null as any,
         };
 
         log.debug(`Action started`, { userId: ctx.userId, tenantId: ctx.tenantId });
