@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { ChevronDown, ChevronRight, MessageCircle, Bot, StickyNote, CheckCircle2, XCircle } from "lucide-react";
 import { getBestDate, getDisplayName, getAllPhones, getFormCountry, getStageInfo, STAGES } from "./utils";
+import { getFirstContactUiBucket } from "./first-contact-ui";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 
 const BULK_SELECTION_LIMIT = 50;
@@ -92,15 +93,12 @@ export function FormListTable({
 
   const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
     'needs_greeting': { label: 'Karşılama Bekliyor', color: '#FF9500', icon: '👋' },
-    'waiting_inbox_reply': { label: 'Panelden Cevap Bekliyor', color: '#5856D6', icon: '💬' },
-    'whatsapp_opened': { label: 'WhatsApp’ta Açıldı', color: '#007AFF', icon: '📲' },
-    'manual_greeting_confirmed': { label: 'Manuel Gönderildi', color: '#34C759', icon: '✅' },
-    'inbox_greeting_sent': { label: 'Panelden Gönderildi', color: '#34C759', icon: '✅' },
-    'patient_replied': { label: 'Cevap Geldi', color: '#10B981', icon: '↩️' },
-    'blocked_or_invalid': { label: 'Sorunlu', color: '#FF3B30', icon: '⚠️' },
-    'out_of_scope': { label: 'Kapsam Dışı', color: '#8E8E93', icon: '⛔' },
-    'no_reply_waiting': { label: 'Cevap Bekleniyor', color: '#FF3B30', icon: '⏳' },
-    'control_required': { label: 'Sync Dışı Sekme / Kontrol Gerekli', color: '#FF9500', icon: '🔍' },
+    'needs_reply': { label: 'Yanıt Verilecek', color: '#5856D6', icon: '💬' },
+    'waiting_patient': { label: 'Yanıt Bekleniyor', color: '#34C759', icon: '✅' },
+    'no_reply_waiting': { label: 'Takip Gerekli', color: '#FF9500', icon: '⏳' },
+    'patient_replied': { label: 'Yanıt Geldi', color: '#10B981', icon: '↩️' },
+    'blocked_or_invalid': { label: 'Kontrol Gerekli', color: '#FF3B30', icon: '⚠️' },
+    'control_required': { label: 'Kontrol Gerekli', color: '#FF9500', icon: '🔍' },
   };
 
   return (
@@ -285,9 +283,7 @@ export function FormListTable({
                   <td className="py-4 px-4 whitespace-nowrap">
                     <div className="flex flex-col items-start gap-1">
                       {(() => {
-                        const badgeKey = form.stage === 'quarantine' || form.firstContactStatus === 'control_required'
-                          ? 'control_required'
-                          : (form.noReplyFollowup?.is_no_reply_eligible ? 'no_reply_waiting' : form.firstContactStatus);
+                        const badgeKey = getFirstContactUiBucket(form);
                         const badge = OUTREACH_BADGE_CONFIG[badgeKey];
                         if (!badge) return <span className="text-[11px] text-[#86868B] italic">—</span>;
                         return (
@@ -435,24 +431,24 @@ export function FormListTable({
                       const isNoReply = form.noReplyFollowup?.is_no_reply_eligible;
                       
                       if (form.stage === 'quarantine' || form.firstContactStatus === 'control_required') {
-                        label = 'Kontrol Gerekli';
+                        label = 'Kontrol';
                         btnClass = "bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed opacity-60";
                       } else if (isNoReply) {
-                        label = 'Inbox’a Git';
+                        label = 'Takip Et';
                         btnClass = "bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100";
                       } else {
                         switch (form.firstContactStatus) {
                           case 'needs_greeting':
-                            label = 'WhatsApp’ta Karşıla';
+                            label = 'Karşıla';
                             btnClass = "bg-[#25D366]/10 border border-[#25D366]/20 text-[#25D366] hover:bg-[#25D366]/20";
                             break;
                           case 'waiting_inbox_reply':
-                            label = 'Inbox’ta Karşıla';
+                            label = 'Yanıtla';
                             btnClass = "bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100";
                             break;
                           case 'whatsapp_opened':
-                            label = 'Tekrar Aç';
-                            btnClass = "bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100";
+                            label = 'Kontrol';
+                            btnClass = "bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed opacity-60";
                             break;
                           case 'manual_greeting_confirmed':
                           case 'inbox_greeting_sent':
@@ -460,7 +456,7 @@ export function FormListTable({
                             btnClass = "bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100";
                             break;
                           case 'patient_replied':
-                            label = 'Inbox’a Git';
+                            label = 'Yanıtı Aç';
                             btnClass = "bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100";
                             break;
                         }
@@ -468,9 +464,9 @@ export function FormListTable({
 
                       return (
                         <button 
-                          disabled={form.stage === 'quarantine' || form.firstContactStatus === 'control_required'}
+                          disabled={form.stage === 'quarantine' || form.firstContactStatus === 'control_required' || form.firstContactStatus === 'whatsapp_opened'}
                           onClick={(e) => {
-                            if (['Inbox’ta Karşıla', 'Mesaja Git', 'Inbox’a Git'].includes(label)) {
+                            if (['Yanıtla', 'Mesaja Git', 'Takip Et', 'Yanıtı Aç'].includes(label)) {
                               onMessageClick(form, e);
                             } else {
                               onPrepareDraft(form);

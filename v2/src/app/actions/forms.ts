@@ -45,10 +45,12 @@ export async function getForms(page: number = 1, search: string = "", source: st
       if (firstContactParam) {
         if (firstContactParam === 'control_required') {
           conditions.push(`cl.first_contact_status = 'control_required'`);
-        } else if (firstContactParam === 'sent') {
-          conditions.push(`cl.first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent') AND COALESCE(cl.stage, '') != 'quarantine'`);
+        } else if (firstContactParam === 'needs_reply') {
+          conditions.push(`cl.first_contact_status = 'waiting_inbox_reply' AND cl.is_no_reply_eligible = false AND COALESCE(cl.stage, '') != 'quarantine'`);
+        } else if (firstContactParam === 'waiting_patient' || firstContactParam === 'sent') {
+          conditions.push(`cl.first_contact_status IN ('manual_greeting_confirmed', 'inbox_greeting_sent') AND cl.is_no_reply_eligible = false AND COALESCE(cl.stage, '') != 'quarantine'`);
         } else if (firstContactParam === 'blocked_or_invalid') {
-          conditions.push(`cl.first_contact_status IN ('blocked_or_invalid', 'out_of_scope') AND COALESCE(cl.stage, '') != 'quarantine'`);
+          conditions.push(`(cl.first_contact_status IN ('blocked_or_invalid', 'out_of_scope', 'control_required', 'whatsapp_opened') OR COALESCE(cl.stage, '') = 'quarantine')`);
         } else if (firstContactParam === 'no_reply_waiting') {
           conditions.push(`cl.is_no_reply_eligible = true AND COALESCE(cl.stage, '') != 'quarantine'`);
         } else if (firstContactParam !== 'all') {
@@ -778,7 +780,7 @@ export async function getFormStatusCounts() {
           LEFT JOIN LATERAL (
             SELECT 
               MAX(created_at) as last_outreach_at,
-              MAX(CASE WHEN action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed', 'inbox_form_greeting_sent', 'whatsapp_app_opened_for_greeting') THEN created_at END) as first_greeting_at,
+              MAX(CASE WHEN action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent', 'manual_whatsapp_greeting_echo_confirmed', 'inbox_form_greeting_sent') THEN created_at END) as first_greeting_at,
               BOOL_OR(action = 'manual_whatsapp_greeting_echo_confirmed') as any_confirmed,
               BOOL_OR(action = 'inbox_form_greeting_sent') as any_inbox_sent,
               BOOL_OR(action IN ('greeting_sent', 'template_sent', 'form_greeting_template_sent')) as any_api_sent,

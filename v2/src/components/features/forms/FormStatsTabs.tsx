@@ -1,5 +1,7 @@
 "use client";
 
+import { FIRST_CONTACT_UI_LABELS } from "./first-contact-ui";
+
 interface FormStatsTabsProps {
   firstContactFilter: string;
   setFirstContactFilter: (val: string) => void;
@@ -8,21 +10,28 @@ interface FormStatsTabsProps {
 
 export function FormStatsTabs({ firstContactFilter, setFirstContactFilter, statusCounts }: FormStatsTabsProps) {
   const tabs = [
-    { value: 'all', label: 'Tümü', icon: '📁' },
-    { value: 'needs_greeting', label: 'Karşılama Bekliyor', icon: '👋' },
-    { value: 'waiting_inbox_reply', label: 'Panelden Cevap Bekliyor', icon: '💬' },
-    { value: 'whatsapp_opened', label: 'WhatsApp’ta Açıldı', icon: '📲' },
-    { value: 'no_reply_waiting', label: 'Cevap Bekleniyor', icon: '⏳' },
-    { value: 'sent', label: 'Gönderildi', icon: '✅' },
-    { value: 'patient_replied', label: 'Cevap Geldi', icon: '↩️' },
-    { value: 'blocked_or_invalid', label: 'Sorunlu', icon: '⚠️' }
+    { value: 'all', label: FIRST_CONTACT_UI_LABELS.all, icon: '📁' },
+    { value: 'needs_greeting', label: FIRST_CONTACT_UI_LABELS.needs_greeting, icon: '👋' },
+    { value: 'needs_reply', label: FIRST_CONTACT_UI_LABELS.needs_reply, icon: '💬' },
+    { value: 'waiting_patient', label: FIRST_CONTACT_UI_LABELS.waiting_patient, icon: '✅' },
+    { value: 'no_reply_waiting', label: FIRST_CONTACT_UI_LABELS.no_reply_waiting, icon: '⏳' },
+    { value: 'patient_replied', label: FIRST_CONTACT_UI_LABELS.patient_replied, icon: '↩️' },
+    { value: 'blocked_or_invalid', label: FIRST_CONTACT_UI_LABELS.blocked_or_invalid, icon: '⚠️' }
   ];
 
   return (
     <div className="mb-4 flex flex-wrap items-center gap-1.5 p-1 bg-black/[0.03] rounded-xl border border-black/5 self-start shadow-sm">
       {tabs.map((tab) => {
         const isActive = firstContactFilter === tab.value;
-        const count = statusCounts ? (statusCounts as any)[tab.value] : null;
+        const count = statusCounts
+          ? tab.value === 'blocked_or_invalid'
+            ? ((statusCounts as any).blocked_or_invalid || 0) + ((statusCounts as any).control_required || 0) + ((statusCounts as any).whatsapp_opened || 0)
+            : tab.value === 'needs_reply'
+              ? (statusCounts as any).waiting_inbox_reply
+            : tab.value === 'waiting_patient'
+              ? (statusCounts as any).sent
+            : (statusCounts as any)[tab.value]
+          : null;
 
         return (
           <button

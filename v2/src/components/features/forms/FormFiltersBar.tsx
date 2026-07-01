@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Search, Filter, X, RefreshCw, CheckCircle2, Bot } from "lucide-react";
 import { getCampaignNames } from "@/app/actions/forms";
+import { getFirstContactFilterLabel } from "./first-contact-ui";
 
 interface FormFiltersBarProps {
   searchInput: string;
@@ -152,7 +153,7 @@ export function FormFiltersBar({
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-[11px] font-bold hover:bg-indigo-100 transition-colors border border-indigo-200"
             >
               <Filter className="w-3 h-3" />
-              {firstContactFilter}
+              {getFirstContactFilterLabel(firstContactFilter)}
               <X className="w-3 h-3 ml-1" />
             </button>
           )}

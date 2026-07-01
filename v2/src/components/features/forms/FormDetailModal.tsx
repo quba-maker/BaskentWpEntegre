@@ -6,6 +6,7 @@ import { FormDetailViewer } from "@/components/shared/form-detail-viewer/FormDet
 import { UniversalFormDetailData } from "@/components/shared/form-detail-viewer/types";
 import { extractFormFields } from "@/lib/utils/form-field-extractor";
 import { getBestDate, getDisplayName, getAllPhones, getFormCountry, STAGES } from "./utils";
+import { getFirstContactUiBucket } from "./first-contact-ui";
 import { formatPhoneReadable } from "@/lib/utils/patient-name-resolver";
 import { FormAutopilotStatusCard } from "./FormAutopilotStatusCard";
 
@@ -275,14 +276,12 @@ export function FormDetailModal({
 
   const OUTREACH_BADGE_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
     'needs_greeting': { label: 'Karşılama Bekliyor', color: '#FF9500', icon: '👋' },
-    'waiting_inbox_reply': { label: 'Panelden Cevap Bekliyor', color: '#5856D6', icon: '💬' },
-    'whatsapp_opened': { label: 'WhatsApp’ta Açıldı', color: '#007AFF', icon: '📲' },
-    'manual_greeting_confirmed': { label: 'Manuel Gönderildi', color: '#34C759', icon: '✅' },
-    'inbox_greeting_sent': { label: 'Panelden Gönderildi', color: '#34C759', icon: '✅' },
-    'patient_replied': { label: 'Cevap Geldi', color: '#10B981', icon: '↩️' },
-    'blocked_or_invalid': { label: 'Sorunlu', color: '#FF3B30', icon: '⚠️' },
-    'out_of_scope': { label: 'Kapsam Dışı', color: '#8E8E93', icon: '⛔' },
-    'no_reply_waiting': { label: 'Cevap Bekleniyor', color: '#FF3B30', icon: '⏳' },
+    'needs_reply': { label: 'Yanıt Verilecek', color: '#5856D6', icon: '💬' },
+    'waiting_patient': { label: 'Yanıt Bekleniyor', color: '#34C759', icon: '✅' },
+    'no_reply_waiting': { label: 'Takip Gerekli', color: '#FF9500', icon: '⏳' },
+    'patient_replied': { label: 'Yanıt Geldi', color: '#10B981', icon: '↩️' },
+    'blocked_or_invalid': { label: 'Kontrol Gerekli', color: '#FF3B30', icon: '⚠️' },
+    'control_required': { label: 'Kontrol Gerekli', color: '#FF9500', icon: '🔍' },
   };
 
   const PRIORITY_CONFIG: Record<string, { label: string; color: string; icon: string }> = {
@@ -453,7 +452,10 @@ export function FormDetailModal({
 
               <div className="p-4 space-y-3">
                 {(() => {
-                  const currentStatus = readiness?.patientLevelStatus || form.firstContactStatus;
+                  const currentStatus = getFirstContactUiBucket({
+                    ...form,
+                    firstContactStatus: readiness?.patientLevelStatus || form.firstContactStatus
+                  });
                   const badge = OUTREACH_BADGE_CONFIG[currentStatus];
                   
                   return (

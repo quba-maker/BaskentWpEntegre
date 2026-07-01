@@ -15434,6 +15434,23 @@ test("Başkent v91 T151: automatic form greeting uses selected template settings
   assert(sheetsContent.includes("normalizeFormGreetingTemplateName"), "Legacy tr_karsilama should normalize to current approved template");
 });
 
+test("Başkent v92 T152: form first-contact UI uses simple operational buckets", async () => {
+  const mod = await import("../components/features/forms/first-contact-ui");
+
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "needs_greeting" }) === "needs_greeting", "Needs greeting should stay selectable");
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "waiting_inbox_reply" }) === "needs_reply", "Inbound waiting state should become an explicit reply-needed bucket");
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "whatsapp_opened" }) === "control_required", "WhatsApp opened without send proof should require control");
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "manual_greeting_confirmed" }) === "waiting_patient", "Manual greeting confirmed should wait for patient reply");
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "inbox_greeting_sent" }) === "waiting_patient", "Inbox greeting sent should wait for patient reply");
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "inbox_greeting_sent", noReplyFollowup: { is_no_reply_eligible: true } }) === "no_reply_waiting", "No-reply automation should have its own bucket");
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "patient_replied" }) === "patient_replied", "Patient replies should stay visible");
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "out_of_scope" }) === "blocked_or_invalid", "Out of scope should roll up to control required");
+  assert(mod.getFirstContactUiBucket({ firstContactStatus: "needs_greeting", stage: "quarantine" }) === "control_required", "Quarantine should always require control");
+  assert(mod.getFirstContactFilterLabel("needs_reply") === "Yanıt Verilecek", "Inbound waiting filter should be action oriented");
+  assert(mod.getFirstContactFilterLabel("waiting_patient") === "Yanıt Bekleniyor", "Sent filter should be shown as waiting for patient reply");
+  assert(mod.getFirstContactFilterLabel("no_reply_waiting") === "Takip Gerekli", "No-reply filter should be follow-up oriented");
+});
+
 
 async function runAllTests() {
   try {
